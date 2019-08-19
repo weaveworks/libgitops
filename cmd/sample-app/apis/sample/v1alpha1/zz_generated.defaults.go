@@ -18,11 +18,9 @@ func RegisterDefaults(scheme *runtime.Scheme) error {
 }
 
 func SetObjectDefaults_Car(in *Car) {
-	SetDefaults_Car(in)
 	SetDefaults_CarSpec(&in.Spec)
 }
 
 func SetObjectDefaults_Motorcycle(in *Motorcycle) {
-	SetDefaults_Motorcycle(in)
 	SetDefaults_MotorcycleSpec(&in.Spec)
 }

@@ -1,2 +1,0 @@
-API rule violation: names_match,github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1,Time,Time
-API rule violation: names_match,github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1,TypeMeta,TypeMeta

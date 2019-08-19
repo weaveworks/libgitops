@@ -20,10 +20,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.MotorcycleSpec":   schema_sample_app_apis_sample_v1alpha1_MotorcycleSpec(ref),
 		"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.MotorcycleStatus": schema_sample_app_apis_sample_v1alpha1_MotorcycleStatus(ref),
 		"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.VehicleStatus":    schema_sample_app_apis_sample_v1alpha1_VehicleStatus(ref),
-		"github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.APIType":                       schema_pkg_apis_meta_v1alpha1_APIType(ref),
-		"github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta":                    schema_pkg_apis_meta_v1alpha1_ObjectMeta(ref),
-		"github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.Time":                          schema_pkg_apis_meta_v1alpha1_Time(ref),
-		"github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.TypeMeta":                      schema_pkg_apis_meta_v1alpha1_TypeMeta(ref),
 	}
 }
 
@@ -41,8 +37,8 @@ func schema_sample_app_apis_sample_v1alpha1_Car(ref common.ReferenceCallback) co
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "meta.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID Name is available at the .metadata.name JSON path ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)",
-							Ref:         ref("github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta"),
+							Description: "runtime.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID Name is available at the .metadata.name JSON path ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)",
+							Ref:         ref("github.com/weaveworks/gitops-toolkit/pkg/runtime.ObjectMeta"),
 						},
 					},
 					"spec": {
@@ -60,7 +56,7 @@ func schema_sample_app_apis_sample_v1alpha1_Car(ref common.ReferenceCallback) co
 			},
 		},
 		Dependencies: []string{
-			"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.CarSpec", "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.CarStatus", "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta", "k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"},
+			"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.CarSpec", "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.CarStatus", "github.com/weaveworks/gitops-toolkit/pkg/runtime.ObjectMeta", "k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"},
 	}
 }
 
@@ -146,8 +142,8 @@ func schema_sample_app_apis_sample_v1alpha1_Motorcycle(ref common.ReferenceCallb
 					},
 					"metadata": {
 						SchemaProps: spec.SchemaProps{
-							Description: "meta.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID Name is available at the .metadata.name JSON path ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)",
-							Ref:         ref("github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta"),
+							Description: "runtime.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID Name is available at the .metadata.name JSON path ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)",
+							Ref:         ref("github.com/weaveworks/gitops-toolkit/pkg/runtime.ObjectMeta"),
 						},
 					},
 					"spec": {
@@ -165,7 +161,7 @@ func schema_sample_app_apis_sample_v1alpha1_Motorcycle(ref common.ReferenceCallb
 			},
 		},
 		Dependencies: []string{
-			"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.MotorcycleSpec", "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.MotorcycleStatus", "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta", "k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"},
+			"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.MotorcycleSpec", "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1.MotorcycleStatus", "github.com/weaveworks/gitops-toolkit/pkg/runtime.ObjectMeta", "k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"},
 	}
 }
 
@@ -259,128 +255,5 @@ func schema_sample_app_apis_sample_v1alpha1_VehicleStatus(ref common.ReferenceCa
 				Required: []string{"speed", "acceleration", "distance"},
 			},
 		},
-	}
-}
-
-func schema_pkg_apis_meta_v1alpha1_APIType(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "APIType is a struct implementing Object, used for unmarshalling unknown objects into this intermediate type where .Name, .UID, .Kind and .APIVersion become easily available",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"metadata": {
-						SchemaProps: spec.SchemaProps{
-							Ref: ref("github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta"),
-						},
-					},
-				},
-				Required: []string{"metadata"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.ObjectMeta"},
-	}
-}
-
-func schema_pkg_apis_meta_v1alpha1_ObjectMeta(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "ObjectMeta have to be embedded into any serializable object. It provides the .GetName() and .GetUID() methods that help implement the Object interface",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
-						},
-					},
-					"uid": {
-						SchemaProps: spec.SchemaProps{
-							Type:   []string{"string"},
-							Format: "",
-						},
-					},
-					"created": {
-						SchemaProps: spec.SchemaProps{
-							Ref: ref("github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.Time"),
-						},
-					},
-					"labels": {
-						SchemaProps: spec.SchemaProps{
-							Type: []string{"object"},
-							AdditionalProperties: &spec.SchemaOrBool{
-								Allows: true,
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Type:   []string{"string"},
-										Format: "",
-									},
-								},
-							},
-						},
-					},
-					"annotations": {
-						SchemaProps: spec.SchemaProps{
-							Type: []string{"object"},
-							AdditionalProperties: &spec.SchemaOrBool{
-								Allows: true,
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Type:   []string{"string"},
-										Format: "",
-									},
-								},
-							},
-						},
-					},
-				},
-				Required: []string{"name", "created"},
-			},
-		},
-		Dependencies: []string{
-			"github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1.Time"},
-	}
-}
-
-func schema_pkg_apis_meta_v1alpha1_Time(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Type: []string{"object"},
-				Properties: map[string]spec.Schema{
-					"Time": {
-						SchemaProps: spec.SchemaProps{
-							Ref: ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
-						},
-					},
-				},
-				Required: []string{"Time"},
-			},
-		},
-		Dependencies: []string{
-			"k8s.io/apimachinery/pkg/apis/meta/v1.Time"},
-	}
-}
-
-func schema_pkg_apis_meta_v1alpha1_TypeMeta(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "TypeMeta is an alias for the k8s/apimachinery TypeMeta with some additional methods",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"TypeMeta": {
-						SchemaProps: spec.SchemaProps{
-							Ref: ref("k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"),
-						},
-					},
-				},
-				Required: []string{"TypeMeta"},
-			},
-		},
-		Dependencies: []string{
-			"k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"},
 	}
 }
