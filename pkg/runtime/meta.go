@@ -1,4 +1,4 @@
-package v1alpha1
+package runtime
 
 import (
 	"bytes"
@@ -7,10 +7,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-)
-
-const (
-	sectorSize = 512
 )
 
 // APIType is a struct implementing Object, used for

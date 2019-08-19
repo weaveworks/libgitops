@@ -1,11 +1,9 @@
-package v1alpha1
+package runtime
 
 import (
 	"fmt"
 	"strconv"
 	"unicode/utf8"
-
-	"github.com/weaveworks/gitops-toolkit/pkg/constants"
 )
 
 // UID represents an unique ID for a type
@@ -29,10 +27,6 @@ func (u *UID) UnmarshalJSON(b []byte) error {
 	uid, err := strconv.Unquote(string(b))
 	if err != nil {
 		return err
-	}
-
-	if len(uid) < constants.IGNITE_UID_LENGTH {
-		return fmt.Errorf("UID string too short: %q", uid)
 	}
 
 	*u = UID(uid)
