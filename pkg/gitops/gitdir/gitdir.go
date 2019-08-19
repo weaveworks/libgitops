@@ -7,7 +7,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/flux/git"
+	"github.com/weaveworks/gitops-toolkit/git"
 	"github.com/weaveworks/gitops-toolkit/pkg/util"
 )
 

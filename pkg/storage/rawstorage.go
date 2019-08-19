@@ -58,7 +58,7 @@ func (r *GenericRawStorage) realPath(key AnyKey) string {
 	// KindKeys get no special treatment
 	case Key:
 		// Keys get the metadata filename added to the returned path
-		file = constants.MetadataJSON
+		file = constants.METADATA
 	default:
 		panic(fmt.Sprintf("invalid key type received: %T", key))
 	}
