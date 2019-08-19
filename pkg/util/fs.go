@@ -1,8 +1,6 @@
 package util
 
 import (
-	"fmt"
-	"io"
 	"os"
 )
 
@@ -22,39 +20,4 @@ func FileExists(filename string) bool {
 	}
 
 	return !info.IsDir()
-}
-
-func DirExists(dirname string) bool {
-	exists, info := PathExists(dirname)
-	if !exists {
-		return false
-	}
-
-	return info.IsDir()
-}
-
-func CopyFile(src string, dst string) error {
-	sourceFileStat, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if !sourceFileStat.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", src)
-	}
-
-	source, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-
-	destination, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destination.Close()
-
-	_, err = io.Copy(destination, source)
-	return err
 }

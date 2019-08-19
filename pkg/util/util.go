@@ -1,8 +1,21 @@
 package util
 
 import (
+	"bytes"
+	"fmt"
+	"os/exec"
 	"strings"
 )
+
+func ExecuteCommand(command string, args ...string) (string, error) {
+	cmd := exec.Command(command, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("command %q exited with %q: %v", cmd.Args, out, err)
+	}
+
+	return string(bytes.TrimSpace(out)), nil
+}
 
 func MatchPrefix(prefix string, fields ...string) ([]string, bool) {
 	var prefixMatches, exactMatches []string

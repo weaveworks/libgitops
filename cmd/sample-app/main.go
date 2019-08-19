@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/labstack/echo"
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/client"
 	"github.com/weaveworks/gitops-toolkit/pkg/filter"
+	"github.com/weaveworks/gitops-toolkit/pkg/git/gitdir"
 	"github.com/weaveworks/gitops-toolkit/pkg/logs"
 	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/cache"
@@ -26,6 +28,12 @@ func main() {
 }
 
 func run() error {
+	// Construct the GitDirectory implementation which backs the storage
+	gitDir := gitdir.NewGitDirectory("https://github.com/luxas/ignite-gitops", "master", nil, 10*time.Second)
+
+	// Wait for the repo to be cloned
+	gitDir.WaitForClone()
+
 	ms, err := manifest.NewManifestStorage(ManifestDir, scheme.Serializer)
 	if err != nil {
 		return err
