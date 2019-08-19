@@ -4,10 +4,10 @@ DOCKER_USER=weaveworks
 GIT_VERSION:=$(shell hack/ldflags.sh --version-only)
 WHAT?=sample-app
 PROJECT = github.com/weaveworks/gitops-toolkit
-BOUNDING_API_DIRS = ${PROJECT}/pkg/apis,${PROJECT}/cmd/apis
-API_DIRS = ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/apis/meta/v1alpha1
+BOUNDING_API_DIRS = ${PROJECT}/pkg,${PROJECT}/cmd/apis
+API_DIRS = ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/runtime
 CACHE_DIR = $(shell pwd)/bin/cache
-API_DOCS = api/sample-app.md api/meta.md
+API_DOCS = api/sample-app.md api/runtime.md
 
 all: sample-app
 

@@ -1,7 +1,7 @@
 package filter
 
 import (
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/filterer"
 )
 
@@ -15,7 +15,7 @@ func NewAllFilter() *AllFilter {
 	return &AllFilter{}
 }
 
-func (f *AllFilter) Filter(object meta.Object) (filterer.Match, error) {
+func (f *AllFilter) Filter(object runtime.Object) (filterer.Match, error) {
 	return filterer.NewMatch(object, false), nil
 }
 
@@ -29,4 +29,4 @@ func (f *AllFilter) NonexistentError() *filterer.NonexistentError {
 }
 
 // SetKind is a no-op as this filter doesn't have a dedicated kind
-func (f *AllFilter) SetKind(_ meta.Kind) {}
+func (f *AllFilter) SetKind(_ runtime.Kind) {}

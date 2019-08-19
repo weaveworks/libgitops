@@ -5,15 +5,15 @@ import (
 
 	api "github.com/weaveworks/gitops-toolkit/pkg/apis/ignite"
 	"github.com/weaveworks/gitops-toolkit/pkg/apis/ignite/scheme"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/serializer"
 )
 
 var s = serializer.NewSerializer(scheme.Scheme, nil)
 var sampleobj = &api.VM{
-	ObjectMeta: meta.ObjectMeta{
+	ObjectMeta: runtime.ObjectMeta{
 		Name: "foo",
-		UID:  meta.UID("1234"),
+		UID:  runtime.UID("1234"),
 	},
 	Spec: api.VMSpec{
 		CPUs: 1,

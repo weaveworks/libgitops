@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 )
 
 // This can be used to match either of the keys
@@ -15,24 +15,24 @@ type AnyKey fmt.Stringer
 
 // KindKey represents the internal format of Kind virtual paths
 type KindKey struct {
-	meta.Kind
+	runtime.Kind
 }
 
 // Key represents the internal format of Object virtual paths
 type Key struct {
 	KindKey
-	meta.UID
+	runtime.UID
 }
 
 // NewKindKey generates a new virtual path Key for a Kind
-func NewKindKey(kind meta.Kind) KindKey {
+func NewKindKey(kind runtime.Kind) KindKey {
 	return KindKey{
 		kind,
 	}
 }
 
 // NewKey generates a new virtual path Key for an Object
-func NewKey(kind meta.Kind, uid meta.UID) Key {
+func NewKey(kind runtime.Kind, uid runtime.UID) Key {
 	return Key{
 		NewKindKey(kind),
 		uid,
@@ -45,8 +45,8 @@ func ParseKey(input string) (k Key, err error) {
 	if len(splitInput) != 2 {
 		err = fmt.Errorf("invalid input for key parsing: %s", input)
 	} else {
-		k.Kind = meta.ParseKind(splitInput[0])
-		k.UID = meta.UID(splitInput[1])
+		k.Kind = runtime.ParseKind(splitInput[0])
+		k.UID = runtime.UID(splitInput[1])
 	}
 
 	return

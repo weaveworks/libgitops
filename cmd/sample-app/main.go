@@ -9,13 +9,14 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/client"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
-	"github.com/weaveworks/gitops-toolkit/pkg/constants"
 	"github.com/weaveworks/gitops-toolkit/pkg/filter"
 	"github.com/weaveworks/gitops-toolkit/pkg/logs"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/cache"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/manifest"
 )
+
+const ManifestDir = "/tmp/gitops-toolkit/manifest"
 
 func main() {
 	if err := run(); err != nil {
@@ -25,7 +26,7 @@ func main() {
 }
 
 func run() error {
-	ms, err := manifest.NewManifestStorage(constants.DataDir, constants.ManifestDir, scheme.Serializer)
+	ms, err := manifest.NewManifestStorage(ManifestDir, scheme.Serializer)
 	if err != nil {
 		return err
 	}
@@ -39,17 +40,13 @@ func run() error {
 	})
 
 	e.GET("/:name", func(c echo.Context) error {
-		/*kind := c.Param("kind")
-		if len(kind) == 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "Please set kind")
-		}*/
 		kind := "car"
 		name := c.Param("name")
 		if len(name) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set ref")
 		}
 
-		obj, err := Client.Dynamic(meta.Kind(kind)).Find(filter.NewIDNameFilter(name))
+		obj, err := Client.Dynamic(runtime.Kind(kind)).Find(filter.NewIDNameFilter(name))
 		if err != nil {
 			return err
 		}
@@ -61,17 +58,13 @@ func run() error {
 	})
 
 	e.POST("/:name", func(c echo.Context) error {
-		/*kind := c.Param("kind")
-		if kind != "car" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Please set kind")
-		}*/
 		name := c.Param("name")
 		if len(name) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
 		obj := Client.Cars().New()
-		obj.ObjectMeta.UID = meta.UID("599615df99804ae8")
+		obj.ObjectMeta.UID = runtime.UID("599615df99804ae8")
 		obj.ObjectMeta.Name = name
 		obj.Spec.Brand = "Acura"
 

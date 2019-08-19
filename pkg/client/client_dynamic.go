@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/filterer"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -12,24 +12,24 @@ import (
 // DynamicClient is an interface for accessing API types generically
 type DynamicClient interface {
 	// New returns a new Object of its kind
-	New() meta.Object
+	New() runtime.Object
 	// Get returns an Object matching the UID from the storage
-	Get(meta.UID) (meta.Object, error)
+	Get(runtime.UID) (runtime.Object, error)
 	// Set saves an Object into the persistent storage
-	Set(meta.Object) error
+	Set(runtime.Object) error
 	// Patch performs a strategic merge patch on the object with
 	// the given UID, using the byte-encoded patch given
-	Patch(meta.UID, []byte) error
+	Patch(runtime.UID, []byte) error
 	// Find returns an Object based on the given filter, filters can
 	// match e.g. the Object's Name, UID or a specific property
-	Find(filter filterer.BaseFilter) (meta.Object, error)
+	Find(filter filterer.BaseFilter) (runtime.Object, error)
 	// FindAll returns multiple Objects based on the given filter, filters can
 	// match e.g. the Object's Name, UID or a specific property
-	FindAll(filter filterer.BaseFilter) ([]meta.Object, error)
+	FindAll(filter filterer.BaseFilter) ([]runtime.Object, error)
 	// Delete deletes an Object from the storage
-	Delete(uid meta.UID) error
+	Delete(uid runtime.UID) error
 	// List returns a list of all Objects available
-	List() ([]meta.Object, error)
+	List() ([]runtime.Object, error)
 }
 
 // dynamicClient is a struct implementing the DynamicClient interface
@@ -50,7 +50,7 @@ func NewDynamicClient(s storage.Storage, gvk schema.GroupVersionKind) DynamicCli
 }
 
 // New returns a new Object of its kind
-func (c *dynamicClient) New() meta.Object {
+func (c *dynamicClient) New() runtime.Object {
 	obj, err := c.storage.New(c.gvk)
 	if err != nil {
 		panic(fmt.Sprintf("Client.New must not return an error: %v", err))
@@ -59,37 +59,37 @@ func (c *dynamicClient) New() meta.Object {
 }
 
 // Get returns an Object based the given UID
-func (c *dynamicClient) Get(uid meta.UID) (meta.Object, error) {
+func (c *dynamicClient) Get(uid runtime.UID) (runtime.Object, error) {
 	return c.storage.Get(c.gvk, uid)
 }
 
 // Set saves an Object into the persistent storage
-func (c *dynamicClient) Set(resource meta.Object) error {
+func (c *dynamicClient) Set(resource runtime.Object) error {
 	return c.storage.Set(c.gvk, resource)
 }
 
 // Patch performs a strategic merge patch on the object with
 // the given UID, using the byte-encoded patch given
-func (c *dynamicClient) Patch(uid meta.UID, patch []byte) error {
+func (c *dynamicClient) Patch(uid runtime.UID, patch []byte) error {
 	return c.storage.Patch(c.gvk, uid, patch)
 }
 
 // Find returns an Object based on a given Filter
-func (c *dynamicClient) Find(filter filterer.BaseFilter) (meta.Object, error) {
+func (c *dynamicClient) Find(filter filterer.BaseFilter) (runtime.Object, error) {
 	return c.filterer.Find(c.gvk, filter)
 }
 
 // FindAll returns multiple Objects based on a given Filter
-func (c *dynamicClient) FindAll(filter filterer.BaseFilter) ([]meta.Object, error) {
+func (c *dynamicClient) FindAll(filter filterer.BaseFilter) ([]runtime.Object, error) {
 	return c.filterer.FindAll(c.gvk, filter)
 }
 
 // Delete deletes the Object from the storage
-func (c *dynamicClient) Delete(uid meta.UID) error {
+func (c *dynamicClient) Delete(uid runtime.UID) error {
 	return c.storage.Delete(c.gvk, uid)
 }
 
 // List returns a list of all Objects available
-func (c *dynamicClient) List() ([]meta.Object, error) {
+func (c *dynamicClient) List() ([]runtime.Object, error) {
 	return c.storage.List(c.gvk)
 }

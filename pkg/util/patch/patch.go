@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/serializer"
-	"k8s.io/apimachinery/pkg/runtime"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 )
 
 type Patcher interface {
-	Create(new meta.Object, applyFn func(meta.Object) error) ([]byte, error)
+	Create(new runtime.Object, applyFn func(runtime.Object) error) ([]byte, error)
 	Apply(original, patch []byte, gvk schema.GroupVersionKind) ([]byte, error)
 	ApplyOnFile(filePath string, patch []byte, gvk schema.GroupVersionKind) error
 }
@@ -26,8 +26,8 @@ type patcher struct {
 }
 
 // Create is a helper that creates a patch out of the change made in applyFn
-func (p *patcher) Create(new meta.Object, applyFn func(meta.Object) error) ([]byte, error) {
-	old := new.DeepCopyObject().(meta.Object)
+func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error) ([]byte, error) {
+	old := new.DeepCopyObject().(runtime.Object)
 
 	oldbytes, err := p.serializer.EncodeJSON(old)
 	if err != nil {
@@ -89,7 +89,7 @@ func (p *patcher) ApplyOnFile(filePath string, patch []byte, gvk schema.GroupVer
 // with the serializer so it conforms to a runtime.Object
 // TODO: Just use encoding/json.Indent here instead?
 func (p *patcher) serializerEncode(input []byte) (result []byte, err error) {
-	var obj runtime.Object
+	var obj kruntime.Object
 	if obj, err = p.serializer.Decode(input, true); err == nil {
 		result, err = p.serializer.EncodeJSON(obj)
 	}

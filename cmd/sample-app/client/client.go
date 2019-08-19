@@ -3,8 +3,8 @@ package client
 
 import (
 	api "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
 	"github.com/weaveworks/gitops-toolkit/pkg/client"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,7 +46,7 @@ type SampleInternalClient struct {
 }
 
 // Dynamic returns the DynamicClient for the Client instance, for the specific kind
-func (c *SampleInternalClient) Dynamic(kind meta.Kind) (dc client.DynamicClient) {
+func (c *SampleInternalClient) Dynamic(kind runtime.Kind) (dc client.DynamicClient) {
 	var ok bool
 	gvk := c.gv.WithKind(kind.Title())
 	if dc, ok = c.dynamicClients[gvk]; !ok {

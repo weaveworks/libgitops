@@ -1,14 +1,14 @@
 package filterer
 
 import (
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 )
 
 // Match describes the result of filtering an Object
 // If the Object to be filtered didn't match, return nil
 type Match interface {
 	// Get the matched Object
-	Object() meta.Object
+	Object() runtime.Object
 	// Check if the match was exact
 	Exact() bool
 }
@@ -16,20 +16,20 @@ type Match interface {
 // GenericMatch is the simplest implementation
 // of Match, carrying no additional data
 type GenericMatch struct {
-	object meta.Object
+	object runtime.Object
 	exact  bool
 }
 
 var _ Match = &GenericMatch{}
 
-func NewMatch(object meta.Object, exact bool) *GenericMatch {
+func NewMatch(object runtime.Object, exact bool) *GenericMatch {
 	return &GenericMatch{
 		object: object,
 		exact:  exact,
 	}
 }
 
-func (m *GenericMatch) Object() meta.Object {
+func (m *GenericMatch) Object() runtime.Object {
 	return m.object
 }
 

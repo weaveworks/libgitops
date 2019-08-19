@@ -2,24 +2,24 @@ package cache
 
 import (
 	log "github.com/sirupsen/logrus"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type index struct {
 	storage storage.Storage
-	objects map[schema.GroupVersionKind]map[meta.UID]*cacheObject
+	objects map[schema.GroupVersionKind]map[runtime.UID]*cacheObject
 }
 
 func newIndex(storage storage.Storage) *index {
 	return &index{
 		storage: storage,
-		objects: make(map[schema.GroupVersionKind]map[meta.UID]*cacheObject),
+		objects: make(map[schema.GroupVersionKind]map[runtime.UID]*cacheObject),
 	}
 }
 
-func (i *index) loadByID(gvk schema.GroupVersionKind, uid meta.UID) (meta.Object, error) {
+func (i *index) loadByID(gvk schema.GroupVersionKind, uid runtime.UID) (runtime.Object, error) {
 	if uids, ok := i.objects[gvk]; ok {
 		if obj, ok := uids[uid]; ok {
 			log.Tracef("index: cache hit for %s with UID %q", gvk.Kind, uid)
@@ -31,18 +31,18 @@ func (i *index) loadByID(gvk schema.GroupVersionKind, uid meta.UID) (meta.Object
 	return nil, nil
 }
 
-func (i *index) load(obj meta.Object) (meta.Object, error) {
+func (i *index) load(obj runtime.Object) (runtime.Object, error) {
 	return i.loadByID(obj.GroupVersionKind(), obj.GetUID())
 }
 
-func (i *index) loadAll() ([]meta.Object, error) {
+func (i *index) loadAll() ([]runtime.Object, error) {
 	var size uint64
 
 	for gvk := range i.objects {
 		size += i.count(gvk)
 	}
 
-	all := make([]meta.Object, 0, size)
+	all := make([]runtime.Object, 0, size)
 
 	for gvk := range i.objects {
 		if objects, err := i.list(gvk); err == nil {
@@ -55,7 +55,7 @@ func (i *index) loadAll() ([]meta.Object, error) {
 	return all, nil
 }
 
-func store(i *index, obj meta.Object, apiType bool) error {
+func store(i *index, obj runtime.Object, apiType bool) error {
 	// If store is called for an invalid Object lacking an UID,
 	// panic and print the stack trace. This should never happen.
 	if obj.GetUID() == "" {
@@ -70,7 +70,7 @@ func store(i *index, obj meta.Object, apiType bool) error {
 	gvk := co.object.GroupVersionKind()
 
 	if _, ok := i.objects[gvk]; !ok {
-		i.objects[gvk] = make(map[meta.UID]*cacheObject)
+		i.objects[gvk] = make(map[runtime.UID]*cacheObject)
 	}
 
 	log.Tracef("index: storing %s object with UID %q, meta: %t", gvk.Kind, obj.GetName(), apiType)
@@ -79,11 +79,11 @@ func store(i *index, obj meta.Object, apiType bool) error {
 	return nil
 }
 
-func (i *index) store(obj meta.Object) error {
+func (i *index) store(obj runtime.Object) error {
 	return store(i, obj, false)
 }
 
-func (i *index) storeAll(objs []meta.Object) (err error) {
+func (i *index) storeAll(objs []runtime.Object) (err error) {
 	for _, obj := range objs {
 		if err = i.store(obj); err != nil {
 			break
@@ -93,11 +93,11 @@ func (i *index) storeAll(objs []meta.Object) (err error) {
 	return
 }
 
-func (i *index) storeMeta(obj meta.Object) error {
+func (i *index) storeMeta(obj runtime.Object) error {
 	return store(i, obj, true)
 }
 
-func (i *index) storeAllMeta(objs []meta.Object) (err error) {
+func (i *index) storeAllMeta(objs []runtime.Object) (err error) {
 	for _, obj := range objs {
 		if uids, ok := i.objects[obj.GroupVersionKind()]; ok {
 			if _, ok := uids[obj.GetUID()]; ok {
@@ -113,7 +113,7 @@ func (i *index) storeAllMeta(objs []meta.Object) (err error) {
 	return
 }
 
-func (i *index) delete(gvk schema.GroupVersionKind, uid meta.UID) {
+func (i *index) delete(gvk schema.GroupVersionKind, uid runtime.UID) {
 	if uids, ok := i.objects[gvk]; ok {
 		delete(uids, uid)
 	}
@@ -125,9 +125,9 @@ func (i *index) count(gvk schema.GroupVersionKind) (count uint64) {
 	return
 }
 
-func list(i *index, gvk schema.GroupVersionKind, apiTypes bool) ([]meta.Object, error) {
+func list(i *index, gvk schema.GroupVersionKind, apiTypes bool) ([]runtime.Object, error) {
 	uids := i.objects[gvk]
-	list := make([]meta.Object, 0, len(uids))
+	list := make([]runtime.Object, 0, len(uids))
 
 	log.Tracef("index: listing %s objects, meta: %t", gvk, apiTypes)
 	for _, obj := range uids {
@@ -146,10 +146,10 @@ func list(i *index, gvk schema.GroupVersionKind, apiTypes bool) ([]meta.Object, 
 	return list, nil
 }
 
-func (i *index) list(gvk schema.GroupVersionKind) ([]meta.Object, error) {
+func (i *index) list(gvk schema.GroupVersionKind) ([]runtime.Object, error) {
 	return list(i, gvk, false)
 }
 
-func (i *index) listMeta(gvk schema.GroupVersionKind) ([]meta.Object, error) {
+func (i *index) listMeta(gvk schema.GroupVersionKind) ([]runtime.Object, error) {
 	return list(i, gvk, true)
 }

@@ -1,14 +1,14 @@
 package filter
 
 import (
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/filterer"
 )
 
 // The NameFilter matches Objects by their exact name
 type NameFilter struct {
 	name string
-	kind meta.Kind
+	kind runtime.Kind
 }
 
 var _ filterer.MetaFilter = &NameFilter{}
@@ -19,7 +19,7 @@ func NewNameFilter(n string) *NameFilter {
 	}
 }
 
-func (f *NameFilter) FilterMeta(object meta.Object) (filterer.Match, error) {
+func (f *NameFilter) FilterMeta(object runtime.Object) (filterer.Match, error) {
 	if object.GetName() == f.name {
 		return filterer.NewMatch(object, true), nil
 	}
@@ -27,7 +27,7 @@ func (f *NameFilter) FilterMeta(object meta.Object) (filterer.Match, error) {
 	return nil, nil
 }
 
-func (f *NameFilter) SetKind(k meta.Kind) {
+func (f *NameFilter) SetKind(k runtime.Kind) {
 	f.kind = k
 }
 

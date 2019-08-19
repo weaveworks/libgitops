@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	api "github.com/weaveworks/gitops-toolkit/pkg/apis/ignite"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 )
 
 var testbytes = []byte(`
@@ -43,7 +43,7 @@ func TestCreatePatch(t *testing.T) {
 		},
 	}
 	vm.SetGroupVersionKind(vmGVK)
-	bytes, err := Create(vm, func(obj meta.Object) error {
+	bytes, err := Create(vm, func(obj runtime.Object) error {
 		vm2 := obj.(*api.VM)
 		vm2.Status.State = api.VMStateRunning
 		return nil

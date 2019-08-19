@@ -5,7 +5,7 @@ import (
 
 	api "github.com/weaveworks/gitops-toolkit/pkg/apis/ignite"
 	"github.com/weaveworks/gitops-toolkit/pkg/apis/ignite/scheme"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 )
 
 var s = NewGenericStorage(NewGenericRawStorage("/tmp/bar"), scheme.Serializer)
@@ -17,28 +17,28 @@ func TestStorageNew(t *testing.T) {
 }
 
 func TestStorageGet(t *testing.T) {
-	obj, err := s.Get(vmGVK, meta.UID("0123456789101112"))
+	obj, err := s.Get(vmGVK, runtime.UID("0123456789101112"))
 	t.Error(err)
 	t.Error(*(obj.(*api.VM)))
 }
 
 func TestStorageSet(t *testing.T) {
 	vm := &api.VM{
-		ObjectMeta: meta.ObjectMeta{
+		ObjectMeta: runtime.ObjectMeta{
 			Name: "foo",
-			UID:  meta.UID("0123456789101112"),
+			UID:  runtime.UID("0123456789101112"),
 		},
 		Spec: api.VMSpec{
 			CPUs:   2,
-			Memory: meta.NewSizeFromBytes(4 * 1024 * 1024),
+			Memory: runtime.NewSizeFromBytes(4 * 1024 * 1024),
 			Image: api.VMImageSpec{
 				OCIClaim: api.OCIImageClaim{
-					Ref: meta.OCIImageRef("centos:7"),
+					Ref: runtime.OCIImageRef("centos:7"),
 				},
 			},
 			Kernel: api.VMKernelSpec{
 				OCIClaim: api.OCIImageClaim{
-					Ref: meta.OCIImageRef("ubuntu:18.04"),
+					Ref: runtime.OCIImageRef("ubuntu:18.04"),
 				},
 			},
 		},
@@ -49,7 +49,7 @@ func TestStorageSet(t *testing.T) {
 
 func TestStoragePatch(t *testing.T) {
 	patch := []byte(`{"status":{"state":"Running"}}`)
-	err := s.Patch(vmGVK, meta.UID("0123456789101112"), patch)
+	err := s.Patch(vmGVK, runtime.UID("0123456789101112"), patch)
 	t.Fatal(err)
 }
 

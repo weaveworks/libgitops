@@ -3,7 +3,7 @@ package filter
 import (
 	"strings"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/filterer"
 	"github.com/weaveworks/gitops-toolkit/pkg/util"
 )
@@ -18,7 +18,7 @@ var _ filterer.Match = &IDNameMatch{}
 // The IDNameFilter is the basic filter matching objects by their ID/name
 type IDNameFilter struct {
 	prefix string
-	kind   meta.Kind
+	kind   runtime.Kind
 }
 
 var _ filterer.MetaFilter = &IDNameFilter{}
@@ -29,7 +29,7 @@ func NewIDNameFilter(p string) *IDNameFilter {
 	}
 }
 
-func (f *IDNameFilter) FilterMeta(object meta.Object) (filterer.Match, error) {
+func (f *IDNameFilter) FilterMeta(object runtime.Object) (filterer.Match, error) {
 	if len(f.kind) == 0 {
 		f.kind = object.GetKind() // reflect.Indirect(reflect.ValueOf(object)).Type().Name()
 	}
@@ -44,7 +44,7 @@ func (f *IDNameFilter) FilterMeta(object meta.Object) (filterer.Match, error) {
 	return nil, nil
 }
 
-func (f *IDNameFilter) SetKind(k meta.Kind) {
+func (f *IDNameFilter) SetKind(k runtime.Kind) {
 	f.kind = k
 }
 

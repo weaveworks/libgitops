@@ -9,8 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
-	"github.com/weaveworks/gitops-toolkit/pkg/constants"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/util"
 )
 
@@ -58,7 +57,7 @@ func (r *GenericRawStorage) realPath(key AnyKey) string {
 	// KindKeys get no special treatment
 	case Key:
 		// Keys get the metadata filename added to the returned path
-		file = constants.METADATA
+		file = "metadata.json"
 	default:
 		panic(fmt.Sprintf("invalid key type received: %T", key))
 	}
@@ -79,7 +78,7 @@ func (r *GenericRawStorage) Write(key Key, content []byte) error {
 
 	// Create the underlying directories if they do not exist already
 	if !r.Exists(key) {
-		if err := os.MkdirAll(path.Dir(file), constants.DATA_DIR_PERM); err != nil {
+		if err := os.MkdirAll(path.Dir(file), 0755); err != nil {
 			return err
 		}
 	}
@@ -99,7 +98,7 @@ func (r *GenericRawStorage) List(key KindKey) ([]Key, error) {
 
 	result := make([]Key, 0, len(entries))
 	for _, entry := range entries {
-		result = append(result, NewKey(key.Kind, meta.UID(entry.Name())))
+		result = append(result, NewKey(key.Kind, runtime.UID(entry.Name())))
 	}
 
 	return result, nil

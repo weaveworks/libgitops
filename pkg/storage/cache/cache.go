@@ -2,7 +2,7 @@ package cache
 
 import (
 	log "github.com/sirupsen/logrus"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/serializer"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -42,7 +42,7 @@ func (s *cache) Serializer() serializer.Serializer {
 	return s.storage.Serializer()
 }
 
-func (c *cache) New(gvk schema.GroupVersionKind) (meta.Object, error) {
+func (c *cache) New(gvk schema.GroupVersionKind) (runtime.Object, error) {
 	// Request the storage to create the Object. The
 	// newly generated Object has not got an UID which
 	// is required for indexing, so just return it
@@ -50,7 +50,7 @@ func (c *cache) New(gvk schema.GroupVersionKind) (meta.Object, error) {
 	return c.storage.New(gvk)
 }
 
-func (c *cache) Get(gvk schema.GroupVersionKind, uid meta.UID) (obj meta.Object, err error) {
+func (c *cache) Get(gvk schema.GroupVersionKind, uid runtime.UID) (obj runtime.Object, err error) {
 	log.Tracef("cache: Get %s with UID %q", gvk.Kind, uid)
 
 	// If the requested Object resides in the cache, return it
@@ -69,7 +69,7 @@ func (c *cache) Get(gvk schema.GroupVersionKind, uid meta.UID) (obj meta.Object,
 	return
 }
 
-func (c *cache) GetMeta(gvk schema.GroupVersionKind, uid meta.UID) (obj meta.Object, err error) {
+func (c *cache) GetMeta(gvk schema.GroupVersionKind, uid runtime.UID) (obj runtime.Object, err error) {
 	log.Tracef("cache: GetMeta %s with UID %q", gvk.Kind, uid)
 
 	obj, err = c.storage.GetMeta(gvk, uid)
@@ -82,7 +82,7 @@ func (c *cache) GetMeta(gvk schema.GroupVersionKind, uid meta.UID) (obj meta.Obj
 	return
 }
 
-func (c *cache) Set(gvk schema.GroupVersionKind, obj meta.Object) error {
+func (c *cache) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
 	log.Tracef("cache: Set %s with UID %q", gvk.Kind, obj.GetUID())
 
 	// Store the changed Object in the cache
@@ -94,12 +94,12 @@ func (c *cache) Set(gvk schema.GroupVersionKind, obj meta.Object) error {
 	return c.storage.Set(gvk, obj)
 }
 
-func (c *cache) Patch(gvk schema.GroupVersionKind, uid meta.UID, patch []byte) error {
+func (c *cache) Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error {
 	// TODO: For now patches are always flushed, the cache will load the updated Object on-demand on access
 	return c.storage.Patch(gvk, uid, patch)
 }
 
-func (c *cache) Delete(gvk schema.GroupVersionKind, uid meta.UID) error {
+func (c *cache) Delete(gvk schema.GroupVersionKind, uid runtime.UID) error {
 	log.Tracef("cache: Delete %s with UID %q", gvk.Kind, uid)
 
 	// Delete the given Object from the cache and storage
@@ -107,11 +107,11 @@ func (c *cache) Delete(gvk schema.GroupVersionKind, uid meta.UID) error {
 	return c.storage.Delete(gvk, uid)
 }
 
-type listFunc func(gvk schema.GroupVersionKind) ([]meta.Object, error)
-type cacheStoreFunc func([]meta.Object) error
+type listFunc func(gvk schema.GroupVersionKind) ([]runtime.Object, error)
+type cacheStoreFunc func([]runtime.Object) error
 
 // list is a common handler for List and ListMeta
-func (c *cache) list(gvk schema.GroupVersionKind, slf, clf listFunc, csf cacheStoreFunc) (objs []meta.Object, err error) {
+func (c *cache) list(gvk schema.GroupVersionKind, slf, clf listFunc, csf cacheStoreFunc) (objs []runtime.Object, err error) {
 	var storageCount uint64
 	if storageCount, err = c.storage.Count(gvk); err != nil {
 		return
@@ -133,11 +133,11 @@ func (c *cache) list(gvk schema.GroupVersionKind, slf, clf listFunc, csf cacheSt
 	return
 }
 
-func (c *cache) List(gvk schema.GroupVersionKind) ([]meta.Object, error) {
+func (c *cache) List(gvk schema.GroupVersionKind) ([]runtime.Object, error) {
 	return c.list(gvk, c.storage.List, c.index.list, c.index.storeAll)
 }
 
-func (c *cache) ListMeta(gvk schema.GroupVersionKind) ([]meta.Object, error) {
+func (c *cache) ListMeta(gvk schema.GroupVersionKind) ([]runtime.Object, error) {
 	return c.list(gvk, c.storage.ListMeta, c.index.listMeta, c.index.storeAllMeta)
 }
 
@@ -146,7 +146,7 @@ func (c *cache) Count(gvk schema.GroupVersionKind) (uint64, error) {
 	return c.storage.Count(gvk)
 }
 
-func (c *cache) Checksum(gvk schema.GroupVersionKind, uid meta.UID) (string, error) {
+func (c *cache) Checksum(gvk schema.GroupVersionKind, uid runtime.UID) (string, error) {
 	// The cache is transparent about the checksums
 	return c.storage.Checksum(gvk, uid)
 }

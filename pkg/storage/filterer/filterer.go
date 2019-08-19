@@ -3,7 +3,7 @@ package filterer
 import (
 	"fmt"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -18,14 +18,14 @@ func NewFilterer(storage storage.Storage) *Filterer {
 	}
 }
 
-type filterFunc func(meta.Object) (Match, error)
+type filterFunc func(runtime.Object) (Match, error)
 
-// Find a single meta.Object of the given kind using the given filter
-func (f *Filterer) Find(gvk schema.GroupVersionKind, filter BaseFilter) (meta.Object, error) {
+// Find a single runtime.Object of the given kind using the given filter
+func (f *Filterer) Find(gvk schema.GroupVersionKind, filter BaseFilter) (runtime.Object, error) {
 	var results []Match
 	var exactMatch Match
 
-	// Fetch the sources, correct filtering method and if we're dealing with meta.APIType objects
+	// Fetch the sources, correct filtering method and if we're dealing with runtime.APIType objects
 	sources, filterFunc, metaObjects, err := f.parseFilter(gvk, filter)
 	if err != nil {
 		return nil, err
@@ -33,7 +33,7 @@ func (f *Filterer) Find(gvk schema.GroupVersionKind, filter BaseFilter) (meta.Ob
 
 	// Perform the filtering
 	for _, object := range sources {
-		if match, err := filterFunc(object); err != nil { // The filter returns meta.Object if it matches, otherwise nil
+		if match, err := filterFunc(object); err != nil { // The filter returns runtime.Object if it matches, otherwise nil
 			return nil, err
 		} else if match != nil {
 			if match.Exact() {
@@ -49,7 +49,7 @@ func (f *Filterer) Find(gvk schema.GroupVersionKind, filter BaseFilter) (meta.Ob
 		}
 	}
 
-	var result meta.Object
+	var result runtime.Object
 
 	// If we have an exact result, select it
 	if exactMatch != nil {
@@ -64,7 +64,7 @@ func (f *Filterer) Find(gvk schema.GroupVersionKind, filter BaseFilter) (meta.Ob
 		result = results[0].Object()
 	}
 
-	// If we're filtering meta.APIType objects, load the full Object to be returned
+	// If we're filtering runtime.APIType objects, load the full Object to be returned
 	if metaObjects {
 		return f.storage.Get(result.GroupVersionKind(), result.GetUID())
 	}
@@ -72,11 +72,11 @@ func (f *Filterer) Find(gvk schema.GroupVersionKind, filter BaseFilter) (meta.Ob
 	return result, nil
 }
 
-// Find all meta.Objects of the given kind using the given filter
-func (f *Filterer) FindAll(gvk schema.GroupVersionKind, filter BaseFilter) ([]meta.Object, error) {
-	var results []meta.Object
+// Find all runtime.Objects of the given kind using the given filter
+func (f *Filterer) FindAll(gvk schema.GroupVersionKind, filter BaseFilter) ([]runtime.Object, error) {
+	var results []runtime.Object
 
-	// Fetch the sources, correct filtering method and if we're dealing with meta.APIType objects
+	// Fetch the sources, correct filtering method and if we're dealing with runtime.APIType objects
 	sources, filterFunc, metaObjects, err := f.parseFilter(gvk, filter)
 	if err != nil {
 		return nil, err
@@ -84,16 +84,16 @@ func (f *Filterer) FindAll(gvk schema.GroupVersionKind, filter BaseFilter) ([]me
 
 	// Perform the filtering
 	for _, object := range sources {
-		if match, err := filterFunc(object); err != nil { // The filter returns meta.Object if it matches, otherwise nil
+		if match, err := filterFunc(object); err != nil { // The filter returns runtime.Object if it matches, otherwise nil
 			return nil, err
 		} else if match != nil {
 			results = append(results, match.Object())
 		}
 	}
 
-	// If we're filtering meta.APIType objects, load the full Objects to be returned
+	// If we're filtering runtime.APIType objects, load the full Objects to be returned
 	if metaObjects {
-		objects := make([]meta.Object, len(results))
+		objects := make([]runtime.Object, len(results))
 		for i, result := range results {
 			if objects[i], err = f.storage.Get(result.GroupVersionKind(), result.GetUID()); err != nil {
 				return nil, err
@@ -106,7 +106,7 @@ func (f *Filterer) FindAll(gvk schema.GroupVersionKind, filter BaseFilter) ([]me
 	return results, nil
 }
 
-func (f *Filterer) parseFilter(gvk schema.GroupVersionKind, filter BaseFilter) (sources []meta.Object, filterFunc filterFunc, metaObjects bool, err error) {
+func (f *Filterer) parseFilter(gvk schema.GroupVersionKind, filter BaseFilter) (sources []runtime.Object, filterFunc filterFunc, metaObjects bool, err error) {
 	// Parse ObjectFilters before MetaFilters, so ObjectFilters can embed MetaFilters
 	if objectFilter, ok := filter.(ObjectFilter); ok {
 		filterFunc = objectFilter.Filter
@@ -120,7 +120,7 @@ func (f *Filterer) parseFilter(gvk schema.GroupVersionKind, filter BaseFilter) (
 	}
 
 	// Make sure the desired kind propagates down to the filter
-	filter.SetKind(meta.Kind(gvk.Kind))
+	filter.SetKind(runtime.Kind(gvk.Kind))
 
 	return
 }

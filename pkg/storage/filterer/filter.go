@@ -3,7 +3,7 @@ package filterer
 import (
 	"fmt"
 
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 )
 
 // BaseFilter provides shared functionality for filter types
@@ -16,27 +16,27 @@ type BaseFilter interface {
 	// a single request returned no matches
 	NonexistentError() *NonexistentError
 	// SetKind sets the kind for the filter
-	SetKind(meta.Kind)
+	SetKind(runtime.Kind)
 }
 
-// ObjectFilter implementations filter fully loaded meta.Objects
+// ObjectFilter implementations filter fully loaded runtime.Objects
 type ObjectFilter interface {
 	BaseFilter
 	// Every Object to be filtered is passed though Filter, which should
 	// return the Object on match, or nil if it doesn't match.
 	// The boolean indicates an exact match.
-	Filter(meta.Object) (Match, error)
+	Filter(runtime.Object) (Match, error)
 }
 
-// MetaFilter implementations operate on meta.APIType objects,
+// MetaFilter implementations operate on runtime.APIType objects,
 // which are more light weight, but provide only name/UID matching.
 type MetaFilter interface {
 	BaseFilter
 	// Every Object to be filtered is passed though FilterMeta, which should
 	// return the Object on match, or nil if it doesn't match. The Objects
-	// given to FilterMeta are of type meta.APIType, stripped of other contents.
+	// given to FilterMeta are of type runtime.APIType, stripped of other contents.
 	// The boolean indicates an exact match.
-	FilterMeta(meta.Object) (Match, error)
+	FilterMeta(runtime.Object) (Match, error)
 }
 
 type AmbiguousError struct {

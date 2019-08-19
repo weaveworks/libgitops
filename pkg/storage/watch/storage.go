@@ -5,12 +5,12 @@ import (
 	"io/ioutil"
 
 	log "github.com/sirupsen/logrus"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/watch/update"
 	"github.com/weaveworks/gitops-toolkit/pkg/util/sync"
 	"github.com/weaveworks/gitops-toolkit/pkg/util/watcher"
-	"k8s.io/apimachinery/pkg/runtime"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 )
@@ -62,19 +62,19 @@ type GenericWatchStorage struct {
 var _ WatchStorage = &GenericWatchStorage{}
 
 // Suspend modify events during Set
-func (s *GenericWatchStorage) Set(gvk schema.GroupVersionKind, obj meta.Object) error {
+func (s *GenericWatchStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
 	s.watcher.Suspend(watcher.FileEventModify)
 	return s.Storage.Set(gvk, obj)
 }
 
 // Suspend modify events during Patch
-func (s *GenericWatchStorage) Patch(gvk schema.GroupVersionKind, uid meta.UID, patch []byte) error {
+func (s *GenericWatchStorage) Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error {
 	s.watcher.Suspend(watcher.FileEventModify)
 	return s.Storage.Patch(gvk, uid, patch)
 }
 
 // Suspend delete events during Delete
-func (s *GenericWatchStorage) Delete(gvk schema.GroupVersionKind, uid meta.UID) error {
+func (s *GenericWatchStorage) Delete(gvk schema.GroupVersionKind, uid runtime.UID) error {
 	s.watcher.Suspend(watcher.FileEventDelete)
 	return s.Storage.Delete(gvk, uid)
 }
@@ -109,7 +109,7 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 
 	for {
 		if event, ok := <-s.watcher.GetFileUpdateStream(); ok {
-			var obj meta.Object
+			var obj runtime.Object
 			var err error
 
 			var objectEvent update.ObjectEvent
@@ -130,12 +130,12 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 
 				// This creates a "fake" Object from the key to be used for
 				// deletion, as the original has already been removed from disk
-				obj = meta.NewAPIType()
+				obj = runtime.NewAPIType()
 				obj.SetName("<deleted>")
 				obj.SetUID(key.UID)
 				obj.SetGroupVersionKind(schema.GroupVersionKind{
 					Group:   groupName,
-					Version: runtime.APIVersionInternal,
+					Version: kruntime.APIVersionInternal,
 					Kind:    key.Kind.Title(),
 				})
 			} else {
@@ -176,7 +176,7 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 	}
 }
 
-func (s *GenericWatchStorage) sendEvent(event update.ObjectEvent, obj meta.Object) {
+func (s *GenericWatchStorage) sendEvent(event update.ObjectEvent, obj runtime.Object) {
 	if s.events != nil {
 		log.Tracef("GenericWatchStorage: Sending event: %v", event)
 		*s.events <- update.AssociatedUpdate{
@@ -189,8 +189,8 @@ func (s *GenericWatchStorage) sendEvent(event update.ObjectEvent, obj meta.Objec
 	}
 }
 
-func (s *GenericWatchStorage) resolveAPIType(path string) (meta.Object, error) {
-	obj := meta.NewAPIType()
+func (s *GenericWatchStorage) resolveAPIType(path string) (runtime.Object, error) {
+	obj := runtime.NewAPIType()
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/watch"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage/watch/update"
@@ -62,21 +62,21 @@ func (ss *SyncStorage) getEventStream() watch.AssociatedEventStream {
 }
 
 // Set is propagated to all Storages
-func (ss *SyncStorage) Set(gvk schema.GroupVersionKind, obj meta.Object) error {
+func (ss *SyncStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
 	return ss.runAll(func(s storage.Storage) error {
 		return s.Set(gvk, obj)
 	})
 }
 
 // Patch is propagated to all Storages
-func (ss *SyncStorage) Patch(gvk schema.GroupVersionKind, uid meta.UID, patch []byte) error {
+func (ss *SyncStorage) Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error {
 	return ss.runAll(func(s storage.Storage) error {
 		return s.Patch(gvk, uid, patch)
 	})
 }
 
 // Delete is propagated to all Storages
-func (ss *SyncStorage) Delete(gvk schema.GroupVersionKind, uid meta.UID) error {
+func (ss *SyncStorage) Delete(gvk schema.GroupVersionKind, uid runtime.UID) error {
 	return ss.runAll(func(s storage.Storage) error {
 		return s.Delete(gvk, uid)
 	})

@@ -2,18 +2,18 @@ package cache
 
 import (
 	log "github.com/sirupsen/logrus"
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 )
 
 type cacheObject struct {
 	storage  storage.Storage
-	object   meta.Object
+	object   runtime.Object
 	checksum string
 	apiType  bool
 }
 
-func newCacheObject(s storage.Storage, object meta.Object, apiType bool) (c *cacheObject, err error) {
+func newCacheObject(s storage.Storage, object runtime.Object, apiType bool) (c *cacheObject, err error) {
 	c = &cacheObject{
 		storage: s,
 		object:  object,
@@ -28,7 +28,7 @@ func newCacheObject(s storage.Storage, object meta.Object, apiType bool) (c *cac
 }
 
 // loadFull returns the full Object, loading it only if it hasn't been cached before or the checksum has changed
-func (c *cacheObject) loadFull() (meta.Object, error) {
+func (c *cacheObject) loadFull() (runtime.Object, error) {
 	var checksum string
 	reload := c.apiType
 
@@ -64,7 +64,7 @@ func (c *cacheObject) loadFull() (meta.Object, error) {
 }
 
 // loadAPI returns the APIType of the Object, loading it only if the checksum has changed
-func (c *cacheObject) loadAPI() (meta.Object, error) {
+func (c *cacheObject) loadAPI() (runtime.Object, error) {
 	if chk, err := c.storage.Checksum(c.object.GroupVersionKind(), c.object.GetUID()); err != nil {
 		return nil, err
 	} else if chk != c.checksum {
@@ -87,5 +87,5 @@ func (c *cacheObject) loadAPI() (meta.Object, error) {
 		return c.object, nil
 	}
 
-	return meta.APITypeFrom(c.object), nil
+	return runtime.APITypeFrom(c.object), nil
 }

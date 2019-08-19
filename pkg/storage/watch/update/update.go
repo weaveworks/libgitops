@@ -1,7 +1,7 @@
 package update
 
 import (
-	meta "github.com/weaveworks/gitops-toolkit/pkg/apis/meta/v1alpha1"
+	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 	"github.com/weaveworks/gitops-toolkit/pkg/storage"
 )
 
@@ -9,7 +9,7 @@ import (
 // APIType for Storage retrieval.
 type Update struct {
 	Event   ObjectEvent
-	APIType meta.Object
+	APIType runtime.Object
 }
 
 // AssociatedUpdate bundles together an Update and a Storage
