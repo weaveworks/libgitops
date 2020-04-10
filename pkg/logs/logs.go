@@ -34,7 +34,7 @@ func newLogger() *logger {
 // Expose the logger
 var Logger *logger
 
-// Automatically initialize the logging system for Ignite
+// Automatically initialize the logging system for the GitOps toolkit
 func init() {
 	// Initialize the logger
 	Logger = newLogger()
