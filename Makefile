@@ -17,7 +17,6 @@ $(BINARIES):
 
 # Make make execute this target although the file already exists.
 .PHONY: bin/sample-app
-# Always update the image when ignite-spawn is updated
 bin/sample-app: bin/%:
 	CGO_ENABLED=0 go build -mod=vendor -ldflags "$(shell ./hack/ldflags.sh)" -o bin/$* ./cmd/$*
 

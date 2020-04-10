@@ -43,7 +43,7 @@ type ResourceClient interface {
 	List() ([]*api.Resource, error)
 }
 
-// Resources returns the ResourceClient for the IgniteInternalClient instance
+// Resources returns the ResourceClient for the Client object
 func (c *Client) Resources() ResourceClient {
 	if c.resourceClient == nil {
 		c.resourceClient = newResourceClient(c.storage, c.gv)

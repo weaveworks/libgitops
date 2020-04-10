@@ -1,58 +1,59 @@
 package patch
 
 import (
+	"bytes"
 	"testing"
 
-	api "github.com/weaveworks/gitops-toolkit/pkg/apis/ignite"
+	api "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
+	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
 )
 
-var testbytes = []byte(`
+var (
+	basebytes = []byte(`
 {
-	"kind": "VM",
-	"apiVersion": "ignite.weave.works/v1alpha1",
+	"kind": "Car",
+	"apiVersion": "sample-app.weave.works/v1alpha1",
 	"metadata": {
 	  "name": "foo",
 	  "uid": "0123456789101112"
 	},
 	"spec": {
-	  "image": {
-		"ociClaim": {
-		  "ref": "centos:7"
-		}
-	  },
-	  "kernel": {
-		"ociClaim": {
-		  "ref": "ubuntu:18.04"
-		}
-	  },
-	  "cpus": 2,
-	  "memory": "4MB"
+	  "engine": "foo",
+	  "brand": "bar"
 	}
 }`)
+	overlaybytes = []byte(`{"status":{"speed":24.7}}`)
+)
 
-var vmGVK = api.SchemeGroupVersion.WithKind("VM")
+var carGVK = api.SchemeGroupVersion.WithKind("Car")
+var p = NewPatcher(scheme.Serializer)
 
 func TestCreatePatch(t *testing.T) {
-	vm := &api.VM{
-		Spec: api.VMSpec{
-			CPUs: 2,
-		},
-		Status: api.VMStatus{
-			State: api.VMStateCreated,
+	car := &api.Car{
+		Spec: api.CarSpec{
+			Engine: "foo",
+			Brand:  "bar",
 		},
 	}
-	vm.SetGroupVersionKind(vmGVK)
-	bytes, err := Create(vm, func(obj runtime.Object) error {
-		vm2 := obj.(*api.VM)
-		vm2.Status.State = api.VMStateRunning
+	car.SetGroupVersionKind(carGVK)
+	b, err := p.Create(car, func(obj runtime.Object) error {
+		car2 := obj.(*api.Car)
+		car2.Status.Speed = 24.7
 		return nil
 	})
-	t.Error(string(bytes), err, vm.Status.State)
+	if !bytes.Equal(b, overlaybytes) {
+		t.Error(string(b), err, car.Status.Speed)
+	}
 }
 
 func TestApplyPatch(t *testing.T) {
-	patch := []byte(`{"status":{"state":"Running"}}`)
-	result, err := Apply(testbytes, patch, vmGVK)
-	t.Error(string(result), err)
+	result, err := p.Apply(basebytes, overlaybytes, carGVK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	car := &api.Car{}
+	if err := scheme.Serializer.DecodeInto(result, car); err != nil {
+		t.Fatal(err)
+	}
 }
