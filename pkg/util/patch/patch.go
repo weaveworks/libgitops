@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/serializer"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"

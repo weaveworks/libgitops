@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	giterr "github.com/weaveworks/gitops-toolkit/pkg/git/errors"
+	giterr "github.com/weaveworks/libgitops/pkg/git/errors"
 )
 
 var NoRepoError = &giterr.Error{
@@ -16,7 +16,7 @@ We need to clone a git repo to proceed, and you haven't supplied
 one. Please upload a config file, including a git repository URL, as
 described in
 
-    https://github.com/weaveworks/gitops-toolkit/blob/master/site/fluxctl.md
+    https://github.com/weaveworks/libgitops/blob/master/site/fluxctl.md
 
 `,
 }

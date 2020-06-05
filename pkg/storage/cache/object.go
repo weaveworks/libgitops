@@ -2,8 +2,8 @@ package cache
 
 import (
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage"
 )
 
 type cacheObject struct {

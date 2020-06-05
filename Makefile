@@ -2,8 +2,7 @@ UID_GID?=$(shell id -u):$(shell id -g)
 GO_VERSION=1.12.7
 DOCKER_USER=weaveworks
 GIT_VERSION:=$(shell hack/ldflags.sh --version-only)
-WHAT?=sample-app
-PROJECT = github.com/weaveworks/gitops-toolkit
+PROJECT = github.com/weaveworks/libgitops
 BOUNDING_API_DIRS = ${PROJECT}/pkg,${PROJECT}/cmd/apis
 API_DIRS = ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/runtime
 CACHE_DIR = $(shell pwd)/bin/cache
@@ -20,13 +19,6 @@ $(BINARIES):
 bin/sample-app: bin/%:
 	CGO_ENABLED=0 go build -mod=vendor -ldflags "$(shell ./hack/ldflags.sh)" -o bin/$* ./cmd/$*
 
-tidy: /go/bin/goimports
-	go mod tidy
-	go mod vendor
-	hack/generate-client.sh
-	gofmt -s -w pkg cmd
-	goimports -w pkg cmd
-
 shell:
 	mkdir -p $(CACHE_DIR)/go $(CACHE_DIR)/cache
 	docker run -it --rm \
@@ -38,6 +30,16 @@ shell:
 		-e GO111MODULE=on \
 		golang:$(GO_VERSION) \
 		$(COMMAND)
+
+tidy:
+	$(MAKE) shell COMMAND="make dockerized-tidy"
+
+dockerized-tidy: /go/bin/goimports
+	go mod tidy
+	go mod vendor
+	hack/generate-client.sh
+	gofmt -s -w pkg cmd
+	goimports -w pkg cmd
 
 autogen:
 	$(MAKE) shell COMMAND="make dockerized-autogen"
@@ -72,3 +74,6 @@ dockerized-autogen: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversio
 
 /go/bin/openapi-gen:
 	go get k8s.io/kube-openapi/cmd/openapi-gen
+
+/go/bin/goimports:
+	go get golang.org/x/tools/cmd/goimports

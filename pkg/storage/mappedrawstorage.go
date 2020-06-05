@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/util"
+	"github.com/weaveworks/libgitops/pkg/util"
 )
 
 // MappedRawStorage is an interface for RawStorages which store their

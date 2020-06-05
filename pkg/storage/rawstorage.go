@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/util"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/util"
 )
 
 // RawStorage is a Key-indexed low-level interface to

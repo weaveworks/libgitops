@@ -1,8 +1,8 @@
 package update
 
 import (
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage"
 )
 
 // Update bundles an FileEvent with an

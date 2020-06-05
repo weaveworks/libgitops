@@ -2,9 +2,9 @@ package reconcile
 
 import (
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/client"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/cache"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/manifest"
+	"github.com/weaveworks/libgitops/pkg/client"
+	"github.com/weaveworks/libgitops/pkg/storage/cache"
+	"github.com/weaveworks/libgitops/pkg/storage/manifest"
 )
 
 var c *client.Client

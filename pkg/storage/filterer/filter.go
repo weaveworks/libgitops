@@ -3,7 +3,7 @@ package filterer
 import (
 	"fmt"
 
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/runtime"
 )
 
 // BaseFilter provides shared functionality for filter types

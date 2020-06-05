@@ -6,7 +6,7 @@ cd ${SCRIPT_DIR}/..
 RESOURCES="Car Motorcycle"
 CLIENT_NAME=SampleInternal
 OUT_DIR=cmd/sample-app/client
-API_DIR="github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
+API_DIR="github.com/weaveworks/libgitops/cmd/sample-app/apis/sample"
 mkdir -p ${OUT_DIR}
 for Resource in ${RESOURCES}; do
     resource=$(echo "${Resource}" | awk '{print tolower($0)}')

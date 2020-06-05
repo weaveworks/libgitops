@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GO_PROJECT="github.com/weaveworks/gitops-toolkit"
+GO_PROJECT="github.com/weaveworks/libgitops"
 
 # Note: This file is heavily inspired by https://github.com/kubernetes/kubernetes/blob/master/hack/lib/version.sh
 

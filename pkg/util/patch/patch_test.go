@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	api "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
-	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/scheme"
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
+	api "github.com/weaveworks/libgitops/cmd/sample-app/apis/sample"
+	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
+	"github.com/weaveworks/libgitops/pkg/runtime"
 )
 
 var (
