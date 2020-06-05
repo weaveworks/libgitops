@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/watch"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/watch/update"
-	"github.com/weaveworks/gitops-toolkit/pkg/util/sync"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
+	"github.com/weaveworks/libgitops/pkg/util/sync"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 

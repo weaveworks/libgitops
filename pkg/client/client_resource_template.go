@@ -14,9 +14,9 @@ import (
 	api "API_DIR"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/filterer"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/filterer"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 

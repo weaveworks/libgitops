@@ -34,7 +34,7 @@ func newLogger() *logger {
 // Expose the logger
 var Logger *logger
 
-// Automatically initialize the logging system for the GitOps toolkit
+// Automatically initialize the logging system for libgitops
 func init() {
 	// Initialize the logger
 	Logger = newLogger()

@@ -5,9 +5,9 @@ import (
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
-	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
-	"github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample/v1alpha1"
-	"github.com/weaveworks/gitops-toolkit/pkg/serializer"
+	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample"
+	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
+	"github.com/weaveworks/libgitops/pkg/serializer"
 )
 
 var (

@@ -3,8 +3,8 @@ package filterer
 import (
 	"fmt"
 
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 

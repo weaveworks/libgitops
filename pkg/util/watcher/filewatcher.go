@@ -10,7 +10,7 @@ import (
 
 	"github.com/rjeczalik/notify"
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/util/sync"
+	"github.com/weaveworks/libgitops/pkg/util/sync"
 	"golang.org/x/sys/unix"
 )
 

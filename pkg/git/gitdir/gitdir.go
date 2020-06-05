@@ -7,8 +7,8 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/gitops-toolkit/pkg/git"
-	"github.com/weaveworks/gitops-toolkit/pkg/util"
+	"github.com/weaveworks/libgitops/pkg/git"
+	"github.com/weaveworks/libgitops/pkg/util"
 )
 
 func NewGitDirectory(url, branch string, paths []string, interval time.Duration) *GitDirectory {
@@ -20,10 +20,10 @@ func NewGitDirectory(url, branch string, paths []string, interval time.Duration)
 		gitConfig: git.Config{
 			Branch:    branch,
 			Paths:     paths,
-			UserName:  "Weave GitOps Toolkit",
+			UserName:  "Weave libgitops",
 			UserEmail: "support@weave.works",
-			SyncTag:   "gitops-toolkit",
-			NotesRef:  "gitops-toolkit",
+			SyncTag:   "libgitops",
+			NotesRef:  "libgitops",
 		},
 		syncInterval: interval,
 		wg:           &sync.WaitGroup{},
@@ -200,7 +200,7 @@ func (d *GitDirectory) doCommit() error {
 	// Do a commit and push
 	if err := d.checkout.CommitAndPush(context.Background(), git.CommitAction{
 		//Author: d.gitConfig.UserName,
-		Message: "Update files changed by GitOps Toolkit",
+		Message: "Update files changed by libgitops",
 	}, nil, true); err != nil {
 		return fmt.Errorf("git commit and/or push error: %v", err)
 	}

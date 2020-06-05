@@ -2,10 +2,10 @@
 package client
 
 import (
-	api "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
-	"github.com/weaveworks/gitops-toolkit/pkg/client"
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
+	api "github.com/weaveworks/libgitops/cmd/sample-app/apis/sample"
+	"github.com/weaveworks/libgitops/pkg/client"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )

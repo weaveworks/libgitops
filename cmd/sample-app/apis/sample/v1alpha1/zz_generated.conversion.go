@@ -5,7 +5,7 @@
 package v1alpha1
 
 import (
-	sample "github.com/weaveworks/gitops-toolkit/cmd/sample-app/apis/sample"
+	sample "github.com/weaveworks/libgitops/cmd/sample-app/apis/sample"
 	conversion "k8s.io/apimachinery/pkg/conversion"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )

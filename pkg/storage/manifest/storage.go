@@ -1,10 +1,10 @@
 package manifest
 
 import (
-	"github.com/weaveworks/gitops-toolkit/pkg/serializer"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/sync"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/sync"
+	"github.com/weaveworks/libgitops/pkg/storage/watch"
 )
 
 // NewManifestStorage constructs a new storage that watches unstructured manifests in the specified directory,

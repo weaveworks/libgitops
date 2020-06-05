@@ -1,8 +1,8 @@
 package filter
 
 import (
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
-	"github.com/weaveworks/gitops-toolkit/pkg/storage/filterer"
+	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/storage/filterer"
 )
 
 // The NameFilter matches Objects by their exact name

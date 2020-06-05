@@ -1,7 +1,7 @@
 package filterer
 
 import (
-	"github.com/weaveworks/gitops-toolkit/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/runtime"
 )
 
 // Match describes the result of filtering an Object
