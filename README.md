@@ -15,3 +15,4 @@ Your feedback is always welcome!
 
 ## Notes
 This project was formerly called `gitops-toolkit`, but has now been given a more descriptive name.
+If you've ended up here, you might be looking for the real [GitOps Toolkit](https://github.com/fluxcd/toolkit).
