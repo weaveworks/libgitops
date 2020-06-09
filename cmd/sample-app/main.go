@@ -11,7 +11,7 @@ import (
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/libgitops/cmd/sample-app/client"
 	"github.com/weaveworks/libgitops/pkg/filter"
-	"github.com/weaveworks/libgitops/pkg/git/gitdir"
+	"github.com/weaveworks/libgitops/pkg/gitdir"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/storage/cache"
@@ -29,7 +29,13 @@ func main() {
 
 func run() error {
 	// Construct the GitDirectory implementation which backs the storage
-	gitDir := gitdir.NewGitDirectory("https://github.com/luxas/ignite-gitops", "master", nil, 10*time.Second)
+	gitDir, err := gitdir.NewGitDirectory("https://github.com/luxas/ignite-gitops", gitdir.GitDirectoryOptions{
+		Branch:   "master",
+		Interval: 10 * time.Second,
+	})
+	if err != nil {
+		return err
+	}
 
 	// Wait for the repo to be cloned
 	gitDir.WaitForClone()
