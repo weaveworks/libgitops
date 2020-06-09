@@ -68,7 +68,7 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("Created temporary git clone at %q", tmpDir)
+	log.Debugf("Created temporary directory for the git clone at %q", tmpDir)
 
 	// Create the struct
 	d := &GitDirectory{
