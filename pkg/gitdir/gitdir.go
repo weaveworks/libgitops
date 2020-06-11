@@ -99,7 +99,7 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 	switch ep.Protocol {
 	case "ssh":
 		// If we haven't got the right credentials, just continue in read-only mode
-		if len(opts.IdentityFileContent) == 0 && len(opts.KnownHostsFileContent) == 0 {
+		if len(opts.IdentityFileContent) == 0 || len(opts.KnownHostsFileContent) == 0 {
 			break
 		}
 		pk, err := ssh.NewPublicKeys("git", opts.IdentityFileContent, "")
@@ -115,7 +115,7 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 		d.readwrite = true
 	case "https":
 		// If we haven't got the right credentials, just continue in read-only mode
-		if opts.Username == nil && opts.Password == nil {
+		if opts.Username == nil || opts.Password == nil {
 			break
 		}
 		d.auth = &http.BasicAuth{
