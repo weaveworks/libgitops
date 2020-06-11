@@ -1,5 +1,5 @@
 UID_GID?=$(shell id -u):$(shell id -g)
-GO_VERSION=1.12.7
+GO_VERSION=1.14.4
 DOCKER_USER=weaveworks
 GIT_VERSION:=$(shell hack/ldflags.sh --version-only)
 PROJECT = github.com/weaveworks/libgitops
