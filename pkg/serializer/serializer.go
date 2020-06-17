@@ -1,38 +1,141 @@
 package serializer
 
 import (
+	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
+)
+
+func newReaderWithClose(r io.Reader) ReadCloser {
+	return &readerWithClose{r}
+}
+
+type readerWithClose struct {
+	io.Reader
+}
+
+func (readerWithClose) Close() error {
+	return nil
+}
+
+type ReadCloser io.ReadCloser
+
+func FromFile(filePath string) ReadCloser {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return &errReadCloser{err}
+	}
+	return f
+}
+
+func FromBytes(content []byte) ReadCloser {
+	return newReaderWithClose(bytes.NewReader(content))
+}
+
+var _ ReadCloser = &errReadCloser{}
+
+type errReadCloser struct {
+	err error
+}
+
+func (rc *errReadCloser) Read(p []byte) (n int, err error) {
+	err = rc.err
+	return
+}
+
+func (rc *errReadCloser) Close() error {
+	return nil
+}
+
+type ContentType string
+
+const (
+	ContentTypeJSON ContentType = ContentType(runtime.ContentTypeJSON)
+	ContentTypeYAML ContentType = ContentType(runtime.ContentTypeYAML)
 )
 
 // Serializer is an interface providing high-level decoding/encoding functionality
 // for types registered in a *runtime.Scheme
 type Serializer interface {
-	// DecodeInto takes byte content and a target object to serialize the data into
-	DecodeInto(content []byte, obj runtime.Object) error
-	// DecodeFileInto takes a file path and a target object to serialize the data into
-	DecodeFileInto(filePath string, obj runtime.Object) error
+	// Decoder returns a decoder with the given options and reader. You may use helper functions
+	// FromBytes and FromFile to decode from a file or byte slice. The decoder should be closed
+	// after use.
+	Decoder(rc ReadCloser, optsFn ...DecodingOptionsFunc) Decoder
 
-	// Decode takes byte content and returns the target object
-	Decode(content []byte, internal bool) (runtime.Object, error)
-	// DecodeFile takes a file path and returns the target object
-	DecodeFile(filePath string, internal bool) (runtime.Object, error)
-
-	// EncodeYAML encodes the specified object for a specific version to YAML bytes
-	EncodeYAML(obj runtime.Object) ([]byte, error)
-	// EncodeJSON encodes the specified object for a specific version to pretty JSON bytes
-	EncodeJSON(obj runtime.Object) ([]byte, error)
+	// Encoder returns an encoder for the specified content type and options. Encode functions return bytes, but
+	// there's also the option to write all encoded content during the lifetime of the encoder to a writer using
+	// WithEncodeWriter(io.Writer) in the options.
+	Encoder(contentType ContentType, optsFn ...EncodingOptionsFunc) Encoder
 
 	// DefaultInternal populates the given internal object with the preferred external version's defaults
+	// TODO: Make Defaulter() interface
 	DefaultInternal(cfg runtime.Object) error
 
 	// Scheme provides access to the underlying runtime.Scheme
 	Scheme() *runtime.Scheme
+}
+
+type schemeAndCodec struct {
+	scheme *runtime.Scheme
+	codecs *k8sserializer.CodecFactory
+}
+
+type Encoder interface {
+	// Encode returns the objects in the specified encoded format. In case multiple objects are
+	// provided, the encoder will specify behavior. For YAML, multiple documents will be written. For
+	// JSON, this call will error. This encoder will choose the preferred external groupversion automatically.
+	Encode(obj ...runtime.Object) ([]byte, error)
+
+	// TODO: Maybe add this?
+	// EncodeForGroupVersion(obj runtime.Object, gv schema.GroupVersion) ([]byte, error)
+}
+
+type Decoder interface {
+	// Decode returns the decoded object from the next document in the stream.
+	// If there are multiple documents in the underlying stream, this call will read one
+	// 	document and return it. Decode might be invoked for getting new documents until it
+	// 	returns io.EOF. When io.EOF is reached in a call, the stream is automatically closed.
+	// If opts.Default is true, the decoded object will be defaulted.
+	// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error (TODO)
+	// 	if the input contains duplicate or unknown fields or formatting errors
+	// If opts.Internal is true, the decoded external object will be converted into its internal representation.
+	// 	Otherwise, the decoded object will be left in the external representation.
+	// opts.DecodeListElements is not applicable in this call. If the underlying data contains a v1.List,
+	// 	decoding will be successfully performed and a v1.List is returned.
+	// TODO: Mention UnrecognizedGroupError and UnrecognizedVersionError
+	Decode() (runtime.Object, error)
+	// DecodeInto decodes the next document in the stream into obj if the types are matching.
+	// If there are multiple documents in the underlying stream, this call will read one
+	// 	document and return it. Decode might be invoked for getting new documents until it
+	// 	returns io.EOF. When io.EOF is reached in a call, the stream is automatically closed.
+	// If opts.Default is true, the decoded object will be defaulted.
+	// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error (TODO)
+	// 	if the input contains duplicate or unknown fields or formatting errors
+	// opts.DecodeListElements is not applicable in this call. If a v1.List is given as obj, and the
+	// 	underlying data contains a v1.List, decoding will be successfully performed.
+	// opts.Internal is not applicable in this call.
+	DecodeInto(obj runtime.Object) error
+
+	// DecodeAll returns the decoded objects from all documents in the stream. The underlying
+	// stream is automatically closed on io.EOF. io.EOF is never returned from this function.
+	// If opts.Default is true, the decoded objects will be defaulted.
+	// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error (TODO)
+	// 	if the input contains duplicate or unknown fields or formatting errors
+	// If opts.Internal is true, the decoded external object will be converted into their internal representation.
+	// 	Otherwise, the decoded objects will be left in their external representation.
+	// If opts.DecodeListElements is true and the underlying data contains a v1.List,
+	// 	the items of the list will be traversed and decoded into their respective types, which are
+	// 	added into the returning slice. The v1.List will in this case not be returned.
+	DecodeAll() ([]runtime.Object, error)
+
+	// Close implements io.Closer. If close is called, the underlying stream is also closed. After
+	// Close() has been called, all future Decode operations will return an error.
+	Close() error
 }
 
 // NewSerializer constructs a new serializer based on a scheme, and optionally a codecfactory
@@ -46,25 +149,17 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 		*codecs = k8sserializer.NewCodecFactory(scheme)
 	}
 
-	// Allow both YAML and JSON inputs (JSON is a subset of YAML), and deserialize in strict mode
-	strictSerializer := json.NewSerializerWithOptions(json.DefaultMetaFactory, scheme, scheme, json.SerializerOptions{
-		Yaml:   true,
-		Strict: true,
-	})
-
 	return &serializer{
-		scheme: scheme,
-		codecs: codecs,
-		// Construct a codec that uses the strict serializer, but also performs defaulting & conversion
-		decoder: codecs.CodecForVersions(nil, strictSerializer, nil, runtime.InternalGroupVersioner),
+		schemeAndCodec: &schemeAndCodec{
+			scheme: scheme,
+			codecs: codecs,
+		},
 	}
 }
 
 // serializer implements the Serializer interface
 type serializer struct {
-	scheme  *runtime.Scheme
-	codecs  *k8sserializer.CodecFactory
-	decoder runtime.Decoder
+	*schemeAndCodec
 }
 
 // Scheme provides access to the underlying runtime.Scheme
@@ -72,76 +167,14 @@ func (s *serializer) Scheme() *runtime.Scheme {
 	return s.scheme
 }
 
-// DecodeFileInto takes a file path and a target object to serialize the data into
-func (s *serializer) DecodeFileInto(filePath string, obj runtime.Object) error {
-	content, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-
-	return s.DecodeInto(content, obj)
+func (s *serializer) Decoder(rc ReadCloser, optFns ...DecodingOptionsFunc) Decoder {
+	opts := newDecodeOpts(optFns...)
+	return newDecoder(s.schemeAndCodec, rc, *opts)
 }
 
-// DecodeInto takes byte content and a target object to serialize the data into
-func (s *serializer) DecodeInto(content []byte, obj runtime.Object) error {
-	return runtime.DecodeInto(s.decoder, content, obj)
-}
-
-// DecodeFile takes a file path and returns the target object
-func (s *serializer) DecodeFile(filePath string, internal bool) (runtime.Object, error) {
-	content, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.Decode(content, internal)
-}
-
-// Decode takes byte content and returns the target object
-func (s *serializer) Decode(content []byte, internal bool) (runtime.Object, error) {
-	obj, err := runtime.Decode(s.decoder, content)
-	if err != nil {
-		return nil, err
-	}
-	// Default the object
-	s.scheme.Default(obj)
-
-	// If we did not request an internal conversion, return quickly
-	if !internal {
-		return obj, nil
-	}
-	// Return the internal version of the object
-	return s.scheme.ConvertToVersion(obj, runtime.InternalGroupVersioner)
-}
-
-// EncodeYAML encodes the specified object for a specific version to YAML bytes
-func (s *serializer) EncodeYAML(obj runtime.Object) ([]byte, error) {
-	return s.encode(obj, runtime.ContentTypeYAML, false)
-}
-
-// EncodeJSON encodes the specified object for a specific version to pretty JSON bytes
-func (s *serializer) EncodeJSON(obj runtime.Object) ([]byte, error) {
-	return s.encode(obj, runtime.ContentTypeJSON, true)
-}
-
-func (s *serializer) encode(obj runtime.Object, mediaType string, pretty bool) ([]byte, error) {
-	info, ok := runtime.SerializerInfoForMediaType(s.codecs.SupportedMediaTypes(), mediaType)
-	if !ok {
-		return nil, fmt.Errorf("unable to locate encoder -- %q is not a supported media type", mediaType)
-	}
-
-	serializer := info.Serializer
-	if pretty {
-		serializer = info.PrettySerializer
-	}
-
-	gvk, err := s.externalGVKForObject(obj)
-	if err != nil {
-		return nil, err
-	}
-
-	encoder := s.codecs.EncoderForVersion(serializer, gvk.GroupVersion())
-	return runtime.Encode(encoder, obj)
+func (s *serializer) Encoder(contentType ContentType, optFns ...EncodingOptionsFunc) Encoder {
+	opts := newEncodeOpts(optFns...)
+	return newEncoder(s.schemeAndCodec, contentType, *opts)
 }
 
 // DefaultInternal populates the given internal object with the preferred external version's defaults

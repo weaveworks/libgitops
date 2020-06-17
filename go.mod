@@ -2,10 +2,7 @@ module github.com/weaveworks/libgitops
 
 go 1.14
 
-replace (
-	github.com/docker/distribution => github.com/docker/distribution v2.7.1+incompatible
-	k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20200121204235-bf4fb3bd569c
-)
+replace github.com/docker/distribution => github.com/docker/distribution v2.7.1+incompatible
 
 require (
 	github.com/fluxcd/toolkit v0.0.1-beta.2
@@ -17,7 +14,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/sys v0.0.0-20200610111108-226ff32320da
-	k8s.io/apimachinery v0.18.3
+	k8s.io/apimachinery v0.19.0-beta.2
 	k8s.io/kube-openapi v0.0.0-20200427153329-656914f816f9
 	sigs.k8s.io/yaml v1.2.0
 )
