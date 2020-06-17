@@ -10,40 +10,74 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
-var defaultEncodingOpts = EncodingOptions{
-	Pretty: true,
+type EncodingOptions struct {
+	// Default: true
+	Pretty *bool
+
+	// Where to write all encoder output during the encoder's lifetime
+	// TODO: Implement this
+	Writer io.Writer
+}
+
+type EncodingOptionsFunc func(*EncodingOptions)
+
+func WithPrettyEncode(pretty bool) EncodingOptionsFunc {
+	return func(opts *EncodingOptions) {
+		opts.Pretty = &pretty
+	}
+}
+
+func WithEncodeWriter(w io.Writer) EncodingOptionsFunc {
+	return func(opts *EncodingOptions) {
+		opts.Writer = w
+	}
+}
+
+func defaultEncodeOpts() *EncodingOptions {
+	return &EncodingOptions{
+		Pretty: boolVar(true),
+		Writer: nil,
+	}
+}
+
+func newEncodeOpts(fns ...EncodingOptionsFunc) *EncodingOptions {
+	opts := defaultEncodeOpts()
+	for _, fn := range fns {
+		fn(opts)
+	}
+	return opts
 }
 
 type encoder struct {
 	*schemeAndCodec
 
-	serializer runtime.Serializer
-	framer     runtime.Framer
-	mediaType  string
-	opts       EncodingOptions
+	serializer  runtime.Serializer
+	framer      runtime.Framer
+	contentType ContentType
+	opts        EncodingOptions
 }
 
-func newEncoder(schemeAndCodec *schemeAndCodec, mediaType string, opts EncodingOptions) Encoder {
+func newEncoder(schemeAndCodec *schemeAndCodec, contentType ContentType, opts EncodingOptions) Encoder {
 	var s runtime.Serializer
 	var framer runtime.Framer
-	switch mediaType {
-	case runtime.ContentTypeYAML:
+	switch contentType {
+	case ContentTypeYAML:
 		s = json.NewSerializerWithOptions(
 			json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme,
-			json.SerializerOptions{Yaml: true, Pretty: opts.Pretty, Strict: false},
+			json.SerializerOptions{Yaml: true, Pretty: *opts.Pretty, Strict: false},
 		)
 		framer = json.YAMLFramer
-	case runtime.ContentTypeJSON:
+	case ContentTypeJSON:
 		s = json.NewSerializerWithOptions(
 			json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme,
-			json.SerializerOptions{Yaml: false, Pretty: opts.Pretty, Strict: false},
+			json.SerializerOptions{Yaml: false, Pretty: *opts.Pretty, Strict: false},
 		)
 		framer = json.Framer
 	default:
-		return &errEncoder{fmt.Errorf("unable to locate encoder -- %q is not a supported media type", mediaType)}
+		return &errEncoder{fmt.Errorf("unable to locate encoder -- %q is not a supported media type", contentType)}
 	}
 
-	return &encoder{schemeAndCodec, s, framer, mediaType, opts}
+	return &encoder{schemeAndCodec, s, framer, contentType, opts}
 }
 
 func (e *encoder) Encode(objs ...runtime.Object) ([]byte, error) {
@@ -63,6 +97,7 @@ func (e *encoder) Encode(objs ...runtime.Object) ([]byte, error) {
 	return bytes.TrimPrefix(buf.Bytes(), []byte("---\n")), nil
 }
 
+// TODO: De-duplicate with serializer
 func (e *encoder) externalGVKForObject(cfg runtime.Object) (*schema.GroupVersionKind, error) {
 	gvks, unversioned, err := e.scheme.ObjectKinds(cfg)
 	if unversioned || err != nil || len(gvks) != 1 {
@@ -80,9 +115,9 @@ func (e *encoder) externalGVKForObject(cfg runtime.Object) (*schema.GroupVersion
 	return &gvk, nil
 }
 
-func (e *encoder) WithOptions(opts EncodingOptions) Encoder {
+/*func (e *encoder) WithOptions(opts EncodingOptions) Encoder {
 	return newEncoder(e.schemeAndCodec, e.mediaType, opts)
-}
+}*/
 
 type jsonFramer struct {
 	w io.Writer
