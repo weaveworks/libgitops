@@ -8,6 +8,7 @@ import (
 	"io"
 	"reflect"
 
+	"github.com/weaveworks/libgitops/pkg/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -18,13 +19,18 @@ import (
 )
 
 type DecodingOptions struct {
-	// Default: false
+	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
+	// will be converted into its internal representation. Otherwise, the decoded
+	// object will be left in its external representation. (Default: false)
 	Internal *bool
-	// Default: true
+	// Parse the YAML/JSON in strict mode, returning a specific error if the input
+	// contains duplicate or unknown fields or formatting errors. (Default: true)
 	Strict *bool
-	// Default: false
+	// Automatically default the decoded object. (Default: false)
 	Default *bool
-	// Default: true
+	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
+	// the items of the list will be traversed, decoded into their respective types, and
+	// appended to the returned slice. The v1.List will in this case not be returned. (Default: true)
 	DecodeListElements *bool // TODO: How to make this able to preserve comments?
 }
 
@@ -54,16 +60,12 @@ func WithListElementsDecoding(listElements bool) DecodingOptionsFunc {
 	}
 }
 
-func boolVar(b bool) *bool { // TODO: move to utils or re-use existing fn?
-	return &b
-}
-
 func defaultDecodeOpts() *DecodingOptions {
 	return &DecodingOptions{
-		Internal:           boolVar(false),
-		Strict:             boolVar(true),
-		Default:            boolVar(false),
-		DecodeListElements: boolVar(true),
+		Internal:           util.BoolPtr(false),
+		Strict:             util.BoolPtr(true),
+		Default:            util.BoolPtr(false),
+		DecodeListElements: util.BoolPtr(true),
 	}
 }
 
@@ -80,9 +82,9 @@ var DecoderClosedError = errors.New("decoder has already been closed")
 type streamDecoder struct {
 	*schemeAndCodec
 
-	rc         io.ReadCloser // this is the underlying reader of YAMLReader
+	rc         io.ReadCloser // Underlying reader of YAMLReader
 	yamlReader *yaml.YAMLReader
-	decoder    runtime.Decoder //serializer *json.Serializer
+	decoder    runtime.Decoder
 	opts       DecodingOptions
 	closed     bool // signal whether Close() has been called or not
 
@@ -239,7 +241,7 @@ func (d *streamDecoder) readDoc() ([]byte, error) {
 		// TODO: Maybe use a generic Framer for both reading & writing?
 		doc, err := d.yamlReader.Read()
 		if err == io.EOF {
-			d.Close()
+			_ = d.Close()
 			return nil, io.EOF
 		} else if err != nil {
 			return nil, err
@@ -260,13 +262,6 @@ func (d *streamDecoder) Close() error {
 	return d.rc.Close()
 }
 
-/*// WithOptions returns a new Decoder with new options, preserving the same data & scheme
-// The options are not defaulted, but used as-is. This call MUST happen before any Decode call
-func (d *streamDecoder) WithOptions(opts DecodingOptions) Decoder {
-	// TODO: Return err-decoder if we've already called any Decode call?
-	return newStreamDecoder(d.rc, d.schemeAndCodec, opts)
-}*/
-
 func newDecoder(schemeAndCodec *schemeAndCodec, rc io.ReadCloser, opts DecodingOptions) Decoder {
 	// The YAML reader supports reading multiple YAML documents
 	yamlReader := yaml.NewYAMLReader(bufio.NewReader(rc))
@@ -276,9 +271,6 @@ func newDecoder(schemeAndCodec *schemeAndCodec, rc io.ReadCloser, opts DecodingO
 		Yaml:   true,
 		Strict: *opts.Strict,
 	})
-	// Construct a codec that uses the strict serializer, but also performs defaulting & conversion
-	//decoder := recognizer.NewDecoder(s) // schemeAndCodec.codecs.CodecForVersions(nil, s, nil, runtime.InternalGroupVersioner)
-	// decoder := schemeAndCodec.codecs.UniversalDeserializer()
 
 	// Default to preferring the scheme's preferred external version for Decode calls (not DecodeInto)
 	var groupVersioner runtime.GroupVersioner = &schemeGroupVersioner{schemeAndCodec.scheme}
