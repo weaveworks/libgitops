@@ -6,6 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// DecodingError extends the error interface
 type DecodingError interface {
 	error
 
@@ -58,8 +59,7 @@ func IsUnrecognizedGroupError(err error) bool {
 	return ok
 }
 
-// UnrecognizedVersionError implements the error interfaces
-var _ error = &UnrecognizedVersionError{}
+// UnrecognizedVersionError implements the DecodingError interface
 var _ DecodingError = &UnrecognizedVersionError{}
 
 // UnrecognizedVersionError is a base error type that is returned when decoding bytes that

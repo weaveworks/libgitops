@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
 type EncodingOptions struct {
-	// Default: true
+	// Use pretty printing when writing to the output. (Default: true)
 	Pretty *bool
 
-	// Where to write all encoder output during the encoder's lifetime
+	// Where to write all encoder output during the encoder's lifetime.
 	// TODO: Implement this
 	Writer io.Writer
 }
@@ -35,7 +36,7 @@ func WithEncodeWriter(w io.Writer) EncodingOptionsFunc {
 
 func defaultEncodeOpts() *EncodingOptions {
 	return &EncodingOptions{
-		Pretty: boolVar(true),
+		Pretty: util.BoolPtr(true),
 		Writer: nil,
 	}
 }
@@ -113,24 +114,6 @@ func (e *encoder) externalGVKForObject(cfg runtime.Object) (*schema.GroupVersion
 	// Use the preferred (external) version
 	gvk.Version = gvs[0].Version
 	return &gvk, nil
-}
-
-/*func (e *encoder) WithOptions(opts EncodingOptions) Encoder {
-	return newEncoder(e.schemeAndCodec, e.mediaType, opts)
-}*/
-
-type jsonFramer struct {
-	w io.Writer
-}
-
-func (f jsonFramer) Write(p []byte) (n int, err error) {
-	if f.w == nil {
-		err = fmt.Errorf("doesn't support writing more than one document at a time!")
-		return
-	}
-	n, err = f.w.Write(p)
-	f.w = nil
-	return
 }
 
 type errEncoder struct {

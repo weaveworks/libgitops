@@ -36,3 +36,7 @@ func MatchPrefix(prefix string, fields ...string) ([]string, bool) {
 
 	return prefixMatches, false
 }
+
+func BoolPtr(b bool) *bool {
+	return &b
+}
