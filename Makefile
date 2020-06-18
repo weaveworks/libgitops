@@ -1,52 +1,42 @@
-UID_GID?=$(shell id -u):$(shell id -g)
-GO_VERSION=1.14.4
-DOCKER_USER=weaveworks
-GIT_VERSION:=$(shell hack/ldflags.sh --version-only)
-PROJECT = github.com/weaveworks/libgitops
-BOUNDING_API_DIRS = ${PROJECT}/pkg,${PROJECT}/cmd/apis
-API_DIRS = ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/runtime
-CACHE_DIR = $(shell pwd)/bin/cache
-API_DOCS = api/sample-app.md api/runtime.md
+UID_GID ?= $(shell id -u):$(shell id -g)
+GO_VERSION ?= 1.14.4
+GIT_VERSION := $(shell hack/ldflags.sh --version-only)
+PROJECT := github.com/weaveworks/libgitops
+BOUNDING_API_DIRS := ${PROJECT}/pkg,${PROJECT}/cmd/apis
+API_DIRS := ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/runtime
+CACHE_DIR := $(shell pwd)/bin/cache
+API_DOCS := api/sample-app.md api/runtime.md
+BINARIES := bin/sample-app
 
-all: sample-app
+all: docker-binaries
 
-BINARIES=sample-app
-$(BINARIES):
-	$(MAKE) shell COMMAND="make bin/$@"
+binaries: $(BINARIES)
+$(BINARIES): bin/%:
+	go mod download
+	CGO_ENABLED=0 go build -ldflags "$(shell ./hack/ldflags.sh)" -o "./bin/$*" "./cmd/$*"
 
-# Make make execute this target although the file already exists.
-.PHONY: bin/sample-app
-bin/sample-app: bin/%:
-	CGO_ENABLED=0 go build -mod=vendor -ldflags "$(shell ./hack/ldflags.sh)" -o bin/$* ./cmd/$*
-
-shell:
-	mkdir -p $(CACHE_DIR)/go $(CACHE_DIR)/cache
+docker-%:
+	mkdir -p "${CACHE_DIR}/go" "${CACHE_DIR}/cache"
 	docker run -it --rm \
-		-v $(CACHE_DIR)/go:/go \
-		-v $(CACHE_DIR)/cache:/.cache/go-build \
-		-v $(shell pwd):/go/src/${PROJECT} \
-		-w /go/src/${PROJECT} \
-		-u $(shell id -u):$(shell id -g) \
-		-e GO111MODULE=on \
-		golang:$(GO_VERSION) \
-		$(COMMAND)
+		-u "${UID_GID}" \
+		-v "${CACHE_DIR}/go":/go \
+		-v "${CACHE_DIR}/cache":/.cache/go-build \
+		-v "$(shell pwd):/go/src/${PROJECT}" \
+		-w "/go/src/${PROJECT}" \
+		"golang:${GO_VERSION}" make $*
 
-tidy:
-	$(MAKE) shell COMMAND="make dockerized-tidy"
-
-dockerized-tidy: /go/bin/goimports
+tidy: docker-tidy-internal
+tidy-internal: /go/bin/goimports
 	go mod tidy
-	go mod vendor
 	hack/generate-client.sh
 	gofmt -s -w pkg cmd
 	goimports -w pkg cmd
 
-autogen:
-	$(MAKE) shell COMMAND="make dockerized-autogen"
-
-dockerized-autogen: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen /go/bin/openapi-gen
+autogen: docker-autogen-internal
+autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen /go/bin/openapi-gen
 	# Let the boilerplate be empty
 	touch /tmp/boilerplate
+
 	/go/bin/deepcopy-gen \
 		--input-dirs ${API_DIRS} \
 		--bounding-dirs ${BOUNDING_API_DIRS} \
@@ -69,6 +59,9 @@ dockerized-autogen: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversio
 		--report-filename api/openapi/violations.txt \
 		-h /tmp/boilerplate
 
+	# These commands modify the environment, perform cleanup
+	$(MAKE) tidy-internal
+
 /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen: /go/bin/%:
 	go get k8s.io/code-generator/cmd/$*
 
@@ -77,3 +70,5 @@ dockerized-autogen: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversio
 
 /go/bin/goimports:
 	go get golang.org/x/tools/cmd/goimports
+
+.PHONY: $(BINARIES)

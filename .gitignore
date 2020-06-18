@@ -1,1 +1,6 @@
-bin
+# IDE-specific configuration
+.idea/
+.vscode/
+
+# Binary artifacts
+bin/
