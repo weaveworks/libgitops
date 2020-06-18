@@ -86,7 +86,7 @@ func (ss *SyncStorage) Close() error {
 	// Close all WatchStorages
 	for _, s := range ss.storages {
 		if watchStorage, ok := s.(watch.WatchStorage); ok {
-			watchStorage.Close()
+			_ = watchStorage.Close()
 		}
 	}
 

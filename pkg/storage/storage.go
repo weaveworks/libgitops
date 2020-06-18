@@ -126,13 +126,13 @@ func (s *GenericStorage) GetMeta(gvk schema.GroupVersionKind, uid runtime.UID) (
 func (s *GenericStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
 	storageKey := KeyForUID(gvk, obj.GetUID())
 
-	// Set the serializer based on the format given by the RawStorage
-	serializeFunc := s.serializer.EncodeJSON
+	// Set the content type based on the format given by the RawStorage
+	var contentType = serializer.ContentTypeJSON
 	if s.raw.Format(storageKey) != FormatJSON {
-		serializeFunc = s.serializer.EncodeYAML
+		contentType = serializer.ContentTypeYAML
 	}
 
-	b, err := serializeFunc(obj)
+	b, err := s.serializer.Encoder(contentType).Encode(obj)
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (s *GenericStorage) decode(content []byte, gvk schema.GroupVersionKind) (ru
 	isInternal := gvk.Version == kruntime.APIVersionInternal
 
 	// Decode the bytes into an Object
-	obj, err := s.serializer.Decode(content, isInternal)
+	obj, err := s.serializer.Decoder(serializer.FromBytes(content), serializer.WithInternalDecode(isInternal)).Decode()
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (s *GenericStorage) decodeMeta(content []byte, gvk schema.GroupVersionKind)
 	obj := runtime.NewAPIType()
 
 	// Decode the bytes into the APIType object
-	if err := s.serializer.DecodeInto(content, obj); err != nil {
+	if err := s.serializer.Decoder(serializer.FromBytes(content)).DecodeInto(obj); err != nil {
 		return nil, err
 	}
 
