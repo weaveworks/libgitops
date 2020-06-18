@@ -15,6 +15,6 @@ require (
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/sys v0.0.0-20200610111108-226ff32320da
 	k8s.io/apimachinery v0.19.0-beta.2
-	k8s.io/kube-openapi v0.0.0-20200427153329-656914f816f9
+	k8s.io/kube-openapi v0.0.0-20200615155156-dffdd1682719
 	sigs.k8s.io/yaml v1.2.0
 )
