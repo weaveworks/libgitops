@@ -28,8 +28,9 @@ type patcher struct {
 // Create is a helper that creates a patch out of the change made in applyFn
 func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error) ([]byte, error) {
 	old := new.DeepCopyObject().(runtime.Object)
+	encoder := p.serializer.Encoder(serializer.ContentTypeJSON)
 
-	oldbytes, err := p.serializer.EncodeJSON(old)
+	oldbytes, err := encoder.Encode(old)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error)
 		return nil, err
 	}
 
-	newbytes, err := p.serializer.EncodeJSON(new)
+	newbytes, err := encoder.Encode(new)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +91,8 @@ func (p *patcher) ApplyOnFile(filePath string, patch []byte, gvk schema.GroupVer
 // TODO: Just use encoding/json.Indent here instead?
 func (p *patcher) serializerEncode(input []byte) (result []byte, err error) {
 	var obj kruntime.Object
-	if obj, err = p.serializer.Decode(input, true); err == nil {
-		result, err = p.serializer.EncodeJSON(obj)
+	if obj, err = p.serializer.Decoder(serializer.FromBytes(input)).Decode(); err == nil {
+		result, err = p.serializer.Encoder(serializer.ContentTypeJSON).Encode(obj)
 	}
 
 	return
