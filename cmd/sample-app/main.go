@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/labstack/echo"
@@ -14,6 +16,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/gitdir"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/cache"
 	"github.com/weaveworks/libgitops/pkg/storage/manifest"
 )
@@ -38,15 +41,25 @@ func run() error {
 	}
 
 	// Wait for the repo to be cloned
-	gitDir.WaitForClone()
+	if err := gitDir.WaitForClone(); err != nil {
+		return err
+	}
 
+	// Create the manifest directory
+	if err := os.MkdirAll(ManifestDir, 0755); err != nil {
+		return err
+	}
+
+	// Set the log level
+	logs.Logger.SetLevel(logrus.DebugLevel)
+
+	// Set up the ManifestStorage
 	ms, err := manifest.NewManifestStorage(ManifestDir, scheme.Serializer)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = ms.Close() }()
 	Client := client.NewClient(cache.NewCache(ms))
-
-	logs.Logger.SetLevel(logrus.DebugLevel)
 
 	e := echo.New()
 	e.GET("/", func(c echo.Context) error {
@@ -64,7 +77,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		content, err := scheme.Serializer.EncodeJSON(obj)
+		content, err := scheme.Serializer.Encoder(serializer.ContentTypeJSON).Encode(obj)
 		if err != nil {
 			return err
 		}
@@ -78,7 +91,7 @@ func run() error {
 		}
 
 		obj := Client.Cars().New()
-		obj.ObjectMeta.UID = runtime.UID("599615df99804ae8")
+		obj.ObjectMeta.UID = "599615df99804ae8"
 		obj.ObjectMeta.Name = name
 		obj.Spec.Brand = "Acura"
 
@@ -89,7 +102,22 @@ func run() error {
 		return c.String(200, "OK!")
 	})
 
-	return e.Start(":8080")
+	// Start the server
+	go func() {
+		if err := e.Start(":8080"); err != nil {
+			e.Logger.Info("shutting down the server")
+		}
+	}()
+
+	quit := make(chan os.Signal)
+	signal.Notify(quit, os.Interrupt)
+
+	// Wait for interrupt signal to gracefully shutdown the application with a timeout of 10 seconds
+	<-quit
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return e.Shutdown(ctx)
 }
 
 /*
