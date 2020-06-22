@@ -11,21 +11,8 @@ import (
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
-func newReaderWithClose(r io.Reader) ReadCloser {
-	return &readerWithClose{r}
-}
-
-type readerWithClose struct {
-	io.Reader
-}
-
-func (readerWithClose) Close() error {
-	return nil
-}
-
-type ReadCloser io.ReadCloser
-
-func FromFile(filePath string) ReadCloser {
+// Helper for fetching serialization content from a file
+func FromFile(filePath string) io.ReadCloser {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return &errReadCloser{err}
@@ -33,30 +20,16 @@ func FromFile(filePath string) ReadCloser {
 	return f
 }
 
-func FromBytes(content []byte) ReadCloser {
+// Helper for fetching serialization content from bytes
+func FromBytes(content []byte) io.ReadCloser {
 	return newReaderWithClose(bytes.NewReader(content))
-}
-
-var _ ReadCloser = &errReadCloser{}
-
-type errReadCloser struct {
-	err error
-}
-
-func (rc *errReadCloser) Read(p []byte) (n int, err error) {
-	err = rc.err
-	return
-}
-
-func (rc *errReadCloser) Close() error {
-	return nil
 }
 
 type ContentType string
 
 const (
-	ContentTypeJSON ContentType = ContentType(runtime.ContentTypeJSON)
-	ContentTypeYAML ContentType = ContentType(runtime.ContentTypeYAML)
+	ContentTypeJSON = ContentType(runtime.ContentTypeJSON)
+	ContentTypeYAML = ContentType(runtime.ContentTypeYAML)
 )
 
 // Serializer is an interface providing high-level decoding/encoding functionality
@@ -65,7 +38,7 @@ type Serializer interface {
 	// Decoder returns a decoder with the given options and reader. You may use helper functions
 	// FromBytes and FromFile to decode from a file or byte slice. The decoder should be closed
 	// after use.
-	Decoder(rc ReadCloser, optsFn ...DecodingOptionsFunc) Decoder
+	Decoder(rc io.ReadCloser, optsFn ...DecodingOptionsFunc) Decoder
 
 	// Encoder returns an encoder for the specified content type and options. Encode functions return bytes, but
 	// there's also the option to write all encoded content during the lifetime of the encoder to a writer using
@@ -167,7 +140,7 @@ func (s *serializer) Scheme() *runtime.Scheme {
 	return s.scheme
 }
 
-func (s *serializer) Decoder(rc ReadCloser, optFns ...DecodingOptionsFunc) Decoder {
+func (s *serializer) Decoder(rc io.ReadCloser, optFns ...DecodingOptionsFunc) Decoder {
 	opts := newDecodeOpts(optFns...)
 	return newDecoder(s.schemeAndCodec, rc, *opts)
 }
