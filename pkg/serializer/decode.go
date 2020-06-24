@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
 	yamlmeta "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
+	webhookconversion "sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 )
 
 type DecodingOptions struct {
@@ -295,8 +297,67 @@ func (c *convertor) ConvertToVersion(in runtime.Object, gv runtime.GroupVersione
 		return in.DeepCopyObject(), nil
 	}
 
+	// If this is a controller-runtime CRD convertible, convert it manually
+	convertible, ok := in.(conversion.Convertible)
+	if ok {
+		return c.tryConvertToHub(convertible)
+	}
+
 	// Just proceed as normal, and convert into the internal version using the internal groupversioner.
 	return c.scheme.ConvertToVersion(in, gv)
+}
+
+func (c *convertor) tryConvertToHub(in conversion.Convertible) (runtime.Object, error) {
+	// If the version should be converted, construct a new version of the object to convert into,
+	// convert and finally add to the list
+	ok, err := webhookconversion.IsConvertible(c.scheme, in)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("object isn't convertible")
+	}
+
+	// Fetch the current in object's GVK
+	currentGVK, err := gvkForObject(c.scheme, in)
+	if err != nil {
+		return nil, err
+	}
+
+	// Loop through all the groupversions for the kind to find the one with the Hub
+	var hub conversion.Hub
+	var targetGVK schema.GroupVersionKind
+	for gvk := range c.scheme.AllKnownTypes() {
+		// Skip any non-similar groupkinds
+		if gvk.GroupKind().String() != currentGVK.GroupKind().String() {
+			continue
+		}
+		// Skip the same version that the convertible has
+		if gvk.Version == currentGVK.Version {
+			continue
+		}
+
+		// Create an object for the certain gvk
+		obj, err := c.scheme.New(gvk)
+		if err != nil {
+			continue
+		}
+
+		// Try to cast it to a Hub, and save it if we need
+		hubObj, ok := obj.(conversion.Hub)
+		if !ok {
+			continue
+		}
+		hub = hubObj
+		targetGVK = gvk
+	}
+
+	// Convert from the in object to the hub and return it
+	if err := in.ConvertTo(hub); err != nil {
+		return nil, err
+	}
+	hub.GetObjectKind().SetGroupVersionKind(targetGVK)
+	return hub, nil
 }
 
 func (c *convertor) ConvertFieldLabel(gvk schema.GroupVersionKind, label, value string) (string, string, error) {
