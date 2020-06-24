@@ -6,12 +6,13 @@ import (
 	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
 type EncodingOptions struct {
 	// Use pretty printing when writing to the output. (Default: true)
 	Pretty *bool
+
+	// TODO: Maybe consider an option to always convert to the preferred version (not just internal)
 }
 
 type EncodingOptionsFunc func(*EncodingOptions)
@@ -45,27 +46,20 @@ func newEncodeOpts(fns ...EncodingOptionsFunc) *EncodingOptions {
 type encoder struct {
 	*schemeAndCodec
 
-	encoders map[ContentType]runtime.Serializer
-	opts     EncodingOptions
+	opts EncodingOptions
 }
 
 func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodingOptions) Encoder {
 	return &encoder{
 		schemeAndCodec,
-		map[ContentType]runtime.Serializer{
-			ContentTypeYAML: json.NewSerializerWithOptions(
-				json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme,
-				json.SerializerOptions{Yaml: true, Pretty: *opts.Pretty, Strict: false},
-			),
-			ContentTypeJSON: json.NewSerializerWithOptions(
-				json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme,
-				json.SerializerOptions{Yaml: false, Pretty: *opts.Pretty, Strict: false},
-			),
-		},
 		opts,
 	}
 }
 
+// Encode encodes the given objects and writes them to the specified FrameWriter.
+// The FrameWriter specifies the ContentType. This encoder will automatically convert any
+// internal object given to the preferred external groupversion. No conversion will happen
+// if the given object is of an external version.
 func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	for _, obj := range objs {
 		// Get the kind for the given object
@@ -92,14 +86,22 @@ func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	return nil
 }
 
+// EncodeForGroupVersion encodes the given object for the specific groupversion. If the object
+// is not of that version currently it will try to convert. The output bytes are written to the
+// FrameWriter. The FrameWriter specifies the ContentType.
 func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv schema.GroupVersion) error {
-	// Get the generic encoder for the right content type
-	enc, ok := e.encoders[fw.ContentType()]
+	// Get the serializer for the media type
+	serializerInfo, ok := runtime.SerializerInfoForMediaType(e.codecs.SupportedMediaTypes(), string(fw.ContentType()))
 	if !ok {
 		return ErrUnsupportedContentType
 	}
-	fmt.Printf("Foo %s %s\n", enc.Identifier(), gv)
+
+	// Choose the pretty or non-pretty one
+	encoder := serializerInfo.Serializer
+	if *e.opts.Pretty {
+		encoder = serializerInfo.PrettySerializer
+	}
 
 	// Specialize the encoder for a specific gv and encode the object
-	return e.codecs.EncoderForVersion(enc, gv).Encode(obj, fw)
+	return e.codecs.EncoderForVersion(encoder, gv).Encode(obj, fw)
 }

@@ -169,7 +169,7 @@ func (s *serializer) DefaultInternal(cfg runtime.Object) error {
 	if err != nil {
 		return err
 	}
-	external, err := s.scheme.New(*gvk)
+	external, err := s.scheme.New(gvk)
 	if err != nil {
 		return nil
 	}
@@ -182,22 +182,22 @@ func (s *serializer) DefaultInternal(cfg runtime.Object) error {
 
 // externalGVKForObject returns the preferred external groupversion for an internal object
 // If the object is not internal, ErrObjectNotInternal is returned
-func externalGVKForObject(scheme *runtime.Scheme, cfg runtime.Object) (*schema.GroupVersionKind, error) {
+func externalGVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
 	// Get the GVK
-	gvk, err := gvkForObject(scheme, cfg)
+	gvk, err := gvkForObject(scheme, obj)
 	if err != nil {
-		return nil, err
+		return schema.GroupVersionKind{}, err
 	}
 
 	// Require the object to be internal
 	if gvk.Version != runtime.APIVersionInternal {
-		return nil, ErrObjectNotInternal
+		return schema.GroupVersionKind{}, ErrObjectNotInternal
 	}
 
 	// Get the prioritized versions for the given group
 	gvs := scheme.PrioritizedVersionsForGroup(gvk.Group)
 	if len(gvs) < 1 {
-		return nil, fmt.Errorf("expected some version to be registered for group %s", gvk.Group)
+		return schema.GroupVersionKind{}, fmt.Errorf("expected some version to be registered for group %s", gvk.Group)
 	}
 
 	// Use the preferred (external) version
@@ -205,10 +205,10 @@ func externalGVKForObject(scheme *runtime.Scheme, cfg runtime.Object) (*schema.G
 	return gvk, nil
 }
 
-func gvkForObject(scheme *runtime.Scheme, cfg runtime.Object) (*schema.GroupVersionKind, error) {
-	gvks, unversioned, err := scheme.ObjectKinds(cfg)
+func gvkForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
+	gvks, unversioned, err := scheme.ObjectKinds(obj)
 	if unversioned || err != nil || len(gvks) != 1 {
-		return nil, fmt.Errorf("unversioned %t or err %v or invalid gvks %v", unversioned, err, gvks)
+		return schema.GroupVersionKind{}, fmt.Errorf("unversioned %t or err %v or invalid gvks %v", unversioned, err, gvks)
 	}
-	return &gvks[0], nil
+	return gvks[0], nil
 }
