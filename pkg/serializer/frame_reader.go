@@ -30,6 +30,7 @@ type ReadCloser io.ReadCloser
 // When io.EOF is reached, the stream is closed automatically.
 type FrameReader interface {
 	ContentTyped
+	io.Closer
 
 	// ReadFrame reads frames from the underlying ReadCloser and returns them for consumption.
 	// When io.EOF is reached, the stream is closed automatically.
@@ -144,6 +145,11 @@ func (rf *frameReader) ReadFrame() (frame []byte, err error) {
 // ContentType returns the content type for the given FrameReader
 func (rf *frameReader) ContentType() ContentType {
 	return rf.contentType
+}
+
+// Close implements io.Closer and closes the underlying ReadCloser
+func (rf *frameReader) Close() error {
+	return rf.rc.Close()
 }
 
 // FromFile returns a ReadCloser from the given file, or a ReadCloser which returns

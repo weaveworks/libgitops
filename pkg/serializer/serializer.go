@@ -161,7 +161,7 @@ func (s *serializer) Encoder(optFns ...EncodingOptionsFunc) Encoder {
 	return newEncoder(s.schemeAndCodec, *opts)
 }
 
-var ErrObjectNotInternal = errors.New("given object is of an internal version")
+var ErrObjectNotInternal = errors.New("given object is not an internal version")
 
 // DefaultInternal populates the given internal object with the preferred external version's defaults
 func (s *serializer) DefaultInternal(cfg runtime.Object) error {

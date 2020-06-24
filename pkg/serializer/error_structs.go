@@ -30,6 +30,11 @@ func (fr *errFrameReader) ContentType() ContentType {
 	return fr.contentType
 }
 
+// Close implements io.Closer and closes the underlying ReadCloser
+func (fr *errFrameReader) Close() error {
+	return nil
+}
+
 var _ FrameWriter = &errFrameWriter{}
 
 type errFrameWriter struct {
