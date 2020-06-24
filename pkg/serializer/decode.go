@@ -1,9 +1,6 @@
 package serializer
 
 import (
-	"bufio"
-	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -15,13 +12,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
 	yamlmeta "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
-	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 type DecodingOptions struct {
 	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
 	// will be converted into its internal representation. Otherwise, the decoded
 	// object will be left in its external representation. (Default: false)
+	// TODO: This should be called sth like ConvertToHub!
 	Internal *bool
 	// Parse the YAML/JSON in strict mode, returning a specific error if the input
 	// contains duplicate or unknown fields or formatting errors. (Default: true)
@@ -60,6 +57,12 @@ func WithListElementsDecoding(listElements bool) DecodingOptionsFunc {
 	}
 }
 
+func WithDecodingOptions(newOpts DecodingOptions) DecodingOptionsFunc {
+	return func(opts *DecodingOptions) {
+		*opts = newOpts
+	}
+}
+
 func defaultDecodeOpts() *DecodingOptions {
 	return &DecodingOptions{
 		Internal:           util.BoolPtr(false),
@@ -77,35 +80,30 @@ func newDecodeOpts(fns ...DecodingOptionsFunc) *DecodingOptions {
 	return opts
 }
 
-var DecoderClosedError = errors.New("decoder has already been closed")
-
 type streamDecoder struct {
 	*schemeAndCodec
 
-	rc         io.ReadCloser // Underlying reader of YAMLReader
-	yamlReader *yaml.YAMLReader
-	decoder    runtime.Decoder
-	opts       DecodingOptions
-	closed     bool // signal whether Close() has been called or not
-
-	// TODO: Add mutexes for thread-safety
+	decoder runtime.Decoder
+	opts    DecodingOptions
 }
 
-// Decode returns the decoded object from the next document in the stream.
+// Decode returns the decoded object from the next document in the FrameReader stream.
 // If there are multiple documents in the underlying stream, this call will read one
 // 	document and return it. Decode might be invoked for getting new documents until it
 // 	returns io.EOF. When io.EOF is reached in a call, the stream is automatically closed.
+// If the decoded object is for an unrecognized group, or version, UnrecognizedGroupError
+// 	or UnrecognizedVersionError might be returned.
 // If opts.Default is true, the decoded object will be defaulted.
-// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error (TODO)
-// 	if the input contains duplicate or unknown fields or formatting errors
+// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
+// 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
+// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 // If opts.Internal is true, the decoded external object will be converted into its internal representation.
 // 	Otherwise, the decoded object will be left in the external representation.
-// opts.DecodeListElements is not applicable in this call. If the underlying data contains a v1.List,
-// 	decoding will be successfully performed and a v1.List is returned.
-// TODO: Mention UnrecognizedGroupError and UnrecognizedVersionError
-func (d *streamDecoder) Decode() (runtime.Object, error) {
-	// Read a YAML document, and return errors (including io.EOF and DecoderClosedError) if found
-	doc, err := d.readDoc()
+// opts.DecodeListElements is not applicable in this call.
+func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
+	// Read a frame from the FrameReader
+	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
+	doc, err := fr.ReadFrame()
 	if err != nil {
 		return nil, err
 	}
@@ -157,19 +155,24 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 	return origErr
 }
 
-// DecodeInto decodes the next document in the stream into obj if the types are matching.
+// DecodeInto decodes the next document in the FrameReader stream into obj if the types are matching.
 // If there are multiple documents in the underlying stream, this call will read one
 // 	document and return it. Decode might be invoked for getting new documents until it
 // 	returns io.EOF. When io.EOF is reached in a call, the stream is automatically closed.
+// The decoded object will automatically be converted into the target one (i.e. one can supply an
+// 	internal object to this function).
+// If the decoded object is for an unrecognized group, or version, UnrecognizedGroupError
+// 	or UnrecognizedVersionError might be returned.
 // If opts.Default is true, the decoded object will be defaulted.
-// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error (TODO)
-// 	if the input contains duplicate or unknown fields or formatting errors
-// opts.DecodeListElements is not applicable in this call. If a v1.List is given as obj, and the
-// 	underlying data contains a v1.List, decoding will be successfully performed.
+// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
+// 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
+// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
+// opts.DecodeListElements is not applicable in this call.
 // opts.Internal is not applicable in this call.
-func (d *streamDecoder) DecodeInto(into runtime.Object) error {
-	// Read a YAML document, and return errors (including io.EOF and DecoderClosedError) if found
-	doc, err := d.readDoc()
+func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
+	// Read a frame from the FrameReader.
+	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
+	doc, err := fr.ReadFrame()
 	if err != nil {
 		return err
 	}
@@ -187,20 +190,23 @@ func (d *streamDecoder) DecodeInto(into runtime.Object) error {
 	return nil
 }
 
-// DecodeAll returns the decoded objects from all documents in the stream. The underlying
+// DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying
 // stream is automatically closed on io.EOF. io.EOF is never returned from this function.
+// If any decoded object is for an unrecognized group, or version, UnrecognizedGroupError
+// 	or UnrecognizedVersionError might be returned.
 // If opts.Default is true, the decoded objects will be defaulted.
-// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error (TODO)
-// 	if the input contains duplicate or unknown fields or formatting errors
+// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
+// 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
+// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 // If opts.Internal is true, the decoded external object will be converted into their internal representation.
 // 	Otherwise, the decoded objects will be left in their external representation.
 // If opts.DecodeListElements is true and the underlying data contains a v1.List,
 // 	the items of the list will be traversed and decoded into their respective types, which are
 // 	added into the returning slice. The v1.List will in this case not be returned.
-func (d *streamDecoder) DecodeAll() ([]runtime.Object, error) {
+func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 	objs := []runtime.Object{}
 	for {
-		obj, err := d.Decode()
+		obj, err := d.Decode(fr)
 		if err == io.EOF {
 			// If we encountered io.EOF, we know that all is fine and we can exit the for loop and return
 			break
@@ -210,6 +216,7 @@ func (d *streamDecoder) DecodeAll() ([]runtime.Object, error) {
 
 		// If we asked to decode list elements, and it is a list, go ahead and loop through
 		// Otherwise, just add the object to the slice and continue
+		// TODO: This requires scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
 		if list, ok := obj.(*metav1.List); *d.opts.DecodeListElements && ok {
 			for _, item := range list.Items {
 				// Decode each part of the list
@@ -223,49 +230,11 @@ func (d *streamDecoder) DecodeAll() ([]runtime.Object, error) {
 			// A normal, non-list object
 			objs = append(objs, obj)
 		}
-
 	}
 	return objs, nil
 }
 
-// readDoc tries to read the next document from the framer
-// If the decoder is already closed, it returns DecodedClosedError
-// If it encounters an io.EOF, it runs d.Close() and returns io.EOF
-func (d *streamDecoder) readDoc() ([]byte, error) {
-	// If the decoder is already closed, return DecodedClosedError
-	if d.closed {
-		return nil, DecoderClosedError
-	}
-
-	for {
-		// TODO: Maybe use a generic Framer for both reading & writing?
-		doc, err := d.yamlReader.Read()
-		if err == io.EOF {
-			_ = d.Close()
-			return nil, io.EOF
-		} else if err != nil {
-			return nil, err
-		}
-
-		//  Skip over empty documents, i.e. a leading `---`
-		if len(bytes.TrimSpace(doc)) == 0 {
-			continue
-		}
-
-		// Return the YAML document
-		return doc, nil
-	}
-}
-
-func (d *streamDecoder) Close() error {
-	d.closed = true
-	return d.rc.Close()
-}
-
-func newDecoder(schemeAndCodec *schemeAndCodec, rc io.ReadCloser, opts DecodingOptions) Decoder {
-	// The YAML reader supports reading multiple YAML documents
-	yamlReader := yaml.NewYAMLReader(bufio.NewReader(rc))
-
+func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
 	// Allow both YAML and JSON inputs (JSON is a subset of YAML), and deserialize in strict mode
 	s := json.NewSerializerWithOptions(json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme, json.SerializerOptions{
 		Yaml:   true,
@@ -281,10 +250,11 @@ func newDecoder(schemeAndCodec *schemeAndCodec, rc io.ReadCloser, opts DecodingO
 
 	decoder := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, groupVersioner, *opts.Default)
 
-	return &streamDecoder{schemeAndCodec, rc, yamlReader, decoder, opts, false}
+	return &streamDecoder{schemeAndCodec, decoder, opts}
 }
 
 // newConversionCodecForScheme is a convenience method for callers that are using a scheme.
+// This is very similar to apimachinery/pkg/serializer/versioning.NewDefaultingCodecForScheme
 func newConversionCodecForScheme(
 	scheme *runtime.Scheme,
 	encoder runtime.Encoder,
@@ -306,6 +276,8 @@ type schemeGroupVersioner struct {
 
 // KindForGroupVersionKinds returns an internal Kind if one is found, or converts the first provided kind to the internal version.
 func (sgv *schemeGroupVersioner) KindForGroupVersionKinds(kinds []schema.GroupVersionKind) (schema.GroupVersionKind, bool) {
+	// TODO: Fix the case when there are two external versions with no direct conversion between each other
+	// and one decodes the old version.
 	for _, gvk := range kinds {
 		for _, gv := range sgv.scheme.PrioritizedVersionsForGroup(gvk.Group) {
 			return gv.WithKind(gvk.Kind), true

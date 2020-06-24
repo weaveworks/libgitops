@@ -1,23 +1,16 @@
 package serializer
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-
 	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
 type EncodingOptions struct {
 	// Use pretty printing when writing to the output. (Default: true)
 	Pretty *bool
 
-	// Where to write all encoder output during the encoder's lifetime.
-	// TODO: Implement this
-	Writer io.Writer
+	// TODO: Maybe consider an option to always convert to the preferred version (not just internal)
 }
 
 type EncodingOptionsFunc func(*EncodingOptions)
@@ -28,16 +21,15 @@ func WithPrettyEncode(pretty bool) EncodingOptionsFunc {
 	}
 }
 
-func WithEncodeWriter(w io.Writer) EncodingOptionsFunc {
+func WithEncodingOptions(newOpts EncodingOptions) EncodingOptionsFunc {
 	return func(opts *EncodingOptions) {
-		opts.Writer = w
+		*opts = newOpts
 	}
 }
 
 func defaultEncodeOpts() *EncodingOptions {
 	return &EncodingOptions{
 		Pretty: util.BoolPtr(true),
-		Writer: nil,
 	}
 }
 
@@ -52,84 +44,60 @@ func newEncodeOpts(fns ...EncodingOptionsFunc) *EncodingOptions {
 type encoder struct {
 	*schemeAndCodec
 
-	serializer  runtime.Serializer
-	framer      runtime.Framer
-	contentType ContentType
-	opts        EncodingOptions
+	opts EncodingOptions
 }
 
-func newEncoder(schemeAndCodec *schemeAndCodec, contentType ContentType, opts EncodingOptions) Encoder {
-	var s runtime.Serializer
-	var framer runtime.Framer
-	switch contentType {
-	case ContentTypeYAML:
-		s = json.NewSerializerWithOptions(
-			json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme,
-			json.SerializerOptions{Yaml: true, Pretty: *opts.Pretty, Strict: false},
-		)
-		framer = json.YAMLFramer
-	case ContentTypeJSON:
-		s = json.NewSerializerWithOptions(
-			json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme,
-			json.SerializerOptions{Yaml: false, Pretty: *opts.Pretty, Strict: false},
-		)
-		framer = json.Framer
-	default:
-		return &errEncoder{fmt.Errorf("unable to locate encoder -- %q is not a supported media type", contentType)}
+func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodingOptions) Encoder {
+	return &encoder{
+		schemeAndCodec,
+		opts,
 	}
-
-	return &encoder{schemeAndCodec, s, framer, contentType, opts}
 }
 
-func (e *encoder) Encode(objs ...runtime.Object) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	fw := e.framer.NewFrameWriter(buf)
+// Encode encodes the given objects and writes them to the specified FrameWriter.
+// The FrameWriter specifies the ContentType. This encoder will automatically convert any
+// internal object given to the preferred external groupversion. No conversion will happen
+// if the given object is of an external version.
+func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	for _, obj := range objs {
-		gvk, err := e.externalGVKForObject(obj)
+		// Get the kind for the given object
+		gvk, err := gvkForObject(e.scheme, obj)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		encoder := e.codecs.EncoderForVersion(e.serializer, gvk.GroupVersion())
-		if err := encoder.Encode(obj, fw); err != nil {
-			return nil, err
+		// If the object is internal, convert it to the preferred external one
+		if gvk.Version == runtime.APIVersionInternal {
+			gvk, err = externalGVKForObject(e.scheme, obj)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Encode it
+		if err := e.EncodeForGroupVersion(fw, obj, gvk.GroupVersion()); err != nil {
+			return err
 		}
 	}
-	return bytes.TrimPrefix(buf.Bytes(), []byte("---\n")), nil
+	return nil
 }
 
-// TODO: De-duplicate with serializer
-func (e *encoder) externalGVKForObject(cfg runtime.Object) (*schema.GroupVersionKind, error) {
-	gvks, unversioned, err := e.scheme.ObjectKinds(cfg)
-	if unversioned || err != nil || len(gvks) != 1 {
-		return nil, fmt.Errorf("unversioned %t or err %v or invalid gvks %v", unversioned, err, gvks)
+// EncodeForGroupVersion encodes the given object for the specific groupversion. If the object
+// is not of that version currently it will try to convert. The output bytes are written to the
+// FrameWriter. The FrameWriter specifies the ContentType.
+func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv schema.GroupVersion) error {
+	// Get the serializer for the media type
+	serializerInfo, ok := runtime.SerializerInfoForMediaType(e.codecs.SupportedMediaTypes(), string(fw.ContentType()))
+	if !ok {
+		return ErrUnsupportedContentType
 	}
 
-	gvk := gvks[0]
-	gvs := e.scheme.PrioritizedVersionsForGroup(gvk.Group)
-	if len(gvs) < 1 {
-		return nil, fmt.Errorf("expected some version to be registered for group %s", gvk.Group)
+	// Choose the pretty or non-pretty one
+	encoder := serializerInfo.Serializer
+	if *e.opts.Pretty {
+		encoder = serializerInfo.PrettySerializer
 	}
 
-	// Use the preferred (external) version
-	gvk.Version = gvs[0].Version
-	return &gvk, nil
-}
-
-type errEncoder struct {
-	err error
-}
-
-// ...
-// The errEncoder always returns nil and the stored error
-func (e *errEncoder) Encode(obj ...runtime.Object) ([]byte, error) {
-	return nil, e.err
-}
-
-// WithOptions sets the options for the decoder with the specified options, and returns itself
-// This call modifies the internal state. The options are not defaulted, but used as-is
-// TODO
-// The errEncoder always returns nil and the stored error
-func (e *errEncoder) WithOptions(_ EncodingOptions) Encoder {
-	return e
+	// Specialize the encoder for a specific gv and encode the object
+	return e.codecs.EncoderForVersion(encoder, gv).Encode(obj, fw)
 }
