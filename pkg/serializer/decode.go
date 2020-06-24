@@ -16,10 +16,9 @@ import (
 
 type DecodingOptions struct {
 	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
-	// will be converted into its internal representation. Otherwise, the decoded
+	// will be converted into its ConvertToHub representation. Otherwise, the decoded
 	// object will be left in its external representation. (Default: false)
-	// TODO: This should be called sth like ConvertToHub!
-	Internal *bool
+	ConvertToHub *bool
 	// Parse the YAML/JSON in strict mode, returning a specific error if the input
 	// contains duplicate or unknown fields or formatting errors. (Default: true)
 	Strict *bool
@@ -33,9 +32,9 @@ type DecodingOptions struct {
 
 type DecodingOptionsFunc func(*DecodingOptions)
 
-func WithInternalDecode(internal bool) DecodingOptionsFunc {
+func WithConvertToHubDecode(ConvertToHub bool) DecodingOptionsFunc {
 	return func(opts *DecodingOptions) {
-		opts.Internal = &internal
+		opts.ConvertToHub = &ConvertToHub
 	}
 }
 
@@ -65,7 +64,7 @@ func WithDecodingOptions(newOpts DecodingOptions) DecodingOptionsFunc {
 
 func defaultDecodeOpts() *DecodingOptions {
 	return &DecodingOptions{
-		Internal:           util.BoolPtr(false),
+		ConvertToHub:       util.BoolPtr(false),
 		Strict:             util.BoolPtr(true),
 		Default:            util.BoolPtr(false),
 		DecodeListElements: util.BoolPtr(true),
@@ -97,7 +96,7 @@ type streamDecoder struct {
 // If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
 // 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
-// If opts.Internal is true, the decoded external object will be converted into its internal representation.
+// If opts.ConvertToHub is true, the decoded external object will be converted into its ConvertToHub representation.
 // 	Otherwise, the decoded object will be left in the external representation.
 // opts.DecodeListElements is not applicable in this call.
 func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
@@ -129,7 +128,7 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 	// Parse the document's TypeMeta information
 	gvk, err := yamlmeta.DefaultMetaFactory.Interpret(doc)
 	if err != nil {
-		return err // TODO: Wrap
+		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. The original error was: %v", err, origErr)
 	}
 
 	// Check if the group was known. If not, return that specific error
@@ -160,7 +159,7 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 // 	document and return it. Decode might be invoked for getting new documents until it
 // 	returns io.EOF. When io.EOF is reached in a call, the stream is automatically closed.
 // The decoded object will automatically be converted into the target one (i.e. one can supply an
-// 	internal object to this function).
+// 	ConvertToHub object to this function).
 // If the decoded object is for an unrecognized group, or version, UnrecognizedGroupError
 // 	or UnrecognizedVersionError might be returned.
 // If opts.Default is true, the decoded object will be defaulted.
@@ -168,7 +167,7 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 // 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 // opts.DecodeListElements is not applicable in this call.
-// opts.Internal is not applicable in this call.
+// opts.ConvertToHub is not applicable in this call.
 func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 	// Read a frame from the FrameReader.
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
@@ -198,7 +197,7 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 // If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
 // 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
-// If opts.Internal is true, the decoded external object will be converted into their internal representation.
+// If opts.ConvertToHub is true, the decoded external object will be converted into their ConvertToHub representation.
 // 	Otherwise, the decoded objects will be left in their external representation.
 // If opts.DecodeListElements is true and the underlying data contains a v1.List,
 // 	the items of the list will be traversed and decoded into their respective types, which are
@@ -241,14 +240,7 @@ func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
 		Strict: *opts.Strict,
 	})
 
-	// Default to preferring the scheme's preferred external version for Decode calls (not DecodeInto)
-	var groupVersioner runtime.GroupVersioner = &schemeGroupVersioner{schemeAndCodec.scheme}
-	if *opts.Internal {
-		// If we asked to always always decode and convert into internal, do it
-		groupVersioner = runtime.InternalGroupVersioner
-	}
-
-	decoder := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, groupVersioner, *opts.Default)
+	decoder := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
 
 	return &streamDecoder{schemeAndCodec, decoder, opts}
 }
@@ -262,32 +254,52 @@ func newConversionCodecForScheme(
 	encodeVersion runtime.GroupVersioner,
 	decodeVersion runtime.GroupVersioner,
 	performDefaulting bool,
+	performConversion bool,
 ) runtime.Codec {
 	var defaulter runtime.ObjectDefaulter
 	if performDefaulting {
 		defaulter = scheme
 	}
-	return versioning.NewCodec(encoder, decoder, runtime.UnsafeObjectConvertor(scheme), scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
+	convertor := &convertor{scheme, performConversion}
+	return versioning.NewCodec(encoder, decoder, convertor, scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
 }
 
-type schemeGroupVersioner struct {
-	scheme *runtime.Scheme
+// convertor implements runtime.ObjectConvertor. See k8s.io/apimachinery/pkg/runtime/serializer/versioning.go for
+// how this convertor is used (e.g. in codec.Decode())
+type convertor struct {
+	scheme  *runtime.Scheme
+	convert bool
 }
 
-// KindForGroupVersionKinds returns an internal Kind if one is found, or converts the first provided kind to the internal version.
-func (sgv *schemeGroupVersioner) KindForGroupVersionKinds(kinds []schema.GroupVersionKind) (schema.GroupVersionKind, bool) {
-	// TODO: Fix the case when there are two external versions with no direct conversion between each other
-	// and one decodes the old version.
-	for _, gvk := range kinds {
-		for _, gv := range sgv.scheme.PrioritizedVersionsForGroup(gvk.Group) {
-			return gv.WithKind(gvk.Kind), true
-		}
+// Convert attempts to convert one object into another, or returns an error. This
+// method does not mutate the in object, but the in and out object might share data structures,
+// i.e. the out object cannot be mutated without mutating the in object as well.
+// The context argument will be passed to all nested conversions.
+func (c *convertor) Convert(in, out, context interface{}) error {
+	// This function is called at DecodeInto-time, and should convert the decoded object into
+	// the into object.
+	return c.scheme.Convert(in, out, context)
+}
+
+// ConvertToVersion takes the provided object and converts it the provided version. This
+// method does not mutate the in object, but the in and out object might share data structures,
+// i.e. the out object cannot be mutated without mutating the in object as well.
+// This method is similar to Convert() but handles specific details of choosing the correct
+// output version.
+func (c *convertor) ConvertToVersion(in runtime.Object, gv runtime.GroupVersioner) (runtime.Object, error) {
+	// This function is called at Decode(All)-time. If we requested a conversion to internal, just proceed
+	// as before, using the scheme's ConvertToVersion function. But if we don't want to convert the newly-decoded
+	// external object, we can just do nothing and the object will stay unconverted.
+	if !c.convert {
+		// DeepCopy the object to make sure that although in would be somehow modified, it doesn't affect out
+		return in.DeepCopyObject(), nil
 	}
 
-	return schema.GroupVersionKind{}, false
+	// Just proceed as normal, and convert into the internal version using the internal groupversioner.
+	return c.scheme.ConvertToVersion(in, gv)
 }
 
-// Identifier implements GroupVersioner interface.
-func (schemeGroupVersioner) Identifier() string {
-	return "scheme"
+func (c *convertor) ConvertFieldLabel(gvk schema.GroupVersionKind, label, value string) (string, string, error) {
+	// just forward this call, not applicable to this implementation
+	return c.scheme.ConvertFieldLabel(gvk, label, value)
 }

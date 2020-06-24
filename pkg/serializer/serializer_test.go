@@ -211,6 +211,43 @@ func TestEncode(t *testing.T) {
 	}
 }
 
+func TestDecode(t *testing.T) {
+	// Also test Defaulting & Conversion
+	tests := []struct {
+		name         string
+		data         []byte
+		doDefaulting bool
+		doConversion bool
+		expected     runtime.Object
+		expectedErr  bool
+	}{
+		{"simple internal", oneSimple, false, true, &runtimetest.InternalSimple{TestString: "foo"}, false},
+		{"complex internal", oneComplex, false, true, &runtimetest.InternalComplex{String: "bar"}, false},
+		{"simple external", oneSimple, false, false, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
+		{"complex external", oneComplex, false, false, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar"}, false},
+		{"defaulted complex external", oneComplex, true, false, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar", Integer64: 5}, false},
+		{"defaulted complex internal", oneComplex, true, true, &runtimetest.InternalComplex{String: "bar", Integer64: 5}, false},
+		{"no unknown fields", simpleUnknownField, false, false, nil, true},
+		{"no duplicate fields", simpleDuplicateField, false, false, nil, true},
+		{"no unrecognized API version", unrecognizedVersion, false, false, nil, true},
+	}
+
+	for _, rt := range tests {
+		t.Run(rt.name, func(t2 *testing.T) {
+			obj, actual := ourserializer.Decoder(
+				WithDefaultsDecode(rt.doDefaulting),
+				WithConvertToHubDecode(rt.doConversion),
+			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
+			if (actual != nil) != rt.expectedErr {
+				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
+			}
+			if rt.expected != nil && !reflect.DeepEqual(obj, rt.expected) {
+				t2.Errorf("expected %#v but actual %#v", rt.expected, obj)
+			}
+		})
+	}
+}
+
 func TestDecodeInto(t *testing.T) {
 	// Also test Defaulting & Conversion
 	tests := []struct {
@@ -234,6 +271,7 @@ func TestDecodeInto(t *testing.T) {
 
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
+
 			actual := ourserializer.Decoder(
 				WithDefaultsDecode(rt.doDefaulting),
 			).DecodeInto(NewYAMLFrameReader(FromBytes(rt.data)), rt.obj)

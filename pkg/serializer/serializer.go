@@ -86,7 +86,7 @@ type Decoder interface {
 	// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
 	// 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 	// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
-	// If opts.Internal is true, the decoded external object will be converted into its internal representation.
+	// If opts.ConvertToHub is true, the decoded external object will be converted into its internal representation.
 	// 	Otherwise, the decoded object will be left in the external representation.
 	// opts.DecodeListElements is not applicable in this call.
 	Decode(fr FrameReader) (runtime.Object, error)
@@ -103,7 +103,7 @@ type Decoder interface {
 	// 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 	// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 	// opts.DecodeListElements is not applicable in this call.
-	// opts.Internal is not applicable in this call.
+	// opts.ConvertToHub is not applicable in this call.
 	DecodeInto(fr FrameReader, obj runtime.Object) error
 
 	// DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying
@@ -114,7 +114,7 @@ type Decoder interface {
 	// If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
 	// 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 	// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
-	// If opts.Internal is true, the decoded external object will be converted into their internal representation.
+	// If opts.ConvertToHub is true, the decoded external object will be converted into their internal representation.
 	// 	Otherwise, the decoded objects will be left in their external representation.
 	// If opts.DecodeListElements is true and the underlying data contains a v1.List,
 	// 	the items of the list will be traversed and decoded into their respective types, which are
