@@ -55,6 +55,8 @@ type frameWriter struct {
 	Writer
 
 	contentType ContentType
+
+	// TODO: Maybe add mutexes for thread-safety (so no two goroutines write at the same time)
 }
 
 // ContentType returns the content type for the given FrameWriter

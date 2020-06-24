@@ -14,11 +14,10 @@ import (
 )
 
 var (
-	scheme        = runtime.NewScheme()
-	codecs        = k8sserializer.NewCodecFactory(scheme)
-	ourserializer = NewSerializer(scheme, &codecs)
-	yamlEncoder   = ourserializer.Encoder(ContentTypeYAML)
-	jsonEncoder   = ourserializer.Encoder(ContentTypeJSON, WithPrettyEncode(false))
+	scheme         = runtime.NewScheme()
+	codecs         = k8sserializer.NewCodecFactory(scheme)
+	ourserializer  = NewSerializer(scheme, &codecs)
+	defaultEncoder = ourserializer.Encoder(WithPrettyEncode(false))
 
 	groupname = "foogroup"
 	intgv     = schema.GroupVersion{Group: groupname, Version: runtime.APIVersionInternal}
@@ -183,23 +182,25 @@ func TestEncode(t *testing.T) {
 	complexObj := &runtimetest.InternalComplex{String: "bar"}
 	tests := []struct {
 		name        string
-		enc         Encoder
+		ct          ContentType
 		objs        []runtime.Object
 		expected    []byte
 		expectedErr bool
 	}{
-		{"simple yaml", yamlEncoder, []runtime.Object{simpleObj}, oneSimple, false},
-		{"complex yaml", yamlEncoder, []runtime.Object{complexObj}, oneComplex, false},
-		{"both simple and complex yaml", yamlEncoder, []runtime.Object{simpleObj, complexObj}, simpleAndComplex, false},
-		{"simple json", jsonEncoder, []runtime.Object{simpleObj}, simpleJSON, false},
-		{"complex json", jsonEncoder, []runtime.Object{complexObj}, complexJSON, false},
-		//{"no-conversion simple", jsonEncoder, &runtimetest.ExternalSimple{TestString: "foo"}, simpleJSON, false},
-		//{"support internal", jsonEncoder, []runtime.Object{simpleObj}, []byte(`{"testString":"foo"}` + "\n"), false},
+		{"simple yaml", ContentTypeYAML, []runtime.Object{simpleObj}, oneSimple, false},
+		{"complex yaml", ContentTypeYAML, []runtime.Object{complexObj}, oneComplex, false},
+		{"both simple and complex yaml", ContentTypeYAML, []runtime.Object{simpleObj, complexObj}, simpleAndComplex, false},
+		{"simple json", ContentTypeJSON, []runtime.Object{simpleObj}, simpleJSON, false},
+		{"complex json", ContentTypeJSON, []runtime.Object{complexObj}, complexJSON, false},
+		//{"no-conversion simple", defaultEncoder, &runtimetest.ExternalSimple{TestString: "foo"}, simpleJSON, false},
+		//{"support internal", defaultEncoder, []runtime.Object{simpleObj}, []byte(`{"testString":"foo"}` + "\n"), false},
 	}
 
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
-			actual, actualErr := rt.enc.Encode(rt.objs...)
+			buf := new(bytes.Buffer)
+			actualErr := defaultEncoder.Encode(NewFrameWriter(rt.ct, buf), rt.objs...)
+			actual := buf.Bytes()
 			if (actualErr != nil) != rt.expectedErr {
 				t2.Errorf("expected error %t but actual %t", rt.expectedErr, actualErr != nil)
 			}
@@ -234,9 +235,8 @@ func TestDecodeInto(t *testing.T) {
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
 			actual := ourserializer.Decoder(
-				FromBytes(rt.data),
 				WithDefaultsDecode(rt.doDefaulting),
-			).DecodeInto(rt.obj)
+			).DecodeInto(NewYAMLFrameReader(FromBytes(rt.data)), rt.obj)
 			if (actual != nil) != rt.expectedErr {
 				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
 			}
@@ -275,10 +275,9 @@ func TestDecodeAll(t *testing.T) {
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
 			objs, actual := ourserializer.Decoder(
-				FromBytes(rt.data),
 				WithDefaultsDecode(rt.doDefaulting),
 				WithListElementsDecoding(rt.listSplit),
-			).DecodeAll()
+			).DecodeAll(NewYAMLFrameReader(FromBytes(rt.data)))
 			if (actual != nil) != rt.expectedErr {
 				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
 			}
@@ -298,22 +297,24 @@ func TestRoundtrip(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
-		enc  Encoder
+		ct   ContentType
 		obj  runtime.Object
 	}{
-		{"simple yaml", oneSimple, yamlEncoder, &runtimetest.InternalSimple{}},
-		{"complex yaml", oneComplex, yamlEncoder, &runtimetest.InternalComplex{}},
-		{"simple json", simpleJSON, jsonEncoder, &runtimetest.InternalSimple{}},
-		{"complex json", complexJSON, jsonEncoder, &runtimetest.InternalComplex{}},
+		{"simple yaml", oneSimple, ContentTypeYAML, &runtimetest.InternalSimple{}},
+		{"complex yaml", oneComplex, ContentTypeYAML, &runtimetest.InternalComplex{}},
+		{"simple json", simpleJSON, ContentTypeJSON, &runtimetest.InternalSimple{}},
+		{"complex json", complexJSON, ContentTypeJSON, &runtimetest.InternalComplex{}},
 	}
 
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
-			err := ourserializer.Decoder(FromBytes(rt.data)).DecodeInto(rt.obj)
+			err := ourserializer.Decoder().DecodeInto(NewYAMLFrameReader(FromBytes(rt.data)), rt.obj)
 			if err != nil {
 				t2.Errorf("unexpected decode error: %v", err)
 			}
-			actual, err := rt.enc.Encode(rt.obj)
+			buf := new(bytes.Buffer)
+			err = defaultEncoder.Encode(NewFrameWriter(rt.ct, buf), rt.obj)
+			actual := buf.Bytes()
 			if err != nil {
 				t2.Errorf("unexpected encode error: %v", err)
 			}

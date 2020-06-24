@@ -82,6 +82,8 @@ type frameReader struct {
 	bufSize      int
 	maxFrameSize int
 	contentType  ContentType
+
+	// TODO: Maybe add mutexes for thread-safety (so no two goroutines read at the same time)
 }
 
 // ReadFrame reads one frame from the underlying io.Reader. ReadFrame
