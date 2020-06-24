@@ -1,8 +1,6 @@
 package serializer
 
 import (
-	"fmt"
-
 	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -69,14 +67,12 @@ func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 		}
 
 		// If the object is internal, convert it to the preferred external one
-		fmt.Printf("GVK before: %s\n", gvk)
 		if gvk.Version == runtime.APIVersionInternal {
 			gvk, err = externalGVKForObject(e.scheme, obj)
 			if err != nil {
 				return err
 			}
 		}
-		fmt.Printf("GVK after: %s\n", gvk)
 
 		// Encode it
 		if err := e.EncodeForGroupVersion(fw, obj, gvk.GroupVersion()); err != nil {
