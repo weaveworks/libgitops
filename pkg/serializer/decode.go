@@ -18,7 +18,7 @@ import (
 
 type DecodingOptions struct {
 	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
-	// will be converted into its ConvertToHub representation. Otherwise, the decoded
+	// will be converted into its hub (or internal, whe applicable) representation. Otherwise, the decoded
 	// object will be left in its external representation. (Default: false)
 	ConvertToHub *bool
 	// Parse the YAML/JSON in strict mode, returning a specific error if the input
@@ -34,9 +34,9 @@ type DecodingOptions struct {
 
 type DecodingOptionsFunc func(*DecodingOptions)
 
-func WithConvertToHubDecode(ConvertToHub bool) DecodingOptionsFunc {
+func WithConvertToHubDecode(convert bool) DecodingOptionsFunc {
 	return func(opts *DecodingOptions) {
-		opts.ConvertToHub = &ConvertToHub
+		opts.ConvertToHub = &convert
 	}
 }
 
@@ -98,7 +98,8 @@ type streamDecoder struct {
 // If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
 // 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
-// If opts.ConvertToHub is true, the decoded external object will be converted into its ConvertToHub representation.
+// If opts.ConvertToHub is true, the decoded external object will be converted into its hub
+// 	(or internal, if applicable) representation.
 // 	Otherwise, the decoded object will be left in the external representation.
 // opts.DecodeListElements is not applicable in this call.
 func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
@@ -199,8 +200,8 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 // If opts.Strict is true, the YAML/JSON will be parsed in strict mode, returning a specific error
 // 	if the input contains duplicate or unknown fields or formatting errors. You can check whether
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
-// If opts.ConvertToHub is true, the decoded external object will be converted into their ConvertToHub representation.
-// 	Otherwise, the decoded objects will be left in their external representation.
+// If opts.ConvertToHub is true, the decoded external object will be converted into its hub
+// 	(or internal, if applicable) representation.
 // If opts.DecodeListElements is true and the underlying data contains a v1.List,
 // 	the items of the list will be traversed and decoded into their respective types, which are
 // 	added into the returning slice. The v1.List will in this case not be returned.
@@ -350,6 +351,7 @@ func (c *convertor) tryConvertToHub(in conversion.Convertible) (runtime.Object, 
 		}
 		hub = hubObj
 		targetGVK = gvk
+		break
 	}
 
 	// Convert from the in object to the hub and return it
