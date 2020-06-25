@@ -2,6 +2,7 @@ package serializer
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	runtimetest "k8s.io/apimachinery/pkg/runtime/testing"
+	crdconversion "sigs.k8s.io/controller-runtime/pkg/conversion"
 )
 
 var (
@@ -25,8 +27,8 @@ var (
 	ext2gv    = schema.GroupVersion{Group: groupname, Version: "v1alpha2"}
 
 	intsb  = runtime.NewSchemeBuilder(addInternalTypes)
-	ext1sb = runtime.NewSchemeBuilder(registerConversions, addExternalTypes(ext1gv), v1_addDefaultingFuncs)
-	ext2sb = runtime.NewSchemeBuilder(registerConversions, addExternalTypes(ext2gv), v2_addDefaultingFuncs)
+	ext1sb = runtime.NewSchemeBuilder(registerConversions, addExternalTypes(ext1gv), v1_addDefaultingFuncs, registerOldCRD)
+	ext2sb = runtime.NewSchemeBuilder(registerConversions, addExternalTypes(ext2gv), v2_addDefaultingFuncs, registerNewCRD)
 )
 
 func v1_addDefaultingFuncs(scheme *runtime.Scheme) error {
@@ -126,9 +128,46 @@ func init() {
 	scheme.SetVersionPriority(ext1gv)
 }
 
+func registerOldCRD(scheme *runtime.Scheme) error {
+	scheme.AddKnownTypeWithName(ext1gv.WithKind("CRD"), &CRDOldVersion{})
+	return nil
+}
+
+var _ crdconversion.Convertible = &CRDOldVersion{}
+
+type CRDOldVersion struct {
+	runtimetest.ExtensionA
+}
+
+func (t *CRDOldVersion) ConvertTo(hub crdconversion.Hub) error {
+	obj := (hub.(runtime.Object)).(*CRDNewVersion)
+	obj.TestString = fmt.Sprintf("Old string %s", t.TestString)
+	return nil
+}
+
+func (t *CRDOldVersion) ConvertFrom(hub crdconversion.Hub) error {
+	obj := (hub.(runtime.Object)).(*CRDNewVersion)
+	obj.TestString = "downgraded"
+	return nil
+}
+
+func registerNewCRD(scheme *runtime.Scheme) error {
+	scheme.AddKnownTypeWithName(ext2gv.WithKind("CRD"), &CRDNewVersion{})
+	return nil
+}
+
+var _ crdconversion.Hub = &CRDNewVersion{}
+
+type CRDNewVersion struct {
+	runtimetest.ExtensionB
+}
+
+func (t *CRDNewVersion) Hub() {}
+
 var (
 	simpleMeta  = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Simple"}
 	complexMeta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Complex"}
+	newCRDMeta  = runtime.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "CRD"}
 
 	oneSimple = []byte(`apiVersion: foogroup/v1alpha1
 kind: Simple
@@ -175,6 +214,11 @@ items:
 `)
 	complexJSON = []byte(`{"apiVersion":"foogroup/v1alpha1","kind":"Complex","string":"bar","int":0,"Int64":0,"bool":false}
 `)
+
+	oldCRD = []byte(`apiVersion: foogroup/v1alpha1
+kind: CRD
+testString: foobar
+`)
 )
 
 func TestEncode(t *testing.T) {
@@ -211,6 +255,44 @@ func TestEncode(t *testing.T) {
 	}
 }
 
+func TestDecode(t *testing.T) {
+	// Also test Defaulting & Conversion
+	tests := []struct {
+		name         string
+		data         []byte
+		doDefaulting bool
+		doConversion bool
+		expected     runtime.Object
+		expectedErr  bool
+	}{
+		{"CRD conversion", oldCRD, false, true, &CRDNewVersion{runtimetest.ExtensionB{TypeMeta: newCRDMeta, TestString: "Old string foobar"}}, false},
+		{"simple internal", oneSimple, false, true, &runtimetest.InternalSimple{TestString: "foo"}, false},
+		{"complex internal", oneComplex, false, true, &runtimetest.InternalComplex{String: "bar"}, false},
+		{"simple external", oneSimple, false, false, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
+		{"complex external", oneComplex, false, false, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar"}, false},
+		{"defaulted complex external", oneComplex, true, false, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar", Integer64: 5}, false},
+		{"defaulted complex internal", oneComplex, true, true, &runtimetest.InternalComplex{String: "bar", Integer64: 5}, false},
+		{"no unknown fields", simpleUnknownField, false, false, nil, true},
+		{"no duplicate fields", simpleDuplicateField, false, false, nil, true},
+		{"no unrecognized API version", unrecognizedVersion, false, false, nil, true},
+	}
+
+	for _, rt := range tests {
+		t.Run(rt.name, func(t2 *testing.T) {
+			obj, actual := ourserializer.Decoder(
+				WithDefaultsDecode(rt.doDefaulting),
+				WithConvertToHubDecode(rt.doConversion),
+			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
+			if (actual != nil) != rt.expectedErr {
+				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
+			}
+			if rt.expected != nil && !reflect.DeepEqual(obj, rt.expected) {
+				t2.Errorf("expected %#v but actual %#v", rt.expected, obj)
+			}
+		})
+	}
+}
+
 func TestDecodeInto(t *testing.T) {
 	// Also test Defaulting & Conversion
 	tests := []struct {
@@ -234,6 +316,7 @@ func TestDecodeInto(t *testing.T) {
 
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
+
 			actual := ourserializer.Decoder(
 				WithDefaultsDecode(rt.doDefaulting),
 			).DecodeInto(NewYAMLFrameReader(FromBytes(rt.data)), rt.obj)
