@@ -18,7 +18,7 @@ import (
 
 type DecodingOptions struct {
 	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
-	// will be converted into its hub (or internal, whe applicable) representation. Otherwise, the decoded
+	// will be converted into its hub (or internal, where applicable) representation. Otherwise, the decoded
 	// object will be left in its external representation. (Default: false)
 	ConvertToHub *bool
 	// Parse the YAML/JSON in strict mode, returning a specific error if the input
