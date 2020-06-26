@@ -1,7 +1,6 @@
 package serializer
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"reflect"
@@ -15,10 +14,6 @@ import (
 	yamlmeta "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 	webhookconversion "sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
-)
-
-const (
-	preserveCommentsAnnotation = "serializer.libgitops.weave.works/original-data"
 )
 
 type DecodingOptions struct {
@@ -75,6 +70,7 @@ func WithCommentsDecode(comments bool) DecodingOptionsFunc {
 
 func WithDecodingOptions(newOpts DecodingOptions) DecodingOptionsFunc {
 	return func(opts *DecodingOptions) {
+		// TODO: Null-check all of these before using them
 		*opts = newOpts
 	}
 }
@@ -173,23 +169,6 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 
 	// If nothing else, just return the underlying error
 	return origErr
-}
-
-func (d *streamDecoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct ContentType) {
-	if *d.opts.PreserveComments && ct == ContentTypeYAML {
-		metaobj, ok := obj.(metav1.Object)
-		if ok { // silently ignore the non-happy case
-			// TODO: This will error if metav1.ObjectMeta is embedded int the object
-			// as a pointer (i.e. *metav1.ObjectMeta) and nil
-			a := metaobj.GetAnnotations()
-			if a == nil {
-				a = map[string]string{}
-			}
-			a[preserveCommentsAnnotation] = base64.StdEncoding.EncodeToString(doc)
-
-			metaobj.SetAnnotations(a)
-		}
-	}
 }
 
 // DecodeInto decodes the next document in the FrameReader stream into obj if the types are matching.

@@ -451,6 +451,9 @@ func TestRoundtrip(t *testing.T) {
 		{"simple json", simpleJSON, ContentTypeJSON, &runtimetest.InternalSimple{}},
 		{"complex json", complexJSON, ContentTypeJSON, &runtimetest.InternalComplex{}},
 		{"crd with objectmeta & comments", oldCRD, ContentTypeYAML, &CRDOldVersion{}},
+		// TODO: Maybe an unit test (case) for a type with ObjectMeta embedded as a pointer being nil
+		// TODO: Make sure that the Encode call (with comments support) doesn't mutate the object state
+		// i.e. doesn't remove the annotation after use so multiple similar encode calls work.
 	}
 
 	for _, rt := range tests {
