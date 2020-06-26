@@ -28,9 +28,11 @@ type DecodingOptions struct {
 	Default *bool
 	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
 	// the items of the list will be traversed, decoded into their respective types, and
-	// appended to the returned slice. The v1.List will in this case not be returned. (Default: true)
-	DecodeListElements *bool // TODO: How to make this able to preserve comments?
-	// Whether to preserve YAML comments internally. Only applicable to ContentTypeYAML framers.
+	// appended to the returned slice. The v1.List will in this case not be returned.
+	// This conversion does NOT support preserving comments. (Default: true)
+	DecodeListElements *bool
+	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
+	// Only applicable to ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in EncodingOptions, too. (Default: false)
 	PreserveComments *bool

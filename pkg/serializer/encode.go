@@ -10,9 +10,10 @@ type EncodingOptions struct {
 	// Use pretty printing when writing to the output. (Default: true)
 	// TODO: Fix that sometimes omitempty fields aren't respected
 	Pretty *bool
-	// Whether to preserve YAML comments internally. Only applicable to ContentTypeYAML framers.
+	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
+	// Only applicable to ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
-	// the PreserveComments in EncodingOptions, too. (Default: false)
+	// the PreserveComments in DecodingOptions, too. (Default: false)
 	PreserveComments *bool
 
 	// TODO: Maybe consider an option to always convert to the preferred version (not just internal)

@@ -206,6 +206,13 @@ func externalGVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.Gr
 }
 
 func gvkForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
+	// If we already have TypeMeta filled in here, just use it
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	if !gvk.Empty() {
+		return gvk, nil
+	}
+
+	// TODO: How to handle two GroupVersions with the same Kind here?
 	gvks, unversioned, err := scheme.ObjectKinds(obj)
 	if unversioned || err != nil || len(gvks) != 1 {
 		return schema.GroupVersionKind{}, fmt.Errorf("unversioned %t or err %v or invalid gvks %v", unversioned, err, gvks)
