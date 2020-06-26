@@ -1,6 +1,7 @@
 package serializer
 
 import (
+	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -108,8 +109,16 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 
 	// Choose the pretty or non-pretty one
 	encoder := serializerInfo.Serializer
+
+	// Use the pretty serializer if it was asked for and is defined for the content type
 	if *e.opts.Pretty {
-		encoder = serializerInfo.PrettySerializer
+		// Apparently not all SerializerInfos have this field defined (e.g. YAML)
+		// TODO: This could be considered a bug in upstream, create an issue
+		if serializerInfo.PrettySerializer != nil {
+			encoder = serializerInfo.PrettySerializer
+		} else {
+			logrus.Debugf("PrettySerializer for ContentType %s is nil, falling back to Serializer.", fw.ContentType())
+		}
 	}
 
 	// Get a version-specific encoder for the specified groupversion

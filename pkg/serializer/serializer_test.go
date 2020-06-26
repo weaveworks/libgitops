@@ -20,7 +20,7 @@ var (
 	codecs         = k8sserializer.NewCodecFactory(scheme)
 	ourserializer  = NewSerializer(scheme, &codecs)
 	defaultEncoder = ourserializer.Encoder(
-		WithPrettyEncode(false),
+		WithPrettyEncode(false), // TODO: Also test the pretty serializer
 		WithCommentsEncode(true),
 	)
 
