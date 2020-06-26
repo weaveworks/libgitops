@@ -28,8 +28,14 @@ type DecodingOptions struct {
 	Default *bool
 	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
 	// the items of the list will be traversed, decoded into their respective types, and
-	// appended to the returned slice. The v1.List will in this case not be returned. (Default: true)
-	DecodeListElements *bool // TODO: How to make this able to preserve comments?
+	// appended to the returned slice. The v1.List will in this case not be returned.
+	// This conversion does NOT support preserving comments. (Default: true)
+	DecodeListElements *bool
+	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
+	// Only applicable to ContentTypeYAML framers.
+	// Using any other framer will be silently ignored. Usage of this option also requires setting
+	// the PreserveComments in EncodingOptions, too. (Default: false)
+	PreserveComments *bool
 }
 
 type DecodingOptionsFunc func(*DecodingOptions)
@@ -58,8 +64,15 @@ func WithListElementsDecoding(listElements bool) DecodingOptionsFunc {
 	}
 }
 
+func WithCommentsDecode(comments bool) DecodingOptionsFunc {
+	return func(opts *DecodingOptions) {
+		opts.PreserveComments = &comments
+	}
+}
+
 func WithDecodingOptions(newOpts DecodingOptions) DecodingOptionsFunc {
 	return func(opts *DecodingOptions) {
+		// TODO: Null-check all of these before using them
 		*opts = newOpts
 	}
 }
@@ -70,6 +83,7 @@ func defaultDecodeOpts() *DecodingOptions {
 		Strict:             util.BoolPtr(true),
 		Default:            util.BoolPtr(false),
 		DecodeListElements: util.BoolPtr(true),
+		PreserveComments:   util.BoolPtr(false),
 	}
 }
 
@@ -109,10 +123,10 @@ func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.decode(doc)
+	return d.decode(doc, fr.ContentType())
 }
 
-func (d *streamDecoder) decode(doc []byte) (runtime.Object, error) {
+func (d *streamDecoder) decode(doc []byte, ct ContentType) (runtime.Object, error) {
 	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
 	obj, _, err := d.decoder.Decode(doc, nil, nil)
 	if err != nil {
@@ -122,6 +136,8 @@ func (d *streamDecoder) decode(doc []byte) (runtime.Object, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("object is nil!")
 	}
+	// Try to preserve comments
+	d.tryToPreserveComments(doc, obj, ct)
 
 	// Return the decoded object
 	return obj, nil
@@ -189,6 +205,8 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 	if out != into {
 		return fmt.Errorf("unable to decode %s into %v", gvk, reflect.TypeOf(into))
 	}
+	// Try to preserve comments
+	d.tryToPreserveComments(doc, into, fr.ContentType())
 	return nil
 }
 
@@ -222,7 +240,7 @@ func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 		if list, ok := obj.(*metav1.List); *d.opts.DecodeListElements && ok {
 			for _, item := range list.Items {
 				// Decode each part of the list
-				listobj, err := d.decode(item.Raw)
+				listobj, err := d.decode(item.Raw, fr.ContentType())
 				if err != nil {
 					return nil, err
 				}
@@ -281,6 +299,9 @@ type convertor struct {
 func (c *convertor) Convert(in, out, context interface{}) error {
 	// This function is called at DecodeInto-time, and should convert the decoded object into
 	// the into object.
+
+	// TODO: Add controller-runtime conversion support here
+
 	return c.scheme.Convert(in, out, context)
 }
 

@@ -8,7 +8,13 @@ import (
 
 type EncodingOptions struct {
 	// Use pretty printing when writing to the output. (Default: true)
+	// TODO: Fix that sometimes omitempty fields aren't respected
 	Pretty *bool
+	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
+	// Only applicable to ContentTypeYAML framers.
+	// Using any other framer will be silently ignored. Usage of this option also requires setting
+	// the PreserveComments in DecodingOptions, too. (Default: false)
+	PreserveComments *bool
 
 	// TODO: Maybe consider an option to always convert to the preferred version (not just internal)
 }
@@ -21,15 +27,23 @@ func WithPrettyEncode(pretty bool) EncodingOptionsFunc {
 	}
 }
 
+func WithCommentsEncode(comments bool) EncodingOptionsFunc {
+	return func(opts *EncodingOptions) {
+		opts.PreserveComments = &comments
+	}
+}
+
 func WithEncodingOptions(newOpts EncodingOptions) EncodingOptionsFunc {
 	return func(opts *EncodingOptions) {
+		// TODO: Null-check all of these before using them
 		*opts = newOpts
 	}
 }
 
 func defaultEncodeOpts() *EncodingOptions {
 	return &EncodingOptions{
-		Pretty: util.BoolPtr(true),
+		Pretty:           util.BoolPtr(true),
+		PreserveComments: util.BoolPtr(false),
 	}
 }
 
@@ -98,6 +112,16 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 		encoder = serializerInfo.PrettySerializer
 	}
 
+	// Get a version-specific encoder for the specified groupversion
+	versionEncoder := e.codecs.EncoderForVersion(encoder, gv)
+
+	// Cast the object to a metav1.Object to get access to annotations
+	metaobj, ok := toMetaObject(obj)
+	// For objects without ObjectMeta, the cast will fail. Allow that failure and do "normal" encoding
+	if !ok {
+		return versionEncoder.Encode(obj, fw)
+	}
+
 	// Specialize the encoder for a specific gv and encode the object
-	return e.codecs.EncoderForVersion(encoder, gv).Encode(obj, fw)
+	return e.encodeWithCommentSupport(versionEncoder, fw, obj, metaobj)
 }
