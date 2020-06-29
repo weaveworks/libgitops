@@ -16,6 +16,9 @@ import (
 	webhookconversion "sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 )
 
+// This is the groupversionkind for the v1.List object
+var listGVK = metav1.Unversioned.WithKind("List")
+
 type DecodingOptions struct {
 	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
 	// will be converted into its hub (or internal, where applicable) representation. Otherwise, the decoded
@@ -29,7 +32,8 @@ type DecodingOptions struct {
 	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
 	// the items of the list will be traversed, decoded into their respective types, and
 	// appended to the returned slice. The v1.List will in this case not be returned.
-	// This conversion does NOT support preserving comments. (Default: true)
+	// This conversion does NOT support preserving comments. If the given scheme doesn't
+	// recognize the v1.List, before using it will be registered automatically. (Default: true)
 	DecodeListElements *bool
 	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
 	// Only applicable to ContentTypeYAML framers.
@@ -127,6 +131,13 @@ func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
 }
 
 func (d *streamDecoder) decode(doc []byte, ct ContentType) (runtime.Object, error) {
+	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
+	// make the scheme able to decode the v1.List automatically
+	// TODO: De-dup with DecodeInto
+	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
+		d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
+	}
+
 	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
 	obj, _, err := d.decoder.Decode(doc, nil, nil)
 	if err != nil {
@@ -195,6 +206,13 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 		return err
 	}
 
+	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
+	// make the scheme able to decode the v1.List automatically
+	// TODO: De-dup with DecodeInto
+	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
+		d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
+	}
+
 	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
 	// This logic is the same as runtime.DecodeInto, but with better error handling
 	out, gvk, err := d.decoder.Decode(doc, nil, into)
@@ -234,22 +252,38 @@ func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 			return nil, err
 		}
 
-		// If we asked to decode list elements, and it is a list, go ahead and loop through
-		// Otherwise, just add the object to the slice and continue
-		// TODO: This requires scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
-		if list, ok := obj.(*metav1.List); *d.opts.DecodeListElements && ok {
-			for _, item := range list.Items {
-				// Decode each part of the list
-				listobj, err := d.decode(item.Raw, fr.ContentType())
-				if err != nil {
-					return nil, err
-				}
-				objs = append(objs, listobj)
-			}
-		} else {
-			// A normal, non-list object
-			objs = append(objs, obj)
+		// Extract possibly nested objects within the one we got (e.g. unwrapping lists if asked to),
+		// or just no-op and return the object given for addition to the larger list
+		nestedObjs, err := d.extractNestedObjects(obj, fr.ContentType())
+		if err != nil {
+			return nil, err
 		}
+		objs = append(objs, nestedObjs...)
+	}
+	return objs, nil
+}
+
+func (d *streamDecoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]runtime.Object, error) {
+	// If we didn't ask for list-unwrapping functionality, return directly
+	if !*d.opts.DecodeListElements {
+		return []runtime.Object{obj}, nil
+	}
+
+	// Try to cast the object to a v1.List. If the object isn't a list, just return it
+	list, ok := obj.(*metav1.List)
+	if !ok {
+		return []runtime.Object{obj}, nil
+	}
+
+	// Loop through the list, and decode every item. Return the final list
+	var objs []runtime.Object
+	for _, item := range list.Items {
+		// Decode each item of the list
+		listobj, err := d.decode(item.Raw, ct)
+		if err != nil {
+			return nil, err
+		}
+		objs = append(objs, listobj)
 	}
 	return objs, nil
 }

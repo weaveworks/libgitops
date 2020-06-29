@@ -106,8 +106,6 @@ func autoConvertInternalComplexToExternalComplex(in *runtimetest.InternalComplex
 }
 
 func addInternalTypes(scheme *runtime.Scheme) error {
-	scheme.AddUnversionedTypes(metav1.Unversioned, &metav1.List{})
-	//scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
 	scheme.AddKnownTypeWithName(intgv.WithKind("Simple"), &runtimetest.InternalSimple{})
 	scheme.AddKnownTypeWithName(intgv.WithKind("Complex"), &runtimetest.InternalComplex{})
 	return nil
@@ -115,9 +113,6 @@ func addInternalTypes(scheme *runtime.Scheme) error {
 
 func addExternalTypes(extgv schema.GroupVersion) func(*runtime.Scheme) error {
 	return func(scheme *runtime.Scheme) error {
-		scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
-		metav1.AddMetaToScheme(scheme)
-		metav1.AddToGroupVersion(scheme, metav1.Unversioned)
 		scheme.AddKnownTypeWithName(extgv.WithKind("Simple"), &runtimetest.ExternalSimple{})
 		scheme.AddKnownTypeWithName(extgv.WithKind("Complex"), &runtimetest.ExternalComplex{})
 		return nil
