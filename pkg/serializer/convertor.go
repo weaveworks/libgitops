@@ -25,6 +25,8 @@ func (c *convertor) Convert(in, out, context interface{}) error {
 	// This function is called at DecodeInto-time, and should convert the decoded object into
 	// the into object.
 
+	// TODO: Unit test that typed errors are returned properly
+
 	// If "in" is a controller-runtime CRD convertible, check if "out" is a Hub, and convert. Otherwise
 	// return an error
 	inConvertible, inOk := in.(conversion.Convertible)
@@ -59,6 +61,8 @@ func (c *convertor) convertIntoHub(in conversion.Convertible, out conversion.Hub
 	if err != nil {
 		return err
 	}
+
+	// TODO: Unit test that typed errors are returned properly
 
 	// Convert the hub into the convertible
 	if err := in.ConvertTo(out); err != nil {

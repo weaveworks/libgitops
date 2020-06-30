@@ -138,6 +138,7 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 	intoGiven := into != nil
 
 	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
+	// TODO: Make sure any possible strict errors are returned/handled properly
 	obj, gvk, err := d.decoder.Decode(doc, nil, into)
 	if err != nil {
 		// Give the user good errors wrt missing group & version
@@ -160,36 +161,6 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 
 	// Return the decoded object
 	return obj, nil
-}
-
-func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
-	// Parse the document's TypeMeta information
-	gvk, err := yamlmeta.DefaultMetaFactory.Interpret(doc)
-	if err != nil {
-		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. The original error was: %v", err, origErr)
-	}
-
-	// Check if the group was known. If not, return that specific error
-	if !d.scheme.IsGroupRegistered(gvk.Group) {
-		return NewUnrecognizedGroupError(
-			fmt.Sprintf("for scheme unrecognized API group: %s", gvk.Group),
-			*gvk,
-			doc,
-		)
-	}
-
-	// Return a structured error if the group was registered with the scheme but the version was unrecognized
-	if !d.scheme.IsVersionRegistered(gvk.GroupVersion()) {
-		gvs := d.scheme.PrioritizedVersionsForGroup(gvk.Group)
-		return NewUnrecognizedVersionError(
-			fmt.Sprintf("for scheme unrecognized API version: %s. Registered GroupVersions: %v", gvk.GroupVersion().String(), gvs),
-			*gvk,
-			doc,
-		)
-	}
-
-	// If nothing else, just return the underlying error
-	return origErr
 }
 
 // DecodeInto decodes the next document in the FrameReader stream into obj if the types are matching.
@@ -252,6 +223,35 @@ func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 		objs = append(objs, nestedObjs...)
 	}
 	return objs, nil
+}
+
+func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
+	// Parse the document's TypeMeta information
+	gvk, err := yamlmeta.DefaultMetaFactory.Interpret(doc)
+	if err != nil {
+		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. Decode error was: %w", err, origErr)
+	}
+
+	// TODO: Unit test that typed errors are returned properly
+
+	// Check if the group was known. If not, return that specific error
+	if !d.scheme.IsGroupRegistered(gvk.Group) {
+		return NewUnrecognizedGroupError(*gvk, origErr)
+	}
+
+	// Return a structured error if the group was registered with the scheme but the version was unrecognized
+	if !d.scheme.IsVersionRegistered(gvk.GroupVersion()) {
+		gvs := d.scheme.PrioritizedVersionsForGroup(gvk.Group)
+		return NewUnrecognizedVersionError(gvs, *gvk, origErr)
+	}
+
+	// Return a structured error if the kind is not known
+	if !d.scheme.Recognizes(*gvk) {
+		return NewUnrecognizedKindError(*gvk, origErr)
+	}
+
+	// If nothing else, just return the underlying error
+	return origErr
 }
 
 func (d *decoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]runtime.Object, error) {
