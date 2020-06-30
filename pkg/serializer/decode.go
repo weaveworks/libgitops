@@ -127,26 +127,37 @@ func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.decode(doc, fr.ContentType())
+	return d.decode(doc, nil, fr.ContentType())
 }
 
-func (d *streamDecoder) decode(doc []byte, ct ContentType) (runtime.Object, error) {
+func (d *streamDecoder) decode(doc []byte, into runtime.Object, ct ContentType) (runtime.Object, error) {
 	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
 	// make the scheme able to decode the v1.List automatically
-	// TODO: De-dup with DecodeInto
 	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
 		d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
 	}
 
+	// Record if this decode call should have runtime.DecodeInto-functionality
+	intoGiven := into != nil
+
 	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
-	obj, _, err := d.decoder.Decode(doc, nil, nil)
+	obj, gvk, err := d.decoder.Decode(doc, nil, into)
 	if err != nil {
 		// Give the user good errors wrt missing group & version
 		return nil, d.handleDecodeError(doc, err)
 	}
+
+	// Fail fast if object is nil
 	if obj == nil {
-		return nil, fmt.Errorf("object is nil!")
+		return nil, fmt.Errorf("decoded object is nil! Detected gvk is %v", gvk)
 	}
+
+	// This logic is the same as in runtime.DecodeInto, and makes sure that if we requested an
+	// "into" object, it actually worked
+	if intoGiven && obj != into {
+		return nil, fmt.Errorf("unable to decode %s into %v", gvk, reflect.TypeOf(into))
+	}
+
 	// Try to preserve comments
 	d.tryToPreserveComments(doc, obj, ct)
 
@@ -206,26 +217,9 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 		return err
 	}
 
-	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
-	// make the scheme able to decode the v1.List automatically
-	// TODO: De-dup with DecodeInto
-	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
-		d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
-	}
-
-	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
-	// This logic is the same as runtime.DecodeInto, but with better error handling
-	out, gvk, err := d.decoder.Decode(doc, nil, into)
-	if err != nil {
-		// Give the user good errors wrt missing group & version
-		return d.handleDecodeError(doc, err)
-	}
-	if out != into {
-		return fmt.Errorf("unable to decode %s into %v", gvk, reflect.TypeOf(into))
-	}
-	// Try to preserve comments
-	d.tryToPreserveComments(doc, into, fr.ContentType())
-	return nil
+	// Run the internal decode() and pass the into object
+	_, err = d.decode(doc, into, fr.ContentType())
+	return err
 }
 
 // DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying
@@ -279,7 +273,7 @@ func (d *streamDecoder) extractNestedObjects(obj runtime.Object, ct ContentType)
 	var objs []runtime.Object
 	for _, item := range list.Items {
 		// Decode each item of the list
-		listobj, err := d.decode(item.Raw, ct)
+		listobj, err := d.decode(item.Raw, nil, ct)
 		if err != nil {
 			return nil, err
 		}
