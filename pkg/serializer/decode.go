@@ -99,7 +99,7 @@ func newDecodeOpts(fns ...DecodingOptionsFunc) *DecodingOptions {
 	return opts
 }
 
-type streamDecoder struct {
+type decoder struct {
 	*schemeAndCodec
 
 	decoder runtime.Decoder
@@ -120,7 +120,7 @@ type streamDecoder struct {
 // 	(or internal, if applicable) representation.
 // 	Otherwise, the decoded object will be left in the external representation.
 // opts.DecodeListElements is not applicable in this call.
-func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
+func (d *decoder) Decode(fr FrameReader) (runtime.Object, error) {
 	// Read a frame from the FrameReader
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
 	doc, err := fr.ReadFrame()
@@ -130,7 +130,7 @@ func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
 	return d.decode(doc, nil, fr.ContentType())
 }
 
-func (d *streamDecoder) decode(doc []byte, into runtime.Object, ct ContentType) (runtime.Object, error) {
+func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runtime.Object, error) {
 	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
 	// make the scheme able to decode the v1.List automatically
 	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
@@ -165,7 +165,7 @@ func (d *streamDecoder) decode(doc []byte, into runtime.Object, ct ContentType) 
 	return obj, nil
 }
 
-func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
+func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
 	// Parse the document's TypeMeta information
 	gvk, err := yamlmeta.DefaultMetaFactory.Interpret(doc)
 	if err != nil {
@@ -209,7 +209,7 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 // opts.DecodeListElements is not applicable in this call.
 // opts.ConvertToHub is not applicable in this call.
-func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
+func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 	// Read a frame from the FrameReader.
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
 	doc, err := fr.ReadFrame()
@@ -235,7 +235,7 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 // If opts.DecodeListElements is true and the underlying data contains a v1.List,
 // 	the items of the list will be traversed and decoded into their respective types, which are
 // 	added into the returning slice. The v1.List will in this case not be returned.
-func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
+func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 	objs := []runtime.Object{}
 	for {
 		obj, err := d.Decode(fr)
@@ -257,7 +257,7 @@ func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 	return objs, nil
 }
 
-func (d *streamDecoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]runtime.Object, error) {
+func (d *decoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]runtime.Object, error) {
 	// If we didn't ask for list-unwrapping functionality, return directly
 	if !*d.opts.DecodeListElements {
 		return []runtime.Object{obj}, nil
@@ -291,7 +291,7 @@ func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
 
 	decoder := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
 
-	return &streamDecoder{schemeAndCodec, decoder, opts}
+	return &decoder{schemeAndCodec, decoder, opts}
 }
 
 // newConversionCodecForScheme is a convenience method for callers that are using a scheme.

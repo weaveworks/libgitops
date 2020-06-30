@@ -16,7 +16,7 @@ const preserveCommentsAnnotation = "serializer.libgitops.weave.works/original-da
 
 // tryToPreserveComments tries to save the original file data (base64-encoded) into an annotation.
 // This original file data can be used at encoding-time to preserve comments
-func (d *streamDecoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct ContentType) {
+func (d *decoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct ContentType) {
 	// If the user opted into preserving comments and the format is YAML, proceed
 	// If they didn't, return directly
 	if !(*d.opts.PreserveComments && ct == ContentTypeYAML) {
