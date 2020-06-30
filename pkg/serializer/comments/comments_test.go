@@ -325,6 +325,29 @@ data:
   somekey: "012345678901234567890123456789012345678901234567890123456789012345678901234" # x
 `,
 		},
+		{
+			name: "copy_comments_move_to_top",
+			from: `
+apiVersion: v1
+kind: ConfigMap # Foo
+# Bar
+data:
+  # Baz
+  somekey: "012345678901234567890123456789012345678901234567890123456789012345678901234" # x
+`,
+			to: `
+apiVersion: v1
+`,
+			expected: `
+# Comments lost during file manipulation:
+# Field name "data": "Bar"
+# Field name "somekey": "Baz"
+# Field name "012345678901234567890123456789012345678901234567890123456789012345678901234": "x"
+# Field name "ConfigMap": "Foo"
+
+apiVersion: v1
+`,
+		},
 	}
 
 	for i := range testCases {
@@ -340,7 +363,7 @@ data:
 				t.FailNow()
 			}
 
-			err = CopyComments(from, to)
+			err = CopyComments(from, to, true)
 			if !assert.NoError(t, err) {
 				t.FailNow()
 			}
