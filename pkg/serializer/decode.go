@@ -37,6 +37,8 @@ type DecodingOptions struct {
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in EncodingOptions, too. (Default: false)
 	PreserveComments *bool
+
+	// TODO: Add a DecodeUnknown option
 }
 
 type DecodingOptionsFunc func(*DecodingOptions)
@@ -306,6 +308,6 @@ func newConversionCodecForScheme(
 	if performDefaulting {
 		defaulter = scheme
 	}
-	convertor := &convertor{scheme, performConversion}
+	convertor := newObjectConvertor(scheme, performConversion)
 	return versioning.NewCodec(encoder, decoder, convertor, scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
 }
