@@ -8,9 +8,10 @@ import (
 	"github.com/weaveworks/libgitops/pkg/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
-	yamlmeta "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
+	"sigs.k8s.io/yaml"
 )
 
 // This is the groupversionkind for the v1.List object
@@ -229,7 +230,7 @@ func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 
 func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
 	// Parse the document's TypeMeta information
-	gvk, err := yamlmeta.DefaultMetaFactory.Interpret(doc)
+	gvk, err := extractYAMLTypeMeta(doc)
 	if err != nil {
 		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. Decode error was: %w", err, origErr)
 	}
@@ -310,4 +311,19 @@ func newConversionCodecForScheme(
 	}
 	convertor := newObjectConvertor(scheme, performConversion)
 	return versioning.NewCodec(encoder, decoder, convertor, scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
+}
+
+// TODO: Use https://github.com/kubernetes/apimachinery/blob/master/pkg/runtime/serializer/yaml/meta.go
+// when we can assume everyone is vendoring k8s v1.19
+func extractYAMLTypeMeta(data []byte) (*schema.GroupVersionKind, error) {
+	typeMeta := runtime.TypeMeta{}
+	if err := yaml.Unmarshal(data, &typeMeta); err != nil {
+		return nil, fmt.Errorf("could not interpret GroupVersionKind: %w", err)
+	}
+	gv, err := schema.ParseGroupVersion(typeMeta.APIVersion)
+	if err != nil {
+		return nil, err
+	}
+	gvk := gv.WithKind(typeMeta.Kind)
+	return &gvk, nil
 }

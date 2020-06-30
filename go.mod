@@ -17,8 +17,8 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/sys v0.0.0-20200610111108-226ff32320da
-	k8s.io/apimachinery v0.19.0-beta.2
-	k8s.io/kube-openapi v0.0.0-20200615155156-dffdd1682719
+	k8s.io/apimachinery v0.18.5
+	k8s.io/kube-openapi v0.0.0-20200410145947-61e04a5be9a6
 	sigs.k8s.io/controller-runtime v0.6.0
 	sigs.k8s.io/kustomize/kyaml v0.1.11
 	sigs.k8s.io/yaml v1.2.0
