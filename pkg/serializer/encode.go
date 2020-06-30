@@ -73,6 +73,7 @@ func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodingOptions) Encoder {
 // The FrameWriter specifies the ContentType. This encoder will automatically convert any
 // internal object given to the preferred external groupversion. No conversion will happen
 // if the given object is of an external version.
+// TODO: This should automatically convert to the preferred version
 func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	for _, obj := range objs {
 		// Get the kind for the given object
@@ -83,10 +84,11 @@ func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 
 		// If the object is internal, convert it to the preferred external one
 		if gvk.Version == runtime.APIVersionInternal {
-			gvk, err = externalGVKForObject(e.scheme, obj)
+			gv, err := prioritizedVersionForGroup(e.scheme, gvk.Group)
 			if err != nil {
 				return err
 			}
+			gvk.Version = gv.Version
 		}
 
 		// Encode it

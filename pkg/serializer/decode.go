@@ -11,10 +11,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
-	yamlmeta "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
-	"sigs.k8s.io/controller-runtime/pkg/conversion"
-	webhookconversion "sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
+	"sigs.k8s.io/yaml"
 )
+
+// This is the groupversionkind for the v1.List object
+var listGVK = metav1.Unversioned.WithKind("List")
 
 type DecodingOptions struct {
 	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
@@ -29,13 +30,16 @@ type DecodingOptions struct {
 	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
 	// the items of the list will be traversed, decoded into their respective types, and
 	// appended to the returned slice. The v1.List will in this case not be returned.
-	// This conversion does NOT support preserving comments. (Default: true)
+	// This conversion does NOT support preserving comments. If the given scheme doesn't
+	// recognize the v1.List, before using it will be registered automatically. (Default: true)
 	DecodeListElements *bool
 	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
 	// Only applicable to ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in EncodingOptions, too. (Default: false)
 	PreserveComments *bool
+
+	// TODO: Add a DecodeUnknown option
 }
 
 type DecodingOptionsFunc func(*DecodingOptions)
@@ -95,7 +99,7 @@ func newDecodeOpts(fns ...DecodingOptionsFunc) *DecodingOptions {
 	return opts
 }
 
-type streamDecoder struct {
+type decoder struct {
 	*schemeAndCodec
 
 	decoder runtime.Decoder
@@ -116,61 +120,50 @@ type streamDecoder struct {
 // 	(or internal, if applicable) representation.
 // 	Otherwise, the decoded object will be left in the external representation.
 // opts.DecodeListElements is not applicable in this call.
-func (d *streamDecoder) Decode(fr FrameReader) (runtime.Object, error) {
+func (d *decoder) Decode(fr FrameReader) (runtime.Object, error) {
 	// Read a frame from the FrameReader
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
 	doc, err := fr.ReadFrame()
 	if err != nil {
 		return nil, err
 	}
-	return d.decode(doc, fr.ContentType())
+	return d.decode(doc, nil, fr.ContentType())
 }
 
-func (d *streamDecoder) decode(doc []byte, ct ContentType) (runtime.Object, error) {
+func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runtime.Object, error) {
+	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
+	// make the scheme able to decode the v1.List automatically
+	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
+		d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
+	}
+
+	// Record if this decode call should have runtime.DecodeInto-functionality
+	intoGiven := into != nil
+
 	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
-	obj, _, err := d.decoder.Decode(doc, nil, nil)
+	// TODO: Make sure any possible strict errors are returned/handled properly
+	obj, gvk, err := d.decoder.Decode(doc, nil, into)
 	if err != nil {
 		// Give the user good errors wrt missing group & version
 		return nil, d.handleDecodeError(doc, err)
 	}
+
+	// Fail fast if object is nil
 	if obj == nil {
-		return nil, fmt.Errorf("object is nil!")
+		return nil, fmt.Errorf("decoded object is nil! Detected gvk is %v", gvk)
 	}
+
+	// This logic is the same as in runtime.DecodeInto, and makes sure that if we requested an
+	// "into" object, it actually worked
+	if intoGiven && obj != into {
+		return nil, fmt.Errorf("unable to decode %s into %v", gvk, reflect.TypeOf(into))
+	}
+
 	// Try to preserve comments
 	d.tryToPreserveComments(doc, obj, ct)
 
 	// Return the decoded object
 	return obj, nil
-}
-
-func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
-	// Parse the document's TypeMeta information
-	gvk, err := yamlmeta.DefaultMetaFactory.Interpret(doc)
-	if err != nil {
-		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. The original error was: %v", err, origErr)
-	}
-
-	// Check if the group was known. If not, return that specific error
-	if !d.scheme.IsGroupRegistered(gvk.Group) {
-		return NewUnrecognizedGroupError(
-			fmt.Sprintf("for scheme unrecognized API group: %s", gvk.Group),
-			*gvk,
-			doc,
-		)
-	}
-
-	// Return a structured error if the group was registered with the scheme but the version was unrecognized
-	if !d.scheme.IsVersionRegistered(gvk.GroupVersion()) {
-		gvs := d.scheme.PrioritizedVersionsForGroup(gvk.Group)
-		return NewUnrecognizedVersionError(
-			fmt.Sprintf("for scheme unrecognized API version: %s. Registered GroupVersions: %v", gvk.GroupVersion().String(), gvs),
-			*gvk,
-			doc,
-		)
-	}
-
-	// If nothing else, just return the underlying error
-	return origErr
 }
 
 // DecodeInto decodes the next document in the FrameReader stream into obj if the types are matching.
@@ -187,7 +180,7 @@ func (d *streamDecoder) handleDecodeError(doc []byte, origErr error) error {
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 // opts.DecodeListElements is not applicable in this call.
 // opts.ConvertToHub is not applicable in this call.
-func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
+func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 	// Read a frame from the FrameReader.
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
 	doc, err := fr.ReadFrame()
@@ -195,19 +188,9 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 		return err
 	}
 
-	// Use our own special (e.g. strict, defaulting/non-defaulting) decoder
-	// This logic is the same as runtime.DecodeInto, but with better error handling
-	out, gvk, err := d.decoder.Decode(doc, nil, into)
-	if err != nil {
-		// Give the user good errors wrt missing group & version
-		return d.handleDecodeError(doc, err)
-	}
-	if out != into {
-		return fmt.Errorf("unable to decode %s into %v", gvk, reflect.TypeOf(into))
-	}
-	// Try to preserve comments
-	d.tryToPreserveComments(doc, into, fr.ContentType())
-	return nil
+	// Run the internal decode() and pass the into object
+	_, err = d.decode(doc, into, fr.ContentType())
+	return err
 }
 
 // DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying
@@ -223,7 +206,7 @@ func (d *streamDecoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 // If opts.DecodeListElements is true and the underlying data contains a v1.List,
 // 	the items of the list will be traversed and decoded into their respective types, which are
 // 	added into the returning slice. The v1.List will in this case not be returned.
-func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
+func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 	objs := []runtime.Object{}
 	for {
 		obj, err := d.Decode(fr)
@@ -234,22 +217,67 @@ func (d *streamDecoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 			return nil, err
 		}
 
-		// If we asked to decode list elements, and it is a list, go ahead and loop through
-		// Otherwise, just add the object to the slice and continue
-		// TODO: This requires scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
-		if list, ok := obj.(*metav1.List); *d.opts.DecodeListElements && ok {
-			for _, item := range list.Items {
-				// Decode each part of the list
-				listobj, err := d.decode(item.Raw, fr.ContentType())
-				if err != nil {
-					return nil, err
-				}
-				objs = append(objs, listobj)
-			}
-		} else {
-			// A normal, non-list object
-			objs = append(objs, obj)
+		// Extract possibly nested objects within the one we got (e.g. unwrapping lists if asked to),
+		// or just no-op and return the object given for addition to the larger list
+		nestedObjs, err := d.extractNestedObjects(obj, fr.ContentType())
+		if err != nil {
+			return nil, err
 		}
+		objs = append(objs, nestedObjs...)
+	}
+	return objs, nil
+}
+
+func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
+	// Parse the document's TypeMeta information
+	gvk, err := extractYAMLTypeMeta(doc)
+	if err != nil {
+		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. Decode error was: %w", err, origErr)
+	}
+
+	// TODO: Unit test that typed errors are returned properly
+
+	// Check if the group was known. If not, return that specific error
+	if !d.scheme.IsGroupRegistered(gvk.Group) {
+		return NewUnrecognizedGroupError(*gvk, origErr)
+	}
+
+	// Return a structured error if the group was registered with the scheme but the version was unrecognized
+	if !d.scheme.IsVersionRegistered(gvk.GroupVersion()) {
+		gvs := d.scheme.PrioritizedVersionsForGroup(gvk.Group)
+		return NewUnrecognizedVersionError(gvs, *gvk, origErr)
+	}
+
+	// Return a structured error if the kind is not known
+	if !d.scheme.Recognizes(*gvk) {
+		return NewUnrecognizedKindError(*gvk, origErr)
+	}
+
+	// If nothing else, just return the underlying error
+	return origErr
+}
+
+func (d *decoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]runtime.Object, error) {
+	// If we didn't ask for list-unwrapping functionality, return directly
+	if !*d.opts.DecodeListElements {
+		return []runtime.Object{obj}, nil
+	}
+
+	// Try to cast the object to a v1.List. If the object isn't a list, just return it
+	list, ok := obj.(*metav1.List)
+	if !ok {
+		return []runtime.Object{obj}, nil
+	}
+
+	// Loop through the list, and decode every item. Return the final list
+	var objs []runtime.Object
+	for _, item := range list.Items {
+		// Decode each item of the list
+		listobj, err := d.decode(item.Raw, nil, ct)
+		if err != nil {
+			return nil, err
+		}
+		objs = append(objs, listobj)
 	}
 	return objs, nil
 }
@@ -261,9 +289,9 @@ func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
 		Strict: *opts.Strict,
 	})
 
-	decoder := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
+	codec := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
 
-	return &streamDecoder{schemeAndCodec, decoder, opts}
+	return &decoder{schemeAndCodec, codec, opts}
 }
 
 // newConversionCodecForScheme is a convenience method for callers that are using a scheme.
@@ -281,109 +309,21 @@ func newConversionCodecForScheme(
 	if performDefaulting {
 		defaulter = scheme
 	}
-	convertor := &convertor{scheme, performConversion}
+	convertor := newObjectConvertor(scheme, performConversion)
 	return versioning.NewCodec(encoder, decoder, convertor, scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
 }
 
-// convertor implements runtime.ObjectConvertor. See k8s.io/apimachinery/pkg/runtime/serializer/versioning.go for
-// how this convertor is used (e.g. in codec.Decode())
-type convertor struct {
-	scheme  *runtime.Scheme
-	convert bool
-}
-
-// Convert attempts to convert one object into another, or returns an error. This
-// method does not mutate the in object, but the in and out object might share data structures,
-// i.e. the out object cannot be mutated without mutating the in object as well.
-// The context argument will be passed to all nested conversions.
-func (c *convertor) Convert(in, out, context interface{}) error {
-	// This function is called at DecodeInto-time, and should convert the decoded object into
-	// the into object.
-
-	// TODO: Add controller-runtime conversion support here
-
-	return c.scheme.Convert(in, out, context)
-}
-
-// ConvertToVersion takes the provided object and converts it the provided version. This
-// method does not mutate the in object, but the in and out object might share data structures,
-// i.e. the out object cannot be mutated without mutating the in object as well.
-// This method is similar to Convert() but handles specific details of choosing the correct
-// output version.
-func (c *convertor) ConvertToVersion(in runtime.Object, gv runtime.GroupVersioner) (runtime.Object, error) {
-	// This function is called at Decode(All)-time. If we requested a conversion to internal, just proceed
-	// as before, using the scheme's ConvertToVersion function. But if we don't want to convert the newly-decoded
-	// external object, we can just do nothing and the object will stay unconverted.
-	if !c.convert {
-		// DeepCopy the object to make sure that although in would be somehow modified, it doesn't affect out
-		return in.DeepCopyObject(), nil
+// TODO: Use https://github.com/kubernetes/apimachinery/blob/master/pkg/runtime/serializer/yaml/meta.go
+// when we can assume everyone is vendoring k8s v1.19
+func extractYAMLTypeMeta(data []byte) (*schema.GroupVersionKind, error) {
+	typeMeta := runtime.TypeMeta{}
+	if err := yaml.Unmarshal(data, &typeMeta); err != nil {
+		return nil, fmt.Errorf("could not interpret GroupVersionKind: %w", err)
 	}
-
-	// If this is a controller-runtime CRD convertible, convert it manually
-	convertible, ok := in.(conversion.Convertible)
-	if ok {
-		return c.tryConvertToHub(convertible)
-	}
-
-	// Just proceed as normal, and convert into the internal version using the internal groupversioner.
-	return c.scheme.ConvertToVersion(in, gv)
-}
-
-func (c *convertor) tryConvertToHub(in conversion.Convertible) (runtime.Object, error) {
-	// If the version should be converted, construct a new version of the object to convert into,
-	// convert and finally add to the list
-	ok, err := webhookconversion.IsConvertible(c.scheme, in)
+	gv, err := schema.ParseGroupVersion(typeMeta.APIVersion)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("object isn't convertible")
-	}
-
-	// Fetch the current in object's GVK
-	currentGVK, err := gvkForObject(c.scheme, in)
-	if err != nil {
-		return nil, err
-	}
-
-	// Loop through all the groupversions for the kind to find the one with the Hub
-	var hub conversion.Hub
-	var targetGVK schema.GroupVersionKind
-	for gvk := range c.scheme.AllKnownTypes() {
-		// Skip any non-similar groupkinds
-		if gvk.GroupKind().String() != currentGVK.GroupKind().String() {
-			continue
-		}
-		// Skip the same version that the convertible has
-		if gvk.Version == currentGVK.Version {
-			continue
-		}
-
-		// Create an object for the certain gvk
-		obj, err := c.scheme.New(gvk)
-		if err != nil {
-			continue
-		}
-
-		// Try to cast it to a Hub, and save it if we need
-		hubObj, ok := obj.(conversion.Hub)
-		if !ok {
-			continue
-		}
-		hub = hubObj
-		targetGVK = gvk
-		break
-	}
-
-	// Convert from the in object to the hub and return it
-	if err := in.ConvertTo(hub); err != nil {
-		return nil, err
-	}
-	hub.GetObjectKind().SetGroupVersionKind(targetGVK)
-	return hub, nil
-}
-
-func (c *convertor) ConvertFieldLabel(gvk schema.GroupVersionKind, label, value string) (string, string, error) {
-	// just forward this call, not applicable to this implementation
-	return c.scheme.ConvertFieldLabel(gvk, label, value)
+	gvk := gv.WithKind(typeMeta.Kind)
+	return &gvk, nil
 }

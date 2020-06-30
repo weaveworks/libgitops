@@ -36,11 +36,15 @@ var (
 
 func v1_addDefaultingFuncs(scheme *runtime.Scheme) error {
 	scheme.AddTypeDefaultingFunc(&runtimetest.ExternalComplex{}, func(obj interface{}) { v1_SetDefaults_Complex(obj.(*runtimetest.ExternalComplex)) })
+	scheme.AddTypeDefaultingFunc(&CRDOldVersion{}, func(obj interface{}) { v1_SetDefaults_CRDOldVersion(obj.(*CRDOldVersion)) })
 	return nil
 }
 
 func v2_addDefaultingFuncs(scheme *runtime.Scheme) error {
+	// TODO: Registering two defaulting functions for the same &runtimetest.ExternalComplex{} makes only the second one (v2) apply
+	// Fix this by making two different struct types for ExternalComplex
 	scheme.AddTypeDefaultingFunc(&runtimetest.ExternalComplex{}, func(obj interface{}) { v2_SetDefaults_Complex(obj.(*runtimetest.ExternalComplex)) })
+	scheme.AddTypeDefaultingFunc(&CRDNewVersion{}, func(obj interface{}) { v2_SetDefaults_CRDNewVersion(obj.(*CRDNewVersion)) })
 	return nil
 }
 
@@ -50,9 +54,21 @@ func v1_SetDefaults_Complex(obj *runtimetest.ExternalComplex) {
 	}
 }
 
+func v1_SetDefaults_CRDOldVersion(obj *CRDOldVersion) {
+	if obj.TestString == "" {
+		obj.TestString = "foo"
+	}
+}
+
 func v2_SetDefaults_Complex(obj *runtimetest.ExternalComplex) {
 	if obj.Integer64 == 0 {
 		obj.Integer64 = 5
+	}
+}
+
+func v2_SetDefaults_CRDNewVersion(obj *CRDNewVersion) {
+	if obj.OtherString == "" {
+		obj.OtherString = "bar"
 	}
 }
 
@@ -106,8 +122,6 @@ func autoConvertInternalComplexToExternalComplex(in *runtimetest.InternalComplex
 }
 
 func addInternalTypes(scheme *runtime.Scheme) error {
-	scheme.AddUnversionedTypes(metav1.Unversioned, &metav1.List{})
-	//scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
 	scheme.AddKnownTypeWithName(intgv.WithKind("Simple"), &runtimetest.InternalSimple{})
 	scheme.AddKnownTypeWithName(intgv.WithKind("Complex"), &runtimetest.InternalComplex{})
 	return nil
@@ -115,9 +129,6 @@ func addInternalTypes(scheme *runtime.Scheme) error {
 
 func addExternalTypes(extgv schema.GroupVersion) func(*runtime.Scheme) error {
 	return func(scheme *runtime.Scheme) error {
-		scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
-		metav1.AddMetaToScheme(scheme)
-		metav1.AddToGroupVersion(scheme, metav1.Unversioned)
 		scheme.AddKnownTypeWithName(extgv.WithKind("Simple"), &runtimetest.ExternalSimple{})
 		scheme.AddKnownTypeWithName(extgv.WithKind("Complex"), &runtimetest.ExternalComplex{})
 		return nil
@@ -226,9 +237,11 @@ func (in *CRDNewVersion) DeepCopyObject() runtime.Object {
 }
 
 var (
-	simpleMeta  = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Simple"}
-	complexMeta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Complex"}
-	newCRDMeta  = metav1.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "CRD"}
+	simpleMeta    = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Simple"}
+	complexv1Meta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Complex"}
+	complexv2Meta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "Complex"}
+	oldCRDMeta    = metav1.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "CRD"}
+	newCRDMeta    = metav1.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "CRD"}
 
 	oneSimple = []byte(`apiVersion: foogroup/v1alpha1
 kind: Simple
@@ -332,12 +345,13 @@ func TestDecode(t *testing.T) {
 		expected     runtime.Object
 		expectedErr  bool
 	}{
-		{"CRD conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"CRD hub conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"CRD no conversion", oldCRD, false, false, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
 		{"simple internal", oneSimple, false, true, &runtimetest.InternalSimple{TestString: "foo"}, false},
 		{"complex internal", oneComplex, false, true, &runtimetest.InternalComplex{String: "bar"}, false},
 		{"simple external", oneSimple, false, false, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
-		{"complex external", oneComplex, false, false, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar"}, false},
-		{"defaulted complex external", oneComplex, true, false, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar", Integer64: 5}, false},
+		{"complex external", oneComplex, false, false, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar"}, false},
+		{"defaulted complex external", oneComplex, true, false, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar", Integer64: 5}, false},
 		{"defaulted complex internal", oneComplex, true, true, &runtimetest.InternalComplex{String: "bar", Integer64: 5}, false},
 		{"no unknown fields", simpleUnknownField, false, false, nil, true},
 		{"no duplicate fields", simpleDuplicateField, false, false, nil, true},
@@ -370,11 +384,13 @@ func TestDecodeInto(t *testing.T) {
 		expected     runtime.Object
 		expectedErr  bool
 	}{
+		{"CRD hub conversion", oldCRD, false, &CRDNewVersion{}, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"CRD no conversion", oldCRD, false, &CRDOldVersion{}, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
 		{"simple internal", oneSimple, false, &runtimetest.InternalSimple{}, &runtimetest.InternalSimple{TestString: "foo"}, false},
 		{"complex internal", oneComplex, false, &runtimetest.InternalComplex{}, &runtimetest.InternalComplex{String: "bar"}, false},
 		{"simple external", oneSimple, false, &runtimetest.ExternalSimple{}, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
-		{"complex external", oneComplex, false, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar"}, false},
-		{"defaulted complex external", oneComplex, true, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexMeta, String: "bar", Integer64: 5}, false},
+		{"complex external", oneComplex, false, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar"}, false},
+		{"defaulted complex external", oneComplex, true, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar", Integer64: 5}, false},
 		{"defaulted complex internal", oneComplex, true, &runtimetest.InternalComplex{}, &runtimetest.InternalComplex{String: "bar", Integer64: 5}, false},
 		{"no unknown fields", simpleUnknownField, false, &runtimetest.InternalSimple{}, nil, true},
 		{"no duplicate fields", simpleDuplicateField, false, &runtimetest.InternalSimple{}, nil, true},
@@ -408,7 +424,7 @@ func TestDecodeAll(t *testing.T) {
 	}{
 		{"list split decoding", testList, false, true, []runtime.Object{
 			&runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"},
-			&runtimetest.ExternalComplex{TypeMeta: complexMeta, Integer: 5},
+			&runtimetest.ExternalComplex{TypeMeta: complexv1Meta, Integer: 5},
 			&runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "bar"},
 		}, false},
 		/*{"simple internal", oneSimple, false, &runtimetest.InternalSimple{}, &runtimetest.InternalSimple{TestString: "foo"}, false},
@@ -476,6 +492,43 @@ func TestRoundtrip(t *testing.T) {
 			}
 			if !bytes.Equal(actual, rt.data) {
 				t2.Errorf("expected %q but actual %q", string(rt.data), string(actual))
+			}
+		})
+	}
+}
+
+func TestDefaulter(t *testing.T) {
+	//first := &runtimetest.ExternalComplex{TypeMeta: complexv2Meta, Integer64: 3}
+	//second := &runtimetest.InternalComplex{Integer64: 3}
+	crdold := &CRDOldVersion{TestString: "foo"}
+	crdnew := &CRDNewVersion{OtherString: "bar"}
+	tests := []struct {
+		name        string
+		before      []runtime.Object
+		after       []runtime.Object
+		expectedErr bool
+	}{
+		// TODO: Reactivate these cases when there are two distinct ExternalComplex types
+		//{"external", []runtime.Object{&runtimetest.ExternalComplex{TypeMeta: complexv1Meta}}, []runtime.Object{first}, false},
+		//{"internal", []runtime.Object{&runtimetest.InternalComplex{}}, []runtime.Object{second}, false},
+		{"crd old", []runtime.Object{&CRDOldVersion{}}, []runtime.Object{crdold}, false},
+		{"crd new", []runtime.Object{&CRDNewVersion{}}, []runtime.Object{crdnew}, false},
+		{"two crds", []runtime.Object{&CRDOldVersion{}, &CRDNewVersion{}}, []runtime.Object{crdold, crdnew}, false},
+	}
+	for _, rt := range tests {
+		t.Run(rt.name, func(t2 *testing.T) {
+			actualErr := ourserializer.Defaulter().Default(rt.before...)
+
+			if (actualErr != nil) != rt.expectedErr {
+				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actualErr != nil, actualErr)
+			}
+			for i := range rt.before {
+				got := rt.before[i]
+				expected := rt.after[i]
+
+				if expected != nil && got != nil && !reflect.DeepEqual(got, expected) {
+					t2.Errorf("item %d: expected %#v but actual %#v", i, expected, got)
+				}
 			}
 		})
 	}
