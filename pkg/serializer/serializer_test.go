@@ -223,6 +223,7 @@ func (in *CRDNewVersion) DeepCopyObject() runtime.Object {
 var (
 	simpleMeta  = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Simple"}
 	complexMeta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "Complex"}
+	oldCRDMeta  = metav1.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "CRD"}
 	newCRDMeta  = metav1.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "CRD"}
 
 	oneSimple = []byte(`apiVersion: foogroup/v1alpha1
@@ -327,7 +328,8 @@ func TestDecode(t *testing.T) {
 		expected     runtime.Object
 		expectedErr  bool
 	}{
-		{"CRD conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"CRD hub conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"CRD no conversion", oldCRD, false, false, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
 		{"simple internal", oneSimple, false, true, &runtimetest.InternalSimple{TestString: "foo"}, false},
 		{"complex internal", oneComplex, false, true, &runtimetest.InternalComplex{String: "bar"}, false},
 		{"simple external", oneSimple, false, false, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
@@ -365,6 +367,8 @@ func TestDecodeInto(t *testing.T) {
 		expected     runtime.Object
 		expectedErr  bool
 	}{
+		{"CRD hub conversion", oldCRD, false, &CRDNewVersion{}, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"CRD no conversion", oldCRD, false, &CRDOldVersion{}, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
 		{"simple internal", oneSimple, false, &runtimetest.InternalSimple{}, &runtimetest.InternalSimple{TestString: "foo"}, false},
 		{"complex internal", oneComplex, false, &runtimetest.InternalComplex{}, &runtimetest.InternalComplex{String: "bar"}, false},
 		{"simple external", oneSimple, false, &runtimetest.ExternalSimple{}, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},

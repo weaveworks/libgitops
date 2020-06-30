@@ -8,12 +8,9 @@ import (
 	"github.com/weaveworks/libgitops/pkg/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
 	yamlmeta "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
-	"sigs.k8s.io/controller-runtime/pkg/conversion"
-	webhookconversion "sigs.k8s.io/controller-runtime/pkg/webhook/conversion"
 )
 
 // This is the groupversionkind for the v1.List object
@@ -289,9 +286,9 @@ func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
 		Strict: *opts.Strict,
 	})
 
-	decoder := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
+	codec := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
 
-	return &decoder{schemeAndCodec, decoder, opts}
+	return &decoder{schemeAndCodec, codec, opts}
 }
 
 // newConversionCodecForScheme is a convenience method for callers that are using a scheme.
@@ -311,107 +308,4 @@ func newConversionCodecForScheme(
 	}
 	convertor := &convertor{scheme, performConversion}
 	return versioning.NewCodec(encoder, decoder, convertor, scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
-}
-
-// convertor implements runtime.ObjectConvertor. See k8s.io/apimachinery/pkg/runtime/serializer/versioning.go for
-// how this convertor is used (e.g. in codec.Decode())
-type convertor struct {
-	scheme  *runtime.Scheme
-	convert bool
-}
-
-// Convert attempts to convert one object into another, or returns an error. This
-// method does not mutate the in object, but the in and out object might share data structures,
-// i.e. the out object cannot be mutated without mutating the in object as well.
-// The context argument will be passed to all nested conversions.
-func (c *convertor) Convert(in, out, context interface{}) error {
-	// This function is called at DecodeInto-time, and should convert the decoded object into
-	// the into object.
-
-	// TODO: Add controller-runtime conversion support here
-
-	return c.scheme.Convert(in, out, context)
-}
-
-// ConvertToVersion takes the provided object and converts it the provided version. This
-// method does not mutate the in object, but the in and out object might share data structures,
-// i.e. the out object cannot be mutated without mutating the in object as well.
-// This method is similar to Convert() but handles specific details of choosing the correct
-// output version.
-func (c *convertor) ConvertToVersion(in runtime.Object, gv runtime.GroupVersioner) (runtime.Object, error) {
-	// This function is called at Decode(All)-time. If we requested a conversion to internal, just proceed
-	// as before, using the scheme's ConvertToVersion function. But if we don't want to convert the newly-decoded
-	// external object, we can just do nothing and the object will stay unconverted.
-	if !c.convert {
-		// DeepCopy the object to make sure that although in would be somehow modified, it doesn't affect out
-		return in.DeepCopyObject(), nil
-	}
-
-	// If this is a controller-runtime CRD convertible, convert it manually
-	convertible, ok := in.(conversion.Convertible)
-	if ok {
-		return c.tryConvertToHub(convertible)
-	}
-
-	// Just proceed as normal, and convert into the internal version using the internal groupversioner.
-	return c.scheme.ConvertToVersion(in, gv)
-}
-
-func (c *convertor) tryConvertToHub(in conversion.Convertible) (runtime.Object, error) {
-	// If the version should be converted, construct a new version of the object to convert into,
-	// convert and finally add to the list
-	ok, err := webhookconversion.IsConvertible(c.scheme, in)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("object isn't convertible")
-	}
-
-	// Fetch the current in object's GVK
-	currentGVK, err := gvkForObject(c.scheme, in)
-	if err != nil {
-		return nil, err
-	}
-
-	// Loop through all the groupversions for the kind to find the one with the Hub
-	var hub conversion.Hub
-	var targetGVK schema.GroupVersionKind
-	for gvk := range c.scheme.AllKnownTypes() {
-		// Skip any non-similar groupkinds
-		if gvk.GroupKind().String() != currentGVK.GroupKind().String() {
-			continue
-		}
-		// Skip the same version that the convertible has
-		if gvk.Version == currentGVK.Version {
-			continue
-		}
-
-		// Create an object for the certain gvk
-		obj, err := c.scheme.New(gvk)
-		if err != nil {
-			continue
-		}
-
-		// Try to cast it to a Hub, and save it if we need
-		hubObj, ok := obj.(conversion.Hub)
-		if !ok {
-			continue
-		}
-		hub = hubObj
-		targetGVK = gvk
-		break
-	}
-
-	// Convert from the in object to the hub and return it
-	if err := in.ConvertTo(hub); err != nil {
-		return nil, err
-	}
-	hub.GetObjectKind().SetGroupVersionKind(targetGVK)
-	return hub, nil
-}
-
-func (c *convertor) ConvertFieldLabel(gvk schema.GroupVersionKind, label, value string) (string, string, error) {
-	// just forward this call, not applicable to this implementation
-	return c.scheme.ConvertFieldLabel(gvk, label, value)
 }
