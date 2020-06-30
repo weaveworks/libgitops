@@ -1,6 +1,7 @@
 package serializer
 
 import (
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -10,6 +11,12 @@ import (
 )
 
 // TODO: Unit-test the converter implementation directly, not just indirectly by usage in the decode mechanism
+
+var (
+	errOutMustBeHub       = errors.New("if in object is Convertible, out must be Hub")
+	errInMustBeHub        = errors.New("if out object is Convertible, in must be Hub")
+	errMustNotHaveTwoHubs = errors.New("in and out must not both be Hubs")
+)
 
 func newConverter(scheme *runtime.Scheme) *converter {
 	return &converter{
@@ -86,7 +93,7 @@ func (c *objectConvertor) Convert(in, out, context interface{}) error {
 		// Require out to be a Hub, and convert
 		outHub, outOk := out.(conversion.Hub)
 		if !outOk {
-			return NewCRDConversionError(nil, CRDConversionErrorCauseInvalidArgs, fmt.Errorf("if in object is Convertible, out must be Hub"))
+			return NewCRDConversionError(nil, CRDConversionErrorCauseInvalidArgs, errOutMustBeHub)
 		}
 		return c.convertIntoHub(inConvertible, outHub)
 	}
@@ -98,9 +105,17 @@ func (c *objectConvertor) Convert(in, out, context interface{}) error {
 		// Require out to be a Hub, and convert
 		inHub, inOk := in.(conversion.Hub)
 		if !inOk {
-			return NewCRDConversionError(nil, CRDConversionErrorCauseInvalidArgs, fmt.Errorf("if out object is Convertible, in must be Hub"))
+			return NewCRDConversionError(nil, CRDConversionErrorCauseInvalidArgs, errInMustBeHub)
 		}
 		return c.convertFromHub(inHub, outConvertible)
+	}
+
+	// Catch the edge case if someone passes two Hubs into both in and out
+	// TODO: This should have an unit test
+	_, inIsHub := in.(conversion.Hub)
+	_, outIsHub := out.(conversion.Hub)
+	if inIsHub && outIsHub {
+		return NewCRDConversionError(nil, CRDConversionErrorCauseInvalidArgs, errMustNotHaveTwoHubs)
 	}
 
 	// Do normal conversion
@@ -218,7 +233,7 @@ func validateConvertible(in conversion.Convertible, scheme *runtime.Scheme) (sch
 }
 
 // findHubType looks in the scheme's all known types for a matching Hub type for the given current gvk
-func findHubType(currentGVK schema.GroupVersionKind, scheme *runtime.Scheme) (hub conversion.Hub, hubGVK schema.GroupVersionKind, returnerr error) {
+func findHubType(currentGVK schema.GroupVersionKind, scheme *runtime.Scheme) (conversion.Hub, schema.GroupVersionKind, error) {
 	// Loop through all the groupversions for the kind to find the one with the Hub
 	for gvk := range scheme.AllKnownTypes() {
 		// Skip any non-similar groupkinds
@@ -237,16 +252,13 @@ func findHubType(currentGVK schema.GroupVersionKind, scheme *runtime.Scheme) (hu
 		}
 
 		// Try to cast it to a Hub, and save it if we need
-		hubObj, ok := obj.(conversion.Hub)
+		hub, ok := obj.(conversion.Hub)
 		if !ok {
 			continue
 		}
-		hub = hubObj
-		hubGVK = gvk
-		return
+		return hub, gvk, nil
 	}
-	returnerr = fmt.Errorf("no matching Hub target type for convertible of gvk %s", currentGVK)
-	return
+	return nil, schema.GroupVersionKind{}, fmt.Errorf("no matching Hub target type for convertible of gvk %s", currentGVK)
 }
 
 // populateGVK finds the gvk of the objects and populates TypeMeta with that information
