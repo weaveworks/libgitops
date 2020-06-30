@@ -89,8 +89,7 @@ func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw Fr
 	}
 
 	// Copy over comments from the old to the new schema
-	// TODO: Also preserve comments that are "lost on the way", i.e. on schema changes
-	if err := comments.CopyComments(priorNode, afterNode); err != nil {
+	if err := comments.CopyComments(priorNode, afterNode, true); err != nil {
 		// fatal error
 		return err
 	}
