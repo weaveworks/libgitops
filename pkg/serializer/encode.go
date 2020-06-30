@@ -84,10 +84,11 @@ func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 
 		// If the object is internal, convert it to the preferred external one
 		if gvk.Version == runtime.APIVersionInternal {
-			gvk, err = externalGVKForObject(e.scheme, obj)
+			gv, err := prioritizedVersionForGroup(e.scheme, gvk.Group)
 			if err != nil {
 				return err
 			}
+			gvk.Version = gv.Version
 		}
 
 		// Encode it

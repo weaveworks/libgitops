@@ -50,9 +50,8 @@ type Serializer interface {
 	// The converter supports both "classic" API Machinery objects and controller-runtime CRDs
 	Converter() Converter
 
-	// DefaultInternal populates the given internal object with the preferred external version's defaults
-	// TODO: Make Defaulter() interface
-	DefaultInternal(cfg runtime.Object) error
+	// Defaulter is a high-level interface for accessing defaulting functions in a scheme
+	Defaulter() Defaulter
 
 	// Scheme provides access to the underlying runtime.Scheme
 	Scheme() *runtime.Scheme
@@ -147,6 +146,15 @@ type Converter interface {
 	ConvertToHub(in runtime.Object) (runtime.Object, error)
 }
 
+// Defaulter is a high-level interface for accessing defaulting functions in a scheme
+type Defaulter interface {
+	// Default runs the registered defaulting functions in the scheme on the given objects, one-by-one.
+	// If the given object is internal, it will be automatically defaulted using the preferred external
+	// version's defaults (i.e. converted to the preferred external version, defaulted there, and converted
+	// back to internal).
+	Default(objs ...runtime.Object) error
+}
+
 // NewSerializer constructs a new serializer based on a scheme, and optionally a codecfactory
 func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) Serializer {
 	if scheme == nil {
@@ -164,6 +172,7 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 			codecs: codecs,
 		},
 		converter: newConverter(scheme),
+		defaulter: newDefaulter(scheme),
 	}
 }
 
@@ -171,6 +180,7 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 type serializer struct {
 	*schemeAndCodec
 	converter *converter
+	defaulter *defaulter
 }
 
 // Scheme provides access to the underlying runtime.Scheme
@@ -192,58 +202,32 @@ func (s *serializer) Converter() Converter {
 	return s.converter
 }
 
-var ErrObjectNotInternal = errors.New("given object is not an internal version")
-
-// DefaultInternal populates the given internal object with the preferred external version's defaults
-func (s *serializer) DefaultInternal(cfg runtime.Object) error {
-	gvk, err := externalGVKForObject(s.scheme, cfg)
-	if err != nil {
-		return err
-	}
-	external, err := s.scheme.New(gvk)
-	if err != nil {
-		return nil
-	}
-	if err := s.scheme.Convert(cfg, external, nil); err != nil {
-		return err
-	}
-	s.scheme.Default(external)
-	return s.scheme.Convert(external, cfg, nil)
+func (s *serializer) Defaulter() Defaulter {
+	return s.defaulter
 }
 
-// externalGVKForObject returns the preferred external groupversion for an internal object
-// If the object is not internal, ErrObjectNotInternal is returned
-func externalGVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
-	// Get the GVK
-	gvk, err := gvkForObject(scheme, obj)
-	if err != nil {
-		return schema.GroupVersionKind{}, err
-	}
-
-	// Require the object to be internal
-	if gvk.Version != runtime.APIVersionInternal {
-		return schema.GroupVersionKind{}, ErrObjectNotInternal
-	}
-
+func prioritizedVersionForGroup(scheme *runtime.Scheme, groupName string) (schema.GroupVersion, error) {
 	// Get the prioritized versions for the given group
-	gvs := scheme.PrioritizedVersionsForGroup(gvk.Group)
+	gvs := scheme.PrioritizedVersionsForGroup(groupName)
 	if len(gvs) < 1 {
-		return schema.GroupVersionKind{}, fmt.Errorf("expected some version to be registered for group %s", gvk.Group)
+		return schema.GroupVersion{}, fmt.Errorf("expected some version to be registered for group %s", groupName)
 	}
-
-	// Use the preferred (external) version
-	gvk.Version = gvs[0].Version
-	return gvk, nil
+	// Use the first, preferred, (external) version
+	return gvs[0], nil
 }
 
 func gvkForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
 	// If we already have TypeMeta filled in here, just use it
+	// TODO: This is probably not needed
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	if !gvk.Empty() {
 		return gvk, nil
 	}
 
-	// TODO: How to handle two GroupVersions with the same Kind here?
+	// TODO: If there are two gvks returned, it's probably a misconfiguration in the scheme
+	// Verify that this is the case
+
+	// Get the possible kinds for the object
 	gvks, unversioned, err := scheme.ObjectKinds(obj)
 	if unversioned || err != nil || len(gvks) != 1 {
 		return schema.GroupVersionKind{}, fmt.Errorf("unversioned %t or err %v or invalid gvks %v", unversioned, err, gvks)
