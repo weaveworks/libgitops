@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
+	"github.com/weaveworks/libgitops/pkg/serializer/comments"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/kustomize/kyaml/comments"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
@@ -89,8 +89,7 @@ func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw Fr
 	}
 
 	// Copy over comments from the old to the new schema
-	// TODO: Also preserve comments that are "lost on the way", i.e. on schema changes
-	if err := comments.CopyComments(priorNode, afterNode); err != nil {
+	if err := comments.CopyComments(priorNode, afterNode, true); err != nil {
 		// fatal error
 		return err
 	}

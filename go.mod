@@ -16,6 +16,7 @@ require (
 	github.com/rjeczalik/notify v0.9.2
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/pflag v1.0.5
+	github.com/stretchr/testify v1.4.0
 	golang.org/x/sys v0.0.0-20200610111108-226ff32320da
 	k8s.io/apimachinery v0.18.5
 	k8s.io/kube-openapi v0.0.0-20200410145947-61e04a5be9a6
