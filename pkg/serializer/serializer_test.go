@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -159,7 +160,7 @@ type CRDOldVersion struct {
 func (in *CRDOldVersion) DeepCopyInto(out *CRDOldVersion) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	out.ObjectMeta = in.ObjectMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	return
 }
 
@@ -182,14 +183,16 @@ func (in *CRDOldVersion) DeepCopyObject() runtime.Object {
 }
 
 func (t *CRDOldVersion) ConvertTo(hub crdconversion.Hub) error {
-	obj := (hub.(runtime.Object)).(*CRDNewVersion)
-	obj.OtherString = fmt.Sprintf("Old string %s", t.TestString)
+	into := (hub.(runtime.Object)).(*CRDNewVersion)
+	into.ObjectMeta = t.ObjectMeta
+	into.OtherString = fmt.Sprintf("Old string %s", t.TestString)
 	return nil
 }
 
 func (t *CRDOldVersion) ConvertFrom(hub crdconversion.Hub) error {
-	obj := (hub.(runtime.Object)).(*CRDNewVersion)
-	obj.OtherString = "downgraded"
+	from := (hub.(runtime.Object)).(*CRDNewVersion)
+	t.ObjectMeta = from.ObjectMeta
+	t.TestString = strings.TrimPrefix(from.OtherString, "Old string ")
 	return nil
 }
 
@@ -214,7 +217,7 @@ func (t *CRDNewVersion) Hub() {}
 func (in *CRDNewVersion) DeepCopyInto(out *CRDNewVersion) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	out.ObjectMeta = in.ObjectMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	return
 }
 
@@ -464,13 +467,13 @@ func TestRoundtrip(t *testing.T) {
 		name string
 		data []byte
 		ct   ContentType
-		obj  runtime.Object
+		gv   *schema.GroupVersion // use a specific groupversion if set. if nil, then use the default Encode
 	}{
-		{"simple yaml", oneSimple, ContentTypeYAML, &runtimetest.InternalSimple{}},
-		{"complex yaml", oneComplex, ContentTypeYAML, &runtimetest.InternalComplex{}},
-		{"simple json", simpleJSON, ContentTypeJSON, &runtimetest.InternalSimple{}},
-		{"complex json", complexJSON, ContentTypeJSON, &runtimetest.InternalComplex{}},
-		{"crd with objectmeta & comments", oldCRD, ContentTypeYAML, &CRDOldVersion{}},
+		{"simple yaml", oneSimple, ContentTypeYAML, nil},
+		{"complex yaml", oneComplex, ContentTypeYAML, nil},
+		{"simple json", simpleJSON, ContentTypeJSON, nil},
+		{"complex json", complexJSON, ContentTypeJSON, nil},
+		{"crd with objectmeta & comments", oldCRD, ContentTypeYAML, &ext1gv}, // encode as v1alpha1
 		// TODO: Maybe an unit test (case) for a type with ObjectMeta embedded as a pointer being nil
 		// TODO: Make sure that the Encode call (with comments support) doesn't mutate the object state
 		// i.e. doesn't remove the annotation after use so multiple similar encode calls work.
@@ -478,14 +481,20 @@ func TestRoundtrip(t *testing.T) {
 
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
-			err := ourserializer.Decoder(
+			obj, err := ourserializer.Decoder(
+				WithConvertToHubDecode(true),
 				WithCommentsDecode(true),
-			).DecodeInto(NewYAMLFrameReader(FromBytes(rt.data)), rt.obj)
+			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
 			if err != nil {
 				t2.Errorf("unexpected decode error: %v", err)
+				return
 			}
 			buf := new(bytes.Buffer)
-			err = defaultEncoder.Encode(NewFrameWriter(rt.ct, buf), rt.obj)
+			if rt.gv == nil {
+				err = defaultEncoder.Encode(NewFrameWriter(rt.ct, buf), obj)
+			} else {
+				err = defaultEncoder.EncodeForGroupVersion(NewFrameWriter(rt.ct, buf), obj, *rt.gv)
+			}
 			actual := buf.Bytes()
 			if err != nil {
 				t2.Errorf("unexpected encode error: %v", err)

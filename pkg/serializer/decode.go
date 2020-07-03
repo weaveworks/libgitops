@@ -38,8 +38,6 @@ type DecodingOptions struct {
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in EncodingOptions, too. (Default: false)
 	PreserveComments *bool
-
-	// TODO: Add a DecodeUnknown option
 }
 
 type DecodingOptionsFunc func(*DecodingOptions)
@@ -289,9 +287,22 @@ func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
 		Strict: *opts.Strict,
 	})
 
-	codec := newConversionCodecForScheme(schemeAndCodec.scheme, nil, s, nil, runtime.InternalGroupVersioner, *opts.Default, *opts.ConvertToHub)
+	decodeCodec := decoderForVersion(schemeAndCodec.scheme, s, *opts.Default, *opts.ConvertToHub)
 
-	return &decoder{schemeAndCodec, codec, opts}
+	return &decoder{schemeAndCodec, decodeCodec, opts}
+}
+
+// decoderForVersion is used instead of CodecFactory.DecoderForVersion, as we want to use our own converter
+func decoderForVersion(scheme *runtime.Scheme, decoder *json.Serializer, doDefaulting, doConversion bool) runtime.Decoder {
+	return newConversionCodecForScheme(
+		scheme,
+		nil,                            // no encoder
+		decoder,                        // our custom JSON serializer
+		nil,                            // no target encode groupversion
+		runtime.InternalGroupVersioner, // if conversion should happen for classic types, convert into internal
+		doDefaulting,                   // default if specified
+		doConversion,                   // convert to the hub type conditionally when decoding
+	)
 }
 
 // newConversionCodecForScheme is a convenience method for callers that are using a scheme.

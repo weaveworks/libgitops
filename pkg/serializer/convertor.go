@@ -64,15 +64,15 @@ func (c *converter) ConvertToHub(in runtime.Object) (runtime.Object, error) {
 	return c.convertor.ConvertToVersion(in, nil)
 }
 
-func newObjectConvertor(scheme *runtime.Scheme, convertToHub bool) *objectConvertor {
-	return &objectConvertor{scheme, convertToHub}
+func newObjectConvertor(scheme *runtime.Scheme, doConversion bool) *objectConvertor {
+	return &objectConvertor{scheme, doConversion}
 }
 
 // objectConvertor implements runtime.ObjectConvertor. See k8s.io/apimachinery/pkg/runtime/serializer/versioning.go for
 // how this objectConvertor is used (e.g. in codec.Decode())
 type objectConvertor struct {
-	scheme         *runtime.Scheme
-	doConvertToHub bool
+	scheme       *runtime.Scheme
+	doConversion bool
 }
 
 // Convert attempts to convert one object into another, or returns an error. This
@@ -163,11 +163,11 @@ func (c *objectConvertor) convertFromHub(in conversion.Hub, out conversion.Conve
 // This method is similar to Convert() but handles specific details of choosing the correct
 // output version.
 // This function might return errors of type *CRDConversionError.
-func (c *objectConvertor) ConvertToVersion(in runtime.Object, _ runtime.GroupVersioner) (runtime.Object, error) {
+func (c *objectConvertor) ConvertToVersion(in runtime.Object, groupVersioner runtime.GroupVersioner) (runtime.Object, error) {
 	// This function is called at Decode(All)-time. If we requested a conversion to internal, just proceed
 	// as before, using the scheme's ConvertToVersion function. But if we don't want to convert the newly-decoded
 	// external object, we can just do nothing and the object will stay unconverted.
-	if !c.doConvertToHub {
+	if !c.doConversion {
 		// DeepCopy the object to make sure that although in would be somehow modified, it doesn't affect out
 		return in.DeepCopyObject(), nil
 	}
@@ -177,9 +177,39 @@ func (c *objectConvertor) ConvertToVersion(in runtime.Object, _ runtime.GroupVer
 	if ok {
 		return c.convertToHub(convertible)
 	}
+	// If we should convert back to the convertible, identify which convertible it is
+	// This happens almost certainly in the encode codepath, where there exists a specific
+	// chosen groupVersioner
+	hub, ok := in.(conversion.Hub)
+	if ok {
+		// Get what group version was asked for, and what kind the hub has at the moment
+		gv, ok := groupVersioner.(schema.GroupVersion)
+		if !ok {
+			return nil, fmt.Errorf("couldn't get groupversion from groupversioner: %v", groupVersioner)
+		}
+		hubGVK, err := gvkForObject(c.scheme, hub)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't get GVK for hub: %w", err)
+		}
+		// Assume the Hub kind and Convertible kinds match
+		gvk := gv.WithKind(hubGVK.Kind)
+
+		// Create the convertible object and cast it to a Convertible
+		intoObj, err := c.scheme.New(gvk)
+		if err != nil {
+			return nil, fmt.Errorf("can't create new obj of gvk %s: %w", gvk, err)
+		}
+		convertible, ok = intoObj.(conversion.Convertible)
+		if !ok {
+			return nil, fmt.Errorf("obj of gvk %s isn't convertible", gvk)
+		}
+		// Run the convertFromHub code
+		err = c.convertFromHub(hub, convertible)
+		return convertible, err
+	}
 
 	// Convert normally into the internal version using the internal groupversioner.
-	return c.scheme.ConvertToVersion(in, runtime.InternalGroupVersioner)
+	return c.scheme.ConvertToVersion(in, groupVersioner)
 }
 
 func (c *objectConvertor) convertToHub(in conversion.Convertible) (runtime.Object, error) {
