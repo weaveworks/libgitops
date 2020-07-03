@@ -264,6 +264,10 @@ testString: bar
 kind: Simple
 testString: foo
 `)
+	unrecognizedGVK = []byte(`apiVersion: unknown/v1
+kind: YouDontRecognizeMe
+testFooBar: true
+`)
 	oneComplex = []byte(`Int64: 0
 apiVersion: foogroup/v1alpha1
 bool: false
@@ -462,6 +466,39 @@ func TestDecodeAll(t *testing.T) {
 	}
 }
 
+func TestDecodeUnknown(t *testing.T) {
+	unknown := &runtime.Unknown{
+		TypeMeta:        runtime.TypeMeta{APIVersion: "unknown/v1", Kind: "YouDontRecognizeMe"},
+		Raw:             unrecognizedGVK,
+		ContentEncoding: "",
+		ContentType:     runtime.ContentTypeJSON,
+	}
+	tests := []struct {
+		name        string
+		data        []byte
+		unknown     bool
+		expected    runtime.Object
+		expectedErr bool
+	}{
+		{"Support unrecognized kinds", unrecognizedGVK, true, unknown, false},
+		{"No support for unrecognized", unrecognizedGVK, false, nil, true},
+	}
+
+	for _, rt := range tests {
+		t.Run(rt.name, func(t2 *testing.T) {
+			obj, actual := ourserializer.Decoder(
+				WithUnknownDecode(rt.unknown),
+			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
+			if (actual != nil) != rt.expectedErr {
+				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
+			}
+			if rt.expected != nil && !reflect.DeepEqual(obj, rt.expected) {
+				t2.Errorf("expected %#v but actual %#v", rt.expected, obj)
+			}
+		})
+	}
+}
+
 func TestRoundtrip(t *testing.T) {
 	tests := []struct {
 		name string
@@ -474,6 +511,7 @@ func TestRoundtrip(t *testing.T) {
 		{"simple json", simpleJSON, ContentTypeJSON, nil},
 		{"complex json", complexJSON, ContentTypeJSON, nil},
 		{"crd with objectmeta & comments", oldCRD, ContentTypeYAML, &ext1gv}, // encode as v1alpha1
+		{"unknown object", unrecognizedGVK, ContentTypeYAML, nil},
 		// TODO: Maybe an unit test (case) for a type with ObjectMeta embedded as a pointer being nil
 		// TODO: Make sure that the Encode call (with comments support) doesn't mutate the object state
 		// i.e. doesn't remove the annotation after use so multiple similar encode calls work.
@@ -484,6 +522,7 @@ func TestRoundtrip(t *testing.T) {
 			obj, err := ourserializer.Decoder(
 				WithConvertToHubDecode(true),
 				WithCommentsDecode(true),
+				WithUnknownDecode(true),
 			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
 			if err != nil {
 				t2.Errorf("unexpected decode error: %v", err)

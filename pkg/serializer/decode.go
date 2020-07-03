@@ -22,22 +22,31 @@ type DecodingOptions struct {
 	// will be converted into its hub (or internal, where applicable) representation. Otherwise, the decoded
 	// object will be left in its external representation. (Default: false)
 	ConvertToHub *bool
+
 	// Parse the YAML/JSON in strict mode, returning a specific error if the input
 	// contains duplicate or unknown fields or formatting errors. (Default: true)
 	Strict *bool
+
 	// Automatically default the decoded object. (Default: false)
 	Default *bool
+
 	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
 	// the items of the list will be traversed, decoded into their respective types, and
 	// appended to the returned slice. The v1.List will in this case not be returned.
 	// This conversion does NOT support preserving comments. If the given scheme doesn't
 	// recognize the v1.List, before using it will be registered automatically. (Default: true)
 	DecodeListElements *bool
+
 	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
 	// Only applicable to ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in EncodingOptions, too. (Default: false)
 	PreserveComments *bool
+
+	// DecodeUnknown specifies whether decode objects with an unknown GroupVersionKind into a
+	// *runtime.Unknown object when running Decode(All) (true value) or to return an error when
+	// any unrecognized type is found (false value). (Default: false)
+	DecodeUnknown *bool
 }
 
 type DecodingOptionsFunc func(*DecodingOptions)
@@ -72,6 +81,12 @@ func WithCommentsDecode(comments bool) DecodingOptionsFunc {
 	}
 }
 
+func WithUnknownDecode(unknown bool) DecodingOptionsFunc {
+	return func(opts *DecodingOptions) {
+		opts.DecodeUnknown = &unknown
+	}
+}
+
 func WithDecodingOptions(newOpts DecodingOptions) DecodingOptionsFunc {
 	return func(opts *DecodingOptions) {
 		// TODO: Null-check all of these before using them
@@ -86,6 +101,7 @@ func defaultDecodeOpts() *DecodingOptions {
 		Default:            util.BoolPtr(false),
 		DecodeListElements: util.BoolPtr(true),
 		PreserveComments:   util.BoolPtr(false),
+		DecodeUnknown:      util.BoolPtr(false),
 	}
 }
 
@@ -117,6 +133,8 @@ type decoder struct {
 // If opts.ConvertToHub is true, the decoded external object will be converted into its hub
 // 	(or internal, if applicable) representation.
 // 	Otherwise, the decoded object will be left in the external representation.
+// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
+// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 // opts.DecodeListElements is not applicable in this call.
 func (d *decoder) Decode(fr FrameReader) (runtime.Object, error) {
 	// Read a frame from the FrameReader
@@ -142,6 +160,12 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 	// TODO: Make sure any possible strict errors are returned/handled properly
 	obj, gvk, err := d.decoder.Decode(doc, nil, into)
 	if err != nil {
+		// If we asked to decode unknown objects, we are in the Decode(All) (not Into)
+		// codepath, and the error returned was due to that the kind was not registered
+		// in the scheme, decode the document as a *runtime.Unknown
+		if *d.opts.DecodeUnknown && !intoGiven && runtime.IsNotRegisteredError(err) {
+			return d.decodeUnknown(doc, ct)
+		}
 		// Give the user good errors wrt missing group & version
 		return nil, d.handleDecodeError(doc, err)
 	}
@@ -178,6 +202,7 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 // 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 // opts.DecodeListElements is not applicable in this call.
 // opts.ConvertToHub is not applicable in this call.
+// opts.DecodeUnknown is not applicable in this call
 func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 	// Read a frame from the FrameReader.
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
@@ -204,6 +229,8 @@ func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 // If opts.DecodeListElements is true and the underlying data contains a v1.List,
 // 	the items of the list will be traversed and decoded into their respective types, which are
 // 	added into the returning slice. The v1.List will in this case not be returned.
+// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
+// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 	objs := []runtime.Object{}
 	for {
@@ -224,6 +251,15 @@ func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 		objs = append(objs, nestedObjs...)
 	}
 	return objs, nil
+}
+
+// decodeUnknown decodes bytes of a certain content type into a returned *runtime.Unknown object
+func (d *decoder) decodeUnknown(doc []byte, ct ContentType) (runtime.Object, error) {
+	// Do a DecodeInto the new pointer to the object we've got. The resulting into object is
+	// also returned.
+	// The content type isn't really used here, as runtime.Unknown will never implement
+	// ObjectMeta, but the signature needs it so we'll just forward it
+	return d.decode(doc, &runtime.Unknown{}, ct)
 }
 
 func (d *decoder) handleDecodeError(doc []byte, origErr error) error {

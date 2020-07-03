@@ -93,8 +93,11 @@ type Decoder interface {
 	// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 	// If opts.ConvertToHub is true, the decoded external object will be converted into its internal representation.
 	// 	Otherwise, the decoded object will be left in the external representation.
+	// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
+	// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 	// opts.DecodeListElements is not applicable in this call.
 	Decode(fr FrameReader) (runtime.Object, error)
+
 	// DecodeInto decodes the next document in the FrameReader stream into obj if the types are matching.
 	// If there are multiple documents in the underlying stream, this call will read one
 	// 	document and return it. Decode might be invoked for getting new documents until it
@@ -109,6 +112,7 @@ type Decoder interface {
 	// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 	// opts.DecodeListElements is not applicable in this call.
 	// opts.ConvertToHub is not applicable in this call.
+	// opts.DecodeUnknown is not applicable in this call
 	DecodeInto(fr FrameReader, obj runtime.Object) error
 
 	// DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying
@@ -124,6 +128,8 @@ type Decoder interface {
 	// If opts.DecodeListElements is true and the underlying data contains a v1.List,
 	// 	the items of the list will be traversed and decoded into their respective types, which are
 	// 	added into the returning slice. The v1.List will in this case not be returned.
+	// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
+	// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 	DecodeAll(fr FrameReader) ([]runtime.Object, error)
 }
 
