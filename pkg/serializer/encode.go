@@ -124,7 +124,7 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 	}
 
 	// Get a version-specific encoder for the specified groupversion
-	versionEncoder := e.codecs.EncoderForVersion(encoder, gv)
+	versionEncoder := encoderForVersion(e.scheme, encoder, gv)
 
 	// Cast the object to a metav1.Object to get access to annotations
 	metaobj, ok := toMetaObject(obj)
@@ -135,4 +135,17 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 
 	// Specialize the encoder for a specific gv and encode the object
 	return e.encodeWithCommentSupport(versionEncoder, fw, obj, metaobj)
+}
+
+// encoderForVersion is used instead of CodecFactory.EncoderForVersion, as we want to use our own converter
+func encoderForVersion(scheme *runtime.Scheme, encoder runtime.Encoder, gv schema.GroupVersion) runtime.Encoder {
+	return newConversionCodecForScheme(
+		scheme,
+		encoder, // what content-type encoder to use
+		nil,     // no decoder
+		gv,      // specify what the target encode groupversion is
+		nil,     // no target decode groupversion
+		false,   // no defaulting
+		true,    // convert if needed before encode
+	)
 }

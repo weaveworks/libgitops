@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -159,7 +160,7 @@ type CRDOldVersion struct {
 func (in *CRDOldVersion) DeepCopyInto(out *CRDOldVersion) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	out.ObjectMeta = in.ObjectMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	return
 }
 
@@ -182,14 +183,16 @@ func (in *CRDOldVersion) DeepCopyObject() runtime.Object {
 }
 
 func (t *CRDOldVersion) ConvertTo(hub crdconversion.Hub) error {
-	obj := (hub.(runtime.Object)).(*CRDNewVersion)
-	obj.OtherString = fmt.Sprintf("Old string %s", t.TestString)
+	into := (hub.(runtime.Object)).(*CRDNewVersion)
+	into.ObjectMeta = t.ObjectMeta
+	into.OtherString = fmt.Sprintf("Old string %s", t.TestString)
 	return nil
 }
 
 func (t *CRDOldVersion) ConvertFrom(hub crdconversion.Hub) error {
-	obj := (hub.(runtime.Object)).(*CRDNewVersion)
-	obj.OtherString = "downgraded"
+	from := (hub.(runtime.Object)).(*CRDNewVersion)
+	t.ObjectMeta = from.ObjectMeta
+	t.TestString = strings.TrimPrefix(from.OtherString, "Old string ")
 	return nil
 }
 
@@ -214,7 +217,7 @@ func (t *CRDNewVersion) Hub() {}
 func (in *CRDNewVersion) DeepCopyInto(out *CRDNewVersion) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	out.ObjectMeta = in.ObjectMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	return
 }
 
@@ -242,6 +245,7 @@ var (
 	complexv2Meta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "Complex"}
 	oldCRDMeta    = metav1.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "CRD"}
 	newCRDMeta    = metav1.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "CRD"}
+	unknownMeta   = runtime.TypeMeta{APIVersion: "unknown/v1", Kind: "YouDontRecognizeMe"}
 
 	oneSimple = []byte(`apiVersion: foogroup/v1alpha1
 kind: Simple
@@ -260,6 +264,10 @@ testString: bar
 	unrecognizedVersion = []byte(`apiVersion: foogroup/v1alpha0
 kind: Simple
 testString: foo
+`)
+	unrecognizedGVK = []byte(`apiVersion: unknown/v1
+kind: YouDontRecognizeMe
+testFooBar: true
 `)
 	oneComplex = []byte(`Int64: 0
 apiVersion: foogroup/v1alpha1
@@ -298,6 +306,15 @@ metadata:
   creationTimestamp: null
 # Preserve me please!
 testString: foobar # Me too
+`)
+
+	newCRD = []byte(`# I'm a top comment
+apiVersion: foogroup/v1alpha2
+kind: CRD
+metadata:
+  creationTimestamp: null
+# Preserve me please!
+otherString: foobar # Me too
 `)
 )
 
@@ -345,8 +362,10 @@ func TestDecode(t *testing.T) {
 		expected     runtime.Object
 		expectedErr  bool
 	}{
-		{"CRD hub conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
-		{"CRD no conversion", oldCRD, false, false, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
+		{"old CRD hub conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"old CRD no conversion", oldCRD, false, false, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
+		{"new CRD hub conversion", newCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
+		{"new CRD no conversion", newCRD, false, false, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
 		{"simple internal", oneSimple, false, true, &runtimetest.InternalSimple{TestString: "foo"}, false},
 		{"complex internal", oneComplex, false, true, &runtimetest.InternalComplex{String: "bar"}, false},
 		{"simple external", oneSimple, false, false, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
@@ -392,6 +411,8 @@ func TestDecodeInto(t *testing.T) {
 		{"complex external", oneComplex, false, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar"}, false},
 		{"defaulted complex external", oneComplex, true, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar", Integer64: 5}, false},
 		{"defaulted complex internal", oneComplex, true, &runtimetest.InternalComplex{}, &runtimetest.InternalComplex{String: "bar", Integer64: 5}, false},
+		{"decode unknown obj into unknown", unrecognizedGVK, false, &runtime.Unknown{}, newUnknown(unknownMeta, unrecognizedGVK), false},
+		{"decode known obj into unknown", oneComplex, false, &runtime.Unknown{}, newUnknown(complexv1Meta, oneComplex), false},
 		{"no unknown fields", simpleUnknownField, false, &runtimetest.InternalSimple{}, nil, true},
 		{"no duplicate fields", simpleDuplicateField, false, &runtimetest.InternalSimple{}, nil, true},
 		{"no unrecognized API version", unrecognizedVersion, false, &runtimetest.InternalSimple{}, nil, true},
@@ -459,18 +480,56 @@ func TestDecodeAll(t *testing.T) {
 	}
 }
 
+func newUnknown(tm runtime.TypeMeta, raw []byte) *runtime.Unknown {
+	return &runtime.Unknown{
+		TypeMeta:        tm,
+		Raw:             raw,
+		ContentEncoding: "",                      // This is left blank by default
+		ContentType:     runtime.ContentTypeJSON, // Note: This is just a hard-coded constant, set automatically.
+	}
+}
+
+func TestDecodeUnknown(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        []byte
+		unknown     bool
+		expected    runtime.Object
+		expectedErr bool
+	}{
+		{"Decode unrecognized kinds into runtime.Unknown", unrecognizedGVK, true, newUnknown(unknownMeta, unrecognizedGVK), false},
+		{"Decode known kinds into known structs", oneComplex, true, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar"}, false},
+		{"No support for unrecognized", unrecognizedGVK, false, nil, true},
+	}
+
+	for _, rt := range tests {
+		t.Run(rt.name, func(t2 *testing.T) {
+			obj, actual := ourserializer.Decoder(
+				WithUnknownDecode(rt.unknown),
+			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
+			if (actual != nil) != rt.expectedErr {
+				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
+			}
+			if rt.expected != nil && !reflect.DeepEqual(obj, rt.expected) {
+				t2.Errorf("expected %#v but actual %#v", rt.expected, obj)
+			}
+		})
+	}
+}
+
 func TestRoundtrip(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
 		ct   ContentType
-		obj  runtime.Object
+		gv   *schema.GroupVersion // use a specific groupversion if set. if nil, then use the default Encode
 	}{
-		{"simple yaml", oneSimple, ContentTypeYAML, &runtimetest.InternalSimple{}},
-		{"complex yaml", oneComplex, ContentTypeYAML, &runtimetest.InternalComplex{}},
-		{"simple json", simpleJSON, ContentTypeJSON, &runtimetest.InternalSimple{}},
-		{"complex json", complexJSON, ContentTypeJSON, &runtimetest.InternalComplex{}},
-		{"crd with objectmeta & comments", oldCRD, ContentTypeYAML, &CRDOldVersion{}},
+		{"simple yaml", oneSimple, ContentTypeYAML, nil},
+		{"complex yaml", oneComplex, ContentTypeYAML, nil},
+		{"simple json", simpleJSON, ContentTypeJSON, nil},
+		{"complex json", complexJSON, ContentTypeJSON, nil},
+		{"crd with objectmeta & comments", oldCRD, ContentTypeYAML, &ext1gv}, // encode as v1alpha1
+		{"unknown object", unrecognizedGVK, ContentTypeYAML, nil},
 		// TODO: Maybe an unit test (case) for a type with ObjectMeta embedded as a pointer being nil
 		// TODO: Make sure that the Encode call (with comments support) doesn't mutate the object state
 		// i.e. doesn't remove the annotation after use so multiple similar encode calls work.
@@ -478,14 +537,21 @@ func TestRoundtrip(t *testing.T) {
 
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
-			err := ourserializer.Decoder(
+			obj, err := ourserializer.Decoder(
+				WithConvertToHubDecode(true),
 				WithCommentsDecode(true),
-			).DecodeInto(NewYAMLFrameReader(FromBytes(rt.data)), rt.obj)
+				WithUnknownDecode(true),
+			).Decode(NewYAMLFrameReader(FromBytes(rt.data)))
 			if err != nil {
 				t2.Errorf("unexpected decode error: %v", err)
+				return
 			}
 			buf := new(bytes.Buffer)
-			err = defaultEncoder.Encode(NewFrameWriter(rt.ct, buf), rt.obj)
+			if rt.gv == nil {
+				err = defaultEncoder.Encode(NewFrameWriter(rt.ct, buf), obj)
+			} else {
+				err = defaultEncoder.EncodeForGroupVersion(NewFrameWriter(rt.ct, buf), obj, *rt.gv)
+			}
 			actual := buf.Bytes()
 			if err != nil {
 				t2.Errorf("unexpected encode error: %v", err)
