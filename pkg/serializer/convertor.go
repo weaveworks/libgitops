@@ -16,6 +16,7 @@ var (
 	errOutMustBeHub       = errors.New("if in object is Convertible, out must be Hub")
 	errInMustBeHub        = errors.New("if out object is Convertible, in must be Hub")
 	errMustNotHaveTwoHubs = errors.New("in and out must not both be Hubs")
+	errObjMustNotBeBoth   = errors.New("given object must not implement both the Convertible and Hub interfaces")
 )
 
 func newConverter(scheme *runtime.Scheme) *converter {
@@ -167,49 +168,68 @@ func (c *objectConvertor) ConvertToVersion(in runtime.Object, groupVersioner run
 	// This function is called at Decode(All)-time. If we requested a conversion to internal, just proceed
 	// as before, using the scheme's ConvertToVersion function. But if we don't want to convert the newly-decoded
 	// external object, we can just do nothing and the object will stay unconverted.
+	// doConversion is always true in the Encode codepath.
 	if !c.doConversion {
 		// DeepCopy the object to make sure that although in would be somehow modified, it doesn't affect out
 		return in.DeepCopyObject(), nil
 	}
 
-	// If this is a controller-runtime CRD convertible, convert it to the Hub type and return it
-	convertible, ok := in.(conversion.Convertible)
-	if ok {
+	// At this point we know we are either in the ConvertToHub Decode(All) codepath, or Encode
+	// Check whether "in" is a CRD-type object
+	convertible, isConvertible := in.(conversion.Convertible)
+	_, isHub := in.(conversion.Hub)
+
+	// Return quickly if neither of the objects are CRD-types, using the "classic" API machinery
+	if !isHub && !isConvertible {
+		// Convert normally using the specified groupversion
+		return c.scheme.ConvertToVersion(in, groupVersioner)
+
+	} else if isHub && isConvertible { // Validate that the object isn't crazy and implements both interfaces
+		return nil, NewCRDConversionError(nil, CRDConversionErrorCauseInvalidArgs, errObjMustNotBeBoth)
+	}
+
+	// We now know that either isHub or isConvertible is true, but not both
+	// If we are in the Decode codepath, the groupVersioner will be internal
+	// We'll need to take special care to convert the object into a Hub
+	if groupVersioner == runtime.InternalGroupVersioner {
+		// As a "ConvertToHub" was asked for, and the in object already is a Hub, just return a deepcopy
+		if isHub {
+			return in.DeepCopyObject(), nil
+		}
+
+		// Otherwise, convert it to a Hub
 		return c.convertToHub(convertible)
 	}
-	// If we should convert back to the convertible, identify which convertible it is
-	// This happens almost certainly in the encode codepath, where there exists a specific
-	// chosen groupVersioner
-	hub, ok := in.(conversion.Hub)
-	if ok {
-		// Get what group version was asked for, and what kind the hub has at the moment
-		gv, ok := groupVersioner.(schema.GroupVersion)
-		if !ok {
-			return nil, fmt.Errorf("couldn't get groupversion from groupversioner: %v", groupVersioner)
-		}
-		hubGVK, err := gvkForObject(c.scheme, hub)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't get GVK for hub: %w", err)
-		}
-		// Assume the Hub kind and Convertible kinds match
-		gvk := gv.WithKind(hubGVK.Kind)
 
-		// Create the convertible object and cast it to a Convertible
-		intoObj, err := c.scheme.New(gvk)
-		if err != nil {
-			return nil, fmt.Errorf("can't create new obj of gvk %s: %w", gvk, err)
-		}
-		convertible, ok = intoObj.(conversion.Convertible)
-		if !ok {
-			return nil, fmt.Errorf("obj of gvk %s isn't convertible", gvk)
-		}
-		// Run the convertFromHub code
-		err = c.convertFromHub(hub, convertible)
-		return convertible, err
+	// At this point we are in the encode codepath. The groupversioner given specifies what
+	// groupVersion to convert into
+
+	// Get what group version was asked for
+	gv, ok := groupVersioner.(schema.GroupVersion)
+	if !ok {
+		return nil, fmt.Errorf("couldn't get groupversion from groupversioner: %v", groupVersioner)
 	}
 
-	// Convert normally into the internal version using the internal groupversioner.
-	return c.scheme.ConvertToVersion(in, groupVersioner)
+	// Get the groupversionkind for the in object
+	inGVK, err := gvkForObject(c.scheme, in)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't get GVK for hub: %w", err)
+	}
+	// Assume the in and out (Hub and Convertible) kinds match (in encoded form)
+	outGVK := gv.WithKind(inGVK.Kind)
+
+	// Create the out object
+	out, err := c.scheme.New(outGVK)
+	if err != nil {
+		return nil, fmt.Errorf("can't create new obj of gvk %s: %w", outGVK, err)
+	}
+
+	// Run the generic convert in-into-out function, which will properly handle this CRD case
+	if err := c.Convert(in, out, nil); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }
 
 func (c *objectConvertor) convertToHub(in conversion.Convertible) (runtime.Object, error) {

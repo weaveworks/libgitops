@@ -112,7 +112,9 @@ type Decoder interface {
 	// 	a returned failed because of the strictness using k8s.io/apimachinery/pkg/runtime.IsStrictDecodingError.
 	// opts.DecodeListElements is not applicable in this call.
 	// opts.ConvertToHub is not applicable in this call.
-	// opts.DecodeUnknown is not applicable in this call
+	// opts.DecodeUnknown is not applicable in this call. In case you want to decode an object into a
+	// 	*runtime.Unknown, just create a runtime.Unknown object and pass the pointer as obj into DecodeInto
+	// 	and it'll work.
 	DecodeInto(fr FrameReader, obj runtime.Object) error
 
 	// DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying

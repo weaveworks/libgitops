@@ -245,6 +245,7 @@ var (
 	complexv2Meta = runtime.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "Complex"}
 	oldCRDMeta    = metav1.TypeMeta{APIVersion: "foogroup/v1alpha1", Kind: "CRD"}
 	newCRDMeta    = metav1.TypeMeta{APIVersion: "foogroup/v1alpha2", Kind: "CRD"}
+	unknownMeta   = runtime.TypeMeta{APIVersion: "unknown/v1", Kind: "YouDontRecognizeMe"}
 
 	oneSimple = []byte(`apiVersion: foogroup/v1alpha1
 kind: Simple
@@ -306,6 +307,15 @@ metadata:
 # Preserve me please!
 testString: foobar # Me too
 `)
+
+	newCRD = []byte(`# I'm a top comment
+apiVersion: foogroup/v1alpha2
+kind: CRD
+metadata:
+  creationTimestamp: null
+# Preserve me please!
+otherString: foobar # Me too
+`)
 )
 
 func TestEncode(t *testing.T) {
@@ -352,8 +362,10 @@ func TestDecode(t *testing.T) {
 		expected     runtime.Object
 		expectedErr  bool
 	}{
-		{"CRD hub conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
-		{"CRD no conversion", oldCRD, false, false, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
+		{"old CRD hub conversion", oldCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "Old string foobar"}, false},
+		{"old CRD no conversion", oldCRD, false, false, &CRDOldVersion{oldCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
+		{"new CRD hub conversion", newCRD, false, true, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
+		{"new CRD no conversion", newCRD, false, false, &CRDNewVersion{newCRDMeta, metav1.ObjectMeta{}, "foobar"}, false},
 		{"simple internal", oneSimple, false, true, &runtimetest.InternalSimple{TestString: "foo"}, false},
 		{"complex internal", oneComplex, false, true, &runtimetest.InternalComplex{String: "bar"}, false},
 		{"simple external", oneSimple, false, false, &runtimetest.ExternalSimple{TypeMeta: simpleMeta, TestString: "foo"}, false},
@@ -399,6 +411,8 @@ func TestDecodeInto(t *testing.T) {
 		{"complex external", oneComplex, false, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar"}, false},
 		{"defaulted complex external", oneComplex, true, &runtimetest.ExternalComplex{}, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar", Integer64: 5}, false},
 		{"defaulted complex internal", oneComplex, true, &runtimetest.InternalComplex{}, &runtimetest.InternalComplex{String: "bar", Integer64: 5}, false},
+		{"decode unknown obj into unknown", unrecognizedGVK, false, &runtime.Unknown{}, newUnknown(unknownMeta, unrecognizedGVK), false},
+		{"decode known obj into unknown", oneComplex, false, &runtime.Unknown{}, newUnknown(complexv1Meta, oneComplex), false},
 		{"no unknown fields", simpleUnknownField, false, &runtimetest.InternalSimple{}, nil, true},
 		{"no duplicate fields", simpleDuplicateField, false, &runtimetest.InternalSimple{}, nil, true},
 		{"no unrecognized API version", unrecognizedVersion, false, &runtimetest.InternalSimple{}, nil, true},
@@ -466,13 +480,16 @@ func TestDecodeAll(t *testing.T) {
 	}
 }
 
-func TestDecodeUnknown(t *testing.T) {
-	unknown := &runtime.Unknown{
-		TypeMeta:        runtime.TypeMeta{APIVersion: "unknown/v1", Kind: "YouDontRecognizeMe"},
-		Raw:             unrecognizedGVK,
-		ContentEncoding: "",
-		ContentType:     runtime.ContentTypeJSON,
+func newUnknown(tm runtime.TypeMeta, raw []byte) *runtime.Unknown {
+	return &runtime.Unknown{
+		TypeMeta:        tm,
+		Raw:             raw,
+		ContentEncoding: "",                      // This is left blank by default
+		ContentType:     runtime.ContentTypeJSON, // Note: This is just a hard-coded constant, set automatically.
 	}
+}
+
+func TestDecodeUnknown(t *testing.T) {
 	tests := []struct {
 		name        string
 		data        []byte
@@ -480,7 +497,8 @@ func TestDecodeUnknown(t *testing.T) {
 		expected    runtime.Object
 		expectedErr bool
 	}{
-		{"Support unrecognized kinds", unrecognizedGVK, true, unknown, false},
+		{"Decode unrecognized kinds into runtime.Unknown", unrecognizedGVK, true, newUnknown(unknownMeta, unrecognizedGVK), false},
+		{"Decode known kinds into known structs", oneComplex, true, &runtimetest.ExternalComplex{TypeMeta: complexv1Meta, String: "bar"}, false},
 		{"No support for unrecognized", unrecognizedGVK, false, nil, true},
 	}
 
