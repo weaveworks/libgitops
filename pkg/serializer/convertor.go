@@ -215,6 +215,17 @@ func (c *objectConvertor) ConvertToVersion(in runtime.Object, groupVersioner run
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get GVK for hub: %w", err)
 	}
+
+	// If "in" already has the right, expected groupversion (here in the Encode CRD codepath),
+	// just return a deepcopy with its GVK set
+	if inGVK.GroupVersion().String() == gv.String() {
+		// Always make sure that the TypeMeta information is encoded.
+		// The Convert() call below also sets this information automatically
+		out := in.DeepCopyObject()
+		out.GetObjectKind().SetGroupVersionKind(inGVK)
+		return out, nil
+	}
+
 	// Assume the in and out (Hub and Convertible) kinds match (in encoded form)
 	outGVK := gv.WithKind(inGVK.Kind)
 
