@@ -308,6 +308,13 @@ metadata:
 testString: foobar # Me too
 `)
 
+	oldCRDNoComments = []byte(`apiVersion: foogroup/v1alpha1
+kind: CRD
+metadata:
+  creationTimestamp: null
+testString: foobar
+`)
+
 	newCRD = []byte(`# I'm a top comment
 apiVersion: foogroup/v1alpha2
 kind: CRD
@@ -316,11 +323,20 @@ metadata:
 # Preserve me please!
 otherString: foobar # Me too
 `)
+
+	newCRDNoComments = []byte(`apiVersion: foogroup/v1alpha2
+kind: CRD
+metadata:
+  creationTimestamp: null
+otherString: foobar
+`)
 )
 
 func TestEncode(t *testing.T) {
 	simpleObj := &runtimetest.InternalSimple{TestString: "foo"}
 	complexObj := &runtimetest.InternalComplex{String: "bar"}
+	oldCRDObj := &CRDOldVersion{TestString: "foobar"}
+	newCRDObj := &CRDNewVersion{OtherString: "foobar"}
 	tests := []struct {
 		name        string
 		ct          ContentType
@@ -333,6 +349,8 @@ func TestEncode(t *testing.T) {
 		{"both simple and complex yaml", ContentTypeYAML, []runtime.Object{simpleObj, complexObj}, simpleAndComplex, false},
 		{"simple json", ContentTypeJSON, []runtime.Object{simpleObj}, simpleJSON, false},
 		{"complex json", ContentTypeJSON, []runtime.Object{complexObj}, complexJSON, false},
+		{"old CRD yaml", ContentTypeYAML, []runtime.Object{oldCRDObj}, oldCRDNoComments, false},
+		{"new CRD yaml", ContentTypeYAML, []runtime.Object{newCRDObj}, newCRDNoComments, false},
 		//{"no-conversion simple", defaultEncoder, &runtimetest.ExternalSimple{TestString: "foo"}, simpleJSON, false},
 		//{"support internal", defaultEncoder, []runtime.Object{simpleObj}, []byte(`{"testString":"foo"}` + "\n"), false},
 	}
