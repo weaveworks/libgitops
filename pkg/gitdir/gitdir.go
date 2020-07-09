@@ -207,7 +207,7 @@ func (d *GitDirectory) commitLoop() {
 
 		// Wait for the checkout to exist
 		if d.wt == nil {
-			log.Tracef("commitLoop: Waiting for the clone to exist")
+			log.Trace("commitLoop: Waiting for the clone to exist")
 			return
 		}
 
@@ -215,7 +215,7 @@ func (d *GitDirectory) commitLoop() {
 
 		// Perform the commit
 		if err := d.doCommit(); err != nil {
-			log.Errorf("checkoutLoop: git commit & push failed with error:", err)
+			log.Errorf("checkoutLoop: git commit & push failed with error: %v", err)
 			return
 		}
 

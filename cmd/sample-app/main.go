@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -77,11 +78,11 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		content, err := scheme.Serializer.Encoder(serializer.ContentTypeJSON).Encode(obj)
-		if err != nil {
+		var content bytes.Buffer
+		if err := scheme.Serializer.Encoder().Encode(serializer.NewJSONFrameWriter(&content), obj); err != nil {
 			return err
 		}
-		return c.JSONBlob(http.StatusOK, content)
+		return c.JSONBlob(http.StatusOK, content.Bytes())
 	})
 
 	e.POST("/:name", func(c echo.Context) error {

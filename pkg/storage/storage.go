@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/weaveworks/libgitops/pkg/runtime"
@@ -76,13 +77,9 @@ func (s *GenericStorage) New(gvk schema.GroupVersionKind) (runtime.Object, error
 		return nil, err
 	}
 
-	// Default either through the scheme, or the high-level serializer Object
-	if gvk.Version == kruntime.APIVersionInternal {
-		if err := s.serializer.DefaultInternal(obj); err != nil {
-			return nil, err
-		}
-	} else {
-		s.serializer.Scheme().Default(obj)
+	// Default the new object, this will take care of internal defaulting automatically
+	if err := s.serializer.Defaulter().Default(obj); err != nil {
+		return nil, err
 	}
 
 	// Cast to runtime.Object, and make sure it works
@@ -132,12 +129,13 @@ func (s *GenericStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) er
 		contentType = serializer.ContentTypeYAML
 	}
 
-	b, err := s.serializer.Encoder(contentType).Encode(obj)
+	var objBytes bytes.Buffer
+	err := s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
 	if err != nil {
 		return err
 	}
 
-	return s.raw.Write(storageKey, b)
+	return s.raw.Write(storageKey, objBytes.Bytes())
 }
 
 // Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
@@ -225,7 +223,9 @@ func (s *GenericStorage) decode(content []byte, gvk schema.GroupVersionKind) (ru
 	isInternal := gvk.Version == kruntime.APIVersionInternal
 
 	// Decode the bytes into an Object
-	obj, err := s.serializer.Decoder(serializer.FromBytes(content), serializer.WithInternalDecode(isInternal)).Decode()
+	obj, err := s.serializer.Decoder(
+		serializer.WithConvertToHubDecode(isInternal),
+	).Decode(serializer.NewJSONFrameReader(serializer.FromBytes(content)))
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,8 @@ func (s *GenericStorage) decodeMeta(content []byte, gvk schema.GroupVersionKind)
 	obj := runtime.NewAPIType()
 
 	// Decode the bytes into the APIType object
-	if err := s.serializer.Decoder(serializer.FromBytes(content)).DecodeInto(obj); err != nil {
+	err := s.serializer.Decoder().DecodeInto(serializer.NewYAMLFrameReader(serializer.FromBytes(content)), obj)
+	if err != nil {
 		return nil, err
 	}
 
