@@ -1,0 +1,19 @@
+name: Continuous Integration
+on: [push, pull_request]
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Sources
+        uses: actions/checkout@v2
+      - name: Docker Layer Caching
+        uses: satackey/action-docker-layer-caching@v0.0.3
+      - name: Restore Go Cache
+        uses: actions/cache@v2
+        with:
+          path: bin/cache/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+      - name: Run Unit Tests
+        run: make test
