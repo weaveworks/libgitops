@@ -4,9 +4,16 @@ GIT_VERSION := $(shell hack/ldflags.sh --version-only)
 PROJECT := github.com/weaveworks/libgitops
 BOUNDING_API_DIRS := ${PROJECT}/pkg,${PROJECT}/cmd/apis
 API_DIRS := ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/runtime
+SRC_PKGS := cmd pkg
+DOCKER_ARGS := --rm
 CACHE_DIR := $(shell pwd)/bin/cache
 API_DOCS := api/sample-app.md api/runtime.md
 BINARIES := bin/sample-app
+
+# If we're not running in CI, run Docker interactively
+ifndef CI
+	DOCKER_ARGS += -it
+endif
 
 all: docker-binaries
 
@@ -17,7 +24,7 @@ $(BINARIES): bin/%:
 
 docker-%:
 	mkdir -p "${CACHE_DIR}/go" "${CACHE_DIR}/cache"
-	docker run -it --rm \
+	docker run ${DOCKER_ARGS} \
 		-u "${UID_GID}" \
 		-v "${CACHE_DIR}/go":/go \
 		-v "${CACHE_DIR}/cache":/.cache/go-build \
@@ -25,12 +32,16 @@ docker-%:
 		-w "/go/src/${PROJECT}" \
 		"golang:${GO_VERSION}" make $*
 
+test: docker-test-internal
+test-internal:
+	go test $(addsuffix /...,$(addprefix ./,${SRC_PKGS}))
+
 tidy: docker-tidy-internal
 tidy-internal: /go/bin/goimports
 	go mod tidy
 	hack/generate-client.sh
-	gofmt -s -w pkg cmd
-	goimports -w pkg cmd
+	gofmt -s -w ${SRC_PKGS}
+	goimports -w ${SRC_PKGS}
 
 autogen: docker-autogen-internal
 autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen /go/bin/openapi-gen
