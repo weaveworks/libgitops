@@ -1,12 +1,12 @@
 package patch
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
-	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 )
@@ -26,30 +26,29 @@ type patcher struct {
 }
 
 // Create is a helper that creates a patch out of the change made in applyFn
-func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error) ([]byte, error) {
+func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error) (patchBytes []byte, err error) {
+	var oldBytes, newBytes bytes.Buffer
+	encoder := p.serializer.Encoder()
 	old := new.DeepCopyObject().(runtime.Object)
-	encoder := p.serializer.Encoder(serializer.ContentTypeJSON)
 
-	oldbytes, err := encoder.Encode(old)
+	if err = encoder.Encode(serializer.NewJSONFrameWriter(&oldBytes), old); err != nil {
+		return
+	}
+
+	if err = applyFn(new); err != nil {
+		return
+	}
+
+	if err = encoder.Encode(serializer.NewJSONFrameWriter(&newBytes), new); err != nil {
+		return
+	}
+
+	emptyObj, err := p.serializer.Scheme().New(old.GroupVersionKind())
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	emptyobj, err := p.serializer.Scheme().New(old.GroupVersionKind())
-	if err != nil {
-		return nil, err
-	}
-
-	if err := applyFn(new); err != nil {
-		return nil, err
-	}
-
-	newbytes, err := encoder.Encode(new)
-	if err != nil {
-		return nil, err
-	}
-
-	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldbytes, newbytes, emptyobj)
+	patchBytes, err = strategicpatch.CreateTwoWayMergePatch(oldBytes.Bytes(), newBytes.Bytes(), emptyObj)
 	if err != nil {
 		return nil, fmt.Errorf("CreateTwoWayMergePatch failed: %v", err)
 	}
@@ -58,12 +57,12 @@ func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error)
 }
 
 func (p *patcher) Apply(original, patch []byte, gvk schema.GroupVersionKind) ([]byte, error) {
-	emptyobj, err := p.serializer.Scheme().New(gvk)
+	emptyObj, err := p.serializer.Scheme().New(gvk)
 	if err != nil {
 		return nil, err
 	}
 
-	b, err := strategicpatch.StrategicMergePatch(original, patch, emptyobj)
+	b, err := strategicpatch.StrategicMergePatch(original, patch, emptyObj)
 	if err != nil {
 		return nil, err
 	}
@@ -89,11 +88,16 @@ func (p *patcher) ApplyOnFile(filePath string, patch []byte, gvk schema.GroupVer
 // this helper takes that as an input and returns the same JSON re-encoded
 // with the serializer so it conforms to a runtime.Object
 // TODO: Just use encoding/json.Indent here instead?
-func (p *patcher) serializerEncode(input []byte) (result []byte, err error) {
-	var obj kruntime.Object
-	if obj, err = p.serializer.Decoder(serializer.FromBytes(input)).Decode(); err == nil {
-		result, err = p.serializer.Encoder(serializer.ContentTypeJSON).Encode(obj)
+func (p *patcher) serializerEncode(input []byte) ([]byte, error) {
+	obj, err := p.serializer.Decoder().Decode(serializer.NewJSONFrameReader(serializer.FromBytes(input)))
+	if err != nil {
+		return nil, err
 	}
 
-	return
+	var result bytes.Buffer
+	if err := p.serializer.Encoder().Encode(serializer.NewJSONFrameWriter(&result), obj); err != nil {
+		return nil, err
+	}
+
+	return result.Bytes(), err
 }
