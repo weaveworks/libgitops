@@ -31,10 +31,6 @@ func (i *index) loadByID(gvk schema.GroupVersionKind, uid runtime.UID) (runtime.
 	return nil, nil
 }
 
-func (i *index) load(obj runtime.Object) (runtime.Object, error) {
-	return i.loadByID(obj.GroupVersionKind(), obj.GetUID())
-}
-
 func (i *index) loadAll() ([]runtime.Object, error) {
 	var size uint64
 

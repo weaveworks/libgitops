@@ -47,7 +47,7 @@ get_version_vars() {
 ldflag() {
   local key=${1}
   local val=${2}
-  echo "-X '${GO_PROJECT}/pkg/version.${key}=${val}'"
+  echo "-X '${GO_PROJECT}/cmd/sample-app/version.${key}=${val}'"
 }
 
 # Prints the value that needs to be passed to the -ldflags parameter of go build

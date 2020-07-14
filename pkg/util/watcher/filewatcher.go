@@ -58,7 +58,6 @@ var combinedEvents = []combinedEvent{
 type notifyEvents []notify.EventInfo
 type eventStream chan notify.EventInfo
 type FileUpdateStream chan *FileUpdate
-type watches []string
 
 // Options specifies options for the FileWatcher
 type Options struct {
@@ -117,7 +116,6 @@ type FileWatcher struct {
 	dir          string
 	events       eventStream
 	updates      FileUpdateStream
-	watches      watches
 	suspendEvent FileEvent
 	monitor      *sync.Monitor
 	dispatcher   *sync.Monitor
