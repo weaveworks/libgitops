@@ -9,6 +9,9 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/spf13/pflag"
+	"github.com/weaveworks/libgitops/cmd/sample-app/version"
+
 	"github.com/labstack/echo"
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
@@ -25,6 +28,10 @@ import (
 const ManifestDir = "/tmp/libgitops/manifest"
 
 func main() {
+	// Parse the version flag
+	parseVersionFlag()
+
+	// Run the application
 	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -62,6 +69,7 @@ func run() error {
 	defer func() { _ = ms.Close() }()
 	Client := client.NewClient(cache.NewCache(ms))
 
+	// Set up the echo server
 	e := echo.New()
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Welcome!")
@@ -110,7 +118,7 @@ func run() error {
 		}
 	}()
 
-	quit := make(chan os.Signal)
+	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 
 	// Wait for interrupt signal to gracefully shutdown the application with a timeout of 10 seconds
@@ -119,6 +127,17 @@ func run() error {
 	defer cancel()
 
 	return e.Shutdown(ctx)
+}
+
+func parseVersionFlag() {
+	var showVersion bool
+
+	pflag.BoolVar(&showVersion, "version", showVersion, "Show version information and exit")
+	pflag.Parse()
+	if showVersion {
+		fmt.Printf("sample-app version: %#v\n", version.Get())
+		os.Exit(0)
+	}
 }
 
 /*
