@@ -23,7 +23,7 @@ func (t Time) String() string {
 		return "<unknown>"
 	}
 
-	return duration.HumanDuration(time.Now().Sub(t.Time.Time))
+	return duration.HumanDuration(time.Since(t.Time.Time))
 }
 
 // Timestamp returns the current UTC time
