@@ -53,8 +53,13 @@ type Serializer interface {
 	// Defaulter is a high-level interface for accessing defaulting functions in a scheme
 	Defaulter() Defaulter
 
-	// Scheme provides access to the underlying runtime.Scheme
+	// Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
+	// the "type universe" and advanced conversion/defaulting features
 	Scheme() *runtime.Scheme
+
+	// Codecs provides access to the underlying serializer.CodecFactory, may be used if low-level access
+	// is needed for encoding and decoding
+	Codecs() *k8sserializer.CodecFactory
 }
 
 type schemeAndCodec struct {
@@ -169,6 +174,7 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 		panic("scheme must not be nil")
 	}
 
+	// Ensure codecs is never nil
 	if codecs == nil {
 		codecs = &k8sserializer.CodecFactory{}
 		*codecs = k8sserializer.NewCodecFactory(scheme)
@@ -191,9 +197,16 @@ type serializer struct {
 	defaulter *defaulter
 }
 
-// Scheme provides access to the underlying runtime.Scheme
+// Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
+// the "type universe" and advanced conversion/defaulting features
 func (s *serializer) Scheme() *runtime.Scheme {
 	return s.scheme
+}
+
+// Codecs provides access to the underlying serializer.CodecFactory, may be used if low-level access
+// is needed for encoding and decoding
+func (s *serializer) Codecs() *k8sserializer.CodecFactory {
+	return s.codecs
 }
 
 func (s *serializer) Decoder(optFns ...DecodingOptionsFunc) Decoder {
