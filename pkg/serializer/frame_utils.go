@@ -8,7 +8,8 @@ type FrameList [][]byte
 // ReadFrameList is a convenience method that reads all available frames from the FrameReader
 // into a returned FrameList
 func ReadFrameList(fr FrameReader) (FrameList, error) {
-	frameList := [][]byte{}
+	// TODO: Create an unit test for this function
+	var frameList [][]byte
 	for {
 		// Read until we get io.EOF or an error
 		frame, err := fr.ReadFrame()
@@ -25,6 +26,7 @@ func ReadFrameList(fr FrameReader) (FrameList, error) {
 
 // WriteFrameList is a convenience method that writes a set of frames to a FrameWriter
 func WriteFrameList(fw FrameWriter, frameList FrameList) error {
+	// TODO: Create an unit test for this function
 	// Loop all frames in the list, and write them individually to the FrameWriter
 	for _, frame := range frameList {
 		if _, err := fw.Write(frame); err != nil {
