@@ -39,6 +39,7 @@ func (t Time) MarshalJSON() (b []byte, err error) {
 	if t.Time.IsZero() {
 		// If the embedded metav1.Time is zero,
 		// use the current time when marshaling
+		// TODO: Move this to the storage instead?
 		b, err = Timestamp().Time.MarshalJSON()
 	} else {
 		b, err = t.Time.MarshalJSON()

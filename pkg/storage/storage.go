@@ -16,33 +16,38 @@ import (
 // One Storage instance handles all different Kinds of Objects
 type Storage interface {
 	// New creates a new Object for the specified kind
-	New(gvk schema.GroupVersionKind) (runtime.Object, error)
+	New(kind KindKey) (runtime.Object, error)
+
 	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content
-	Get(gvk schema.GroupVersionKind, uid runtime.UID) (runtime.Object, error)
+	Get(key ObjectKey) (runtime.Object, error)
 	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
-	GetMeta(gvk schema.GroupVersionKind, uid runtime.UID) (runtime.Object, error)
+	GetMeta(key ObjectKey) (runtime.Object, error)
 	// Set saves the Object to disk. If the Object does not exist, the
 	// ObjectMeta.Created field is set automatically
-	Set(gvk schema.GroupVersionKind, obj runtime.Object) error
+	Set(obj runtime.Object) error
 	// Patch performs a strategic merge patch on the Object with the given UID, using the byte-encoded patch given
-	Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error
+	Patch(key ObjectKey, patch []byte) error
 	// Delete removes an Object from the storage
-	Delete(gvk schema.GroupVersionKind, uid runtime.UID) error
-	// List lists Objects for the specific kind
-	List(gvk schema.GroupVersionKind) ([]runtime.Object, error)
-	// ListMeta lists all Objects' APIType representation. In other words,
-	// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
-	// This allows for faster runs (no need to unmarshal "the world"), and less
-	// resource usage, when only metadata is unmarshalled into memory
-	ListMeta(gvk schema.GroupVersionKind) ([]runtime.Object, error)
-	// Count returns the amount of available Objects of a specific kind
-	// This is used by Caches to check if all Objects are cached to perform a List
-	Count(gvk schema.GroupVersionKind) (uint64, error)
+	Delete(key ObjectKey) error
 	// Checksum returns a string representing the state of an Object on disk
 	// The checksum should change if any modifications have been made to the
 	// Object on disk, it can be e.g. the Object's modification timestamp or
 	// calculated checksum
-	Checksum(gvk schema.GroupVersionKind, uid runtime.UID) (string, error)
+	Checksum(key ObjectKey) (string, error)
+
+	// List lists Objects for the specific kind
+	List(kind KindKey) ([]runtime.Object, error)
+	// ListMeta lists all Objects' APIType representation. In other words,
+	// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
+	// This allows for faster runs (no need to unmarshal "the world"), and less
+	// resource usage, when only metadata is unmarshalled into memory
+	ListMeta(kind KindKey) ([]runtime.Object, error)
+	// Count returns the amount of available Objects of a specific kind
+	// This is used by Caches to check if all Objects are cached to perform a List
+	Count(kind KindKey) (uint64, error)
+
+	// ObjectKeyFor returns the ObjectKey for the given object
+	ObjectKeyFor(obj runtime.Object) (ObjectKey, error)
 	// RawStorage returns the RawStorage instance backing this Storage
 	RawStorage() RawStorage
 	// Serializer returns the serializer
@@ -52,15 +57,16 @@ type Storage interface {
 }
 
 // NewGenericStorage constructs a new Storage
-func NewGenericStorage(rawStorage RawStorage, serializer serializer.Serializer) Storage {
-	return &GenericStorage{rawStorage, serializer, patchutil.NewPatcher(serializer)}
+func NewGenericStorage(rawStorage RawStorage, serializer serializer.Serializer, identifiers []runtime.IdentifierFactory) Storage {
+	return &GenericStorage{rawStorage, serializer, patchutil.NewPatcher(serializer), identifiers}
 }
 
 // GenericStorage implements the Storage interface
 type GenericStorage struct {
-	raw        RawStorage
-	serializer serializer.Serializer
-	patcher    patchutil.Patcher
+	raw         RawStorage
+	serializer  serializer.Serializer
+	patcher     patchutil.Patcher
+	identifiers []runtime.IdentifierFactory
 }
 
 var _ Storage = &GenericStorage{}
@@ -71,8 +77,8 @@ func (s *GenericStorage) Serializer() serializer.Serializer {
 
 // New creates a new Object for the specified kind
 // TODO: Create better error handling if the GVK specified is not recognized
-func (s *GenericStorage) New(gvk schema.GroupVersionKind) (runtime.Object, error) {
-	obj, err := s.serializer.Scheme().New(gvk)
+func (s *GenericStorage) New(kind KindKey) (runtime.Object, error) {
+	obj, err := s.serializer.Scheme().New(kind.GetGVK())
 	if err != nil {
 		return nil, err
 	}
@@ -92,77 +98,82 @@ func (s *GenericStorage) New(gvk schema.GroupVersionKind) (runtime.Object, error
 	// from defaulting external TypeMeta information was set. Set the
 	// desired gvk here so it's correctly handled in all code that gets
 	// the gvk from the Object
-	metaObj.SetGroupVersionKind(gvk)
+	metaObj.SetGroupVersionKind(kind.GetGVK())
 	return metaObj, nil
 }
 
 // Get returns a new Object for the resource at the specified kind/uid path, based on the file content
-func (s *GenericStorage) Get(gvk schema.GroupVersionKind, uid runtime.UID) (runtime.Object, error) {
-	storageKey := KeyForUID(gvk, uid)
-	content, err := s.raw.Read(storageKey)
+func (s *GenericStorage) Get(key ObjectKey) (runtime.Object, error) {
+	content, err := s.raw.Read(key)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.decode(content, gvk)
+	return s.decode(content, key.GetGVK())
 }
 
 // TODO: Verify this works
 // GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
-func (s *GenericStorage) GetMeta(gvk schema.GroupVersionKind, uid runtime.UID) (runtime.Object, error) {
-	storageKey := KeyForUID(gvk, uid)
-	content, err := s.raw.Read(storageKey)
+func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.Object, error) {
+	content, err := s.raw.Read(key)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.decodeMeta(content, gvk)
+	return s.decodeMeta(content, key.GetGVK())
 }
 
 // Set saves the Object to disk
-func (s *GenericStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
-	storageKey := KeyForUID(gvk, obj.GetUID())
+func (s *GenericStorage) Set(obj runtime.Object) error {
+	key, err := s.ObjectKeyFor(obj)
+	if err != nil {
+		return err
+	}
 
-	// Set the content type based on the format given by the RawStorage
-	var contentType = serializer.ContentTypeJSON
-	if s.raw.Format(storageKey) != FormatJSON {
-		contentType = serializer.ContentTypeYAML
+	// Set the content type based on the format given by the RawStorage, but default to JSON
+	contentType := serializer.ContentTypeJSON
+	if ct := s.raw.ContentType(key); len(ct) != 0 {
+		contentType = ct
 	}
 
 	var objBytes bytes.Buffer
-	err := s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
+	err = s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
 	if err != nil {
 		return err
 	}
 
-	return s.raw.Write(storageKey, objBytes.Bytes())
+	return s.raw.Write(key, objBytes.Bytes())
 }
 
 // Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
-func (s *GenericStorage) Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error {
-	storageKey := KeyForUID(gvk, uid)
-	oldContent, err := s.raw.Read(storageKey)
+func (s *GenericStorage) Patch(key ObjectKey, patch []byte) error {
+	oldContent, err := s.raw.Read(key)
 	if err != nil {
 		return err
 	}
 
-	newContent, err := s.patcher.Apply(oldContent, patch, gvk)
+	newContent, err := s.patcher.Apply(oldContent, patch, key.GetGVK())
 	if err != nil {
 		return err
 	}
 
-	return s.raw.Write(storageKey, newContent)
+	return s.raw.Write(key, newContent)
 }
 
 // Delete removes an Object from the storage
-func (s *GenericStorage) Delete(gvk schema.GroupVersionKind, uid runtime.UID) error {
-	storageKey := KeyForUID(gvk, uid)
-	return s.raw.Delete(storageKey)
+func (s *GenericStorage) Delete(key ObjectKey) error {
+	return s.raw.Delete(key)
+}
+
+// Checksum returns a string representing the state of an Object on disk
+func (s *GenericStorage) Checksum(key ObjectKey) (string, error) {
+	return s.raw.Checksum(key)
 }
 
 // List lists Objects for the specific kind
-func (s *GenericStorage) List(gvk schema.GroupVersionKind) (result []runtime.Object, walkerr error) {
-	walkerr = s.walkKind(gvk, func(content []byte) error {
+func (s *GenericStorage) List(kind KindKey) (result []runtime.Object, walkerr error) {
+	gvk := kind.GetGVK()
+	walkerr = s.walkKind(kind, func(content []byte) error {
 		obj, err := s.decode(content, gvk)
 		if err != nil {
 			return err
@@ -178,8 +189,9 @@ func (s *GenericStorage) List(gvk schema.GroupVersionKind) (result []runtime.Obj
 // only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
 // This allows for faster runs (no need to unmarshal "the world"), and less
 // resource usage, when only metadata is unmarshalled into memory
-func (s *GenericStorage) ListMeta(gvk schema.GroupVersionKind) (result []runtime.Object, walkerr error) {
-	walkerr = s.walkKind(gvk, func(content []byte) error {
+func (s *GenericStorage) ListMeta(kind KindKey) (result []runtime.Object, walkerr error) {
+	gvk := kind.GetGVK()
+	walkerr = s.walkKind(kind, func(content []byte) error {
 		obj := runtime.NewAPIType()
 		// The yaml package supports both YAML and JSON
 		if err := yaml.Unmarshal(content, obj); err != nil {
@@ -198,14 +210,21 @@ func (s *GenericStorage) ListMeta(gvk schema.GroupVersionKind) (result []runtime
 }
 
 // Count counts the Objects for the specific kind
-func (s *GenericStorage) Count(gvk schema.GroupVersionKind) (uint64, error) {
-	entries, err := s.raw.List(KeyForKind(gvk))
+func (s *GenericStorage) Count(kind KindKey) (uint64, error) {
+	entries, err := s.raw.List(kind)
 	return uint64(len(entries)), err
 }
 
-// Checksum returns a string representing the state of an Object on disk
-func (s *GenericStorage) Checksum(gvk schema.GroupVersionKind, uid runtime.UID) (string, error) {
-	return s.raw.Checksum(KeyForUID(gvk, uid))
+func (s *GenericStorage) ObjectKeyFor(obj runtime.Object) (ObjectKey, error) {
+	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
+	if err != nil {
+		return nil, err
+	}
+	id := s.identify(obj)
+	if id == nil {
+		return nil, fmt.Errorf("couldn't identify object")
+	}
+	return NewObjectKey(NewKindKey(gvk), id), nil
 }
 
 // RawStorage returns the RawStorage instance backing this Storage
@@ -216,6 +235,18 @@ func (s *GenericStorage) RawStorage() RawStorage {
 // Close closes all underlying resources (e.g. goroutines) used; before the application exits
 func (s *GenericStorage) Close() error {
 	return nil // nothing to do here for GenericStorage
+}
+
+// identify loops through the identifiers, in priority order, to identify the object correctly
+func (s *GenericStorage) identify(obj runtime.Object) runtime.Identifyable {
+	for _, identifier := range s.identifiers {
+
+		id, ok := identifier.Identify(obj)
+		if ok {
+			return id
+		}
+	}
+	return nil
 }
 
 func (s *GenericStorage) decode(content []byte, gvk schema.GroupVersionKind) (runtime.Object, error) {
@@ -256,9 +287,8 @@ func (s *GenericStorage) decodeMeta(content []byte, gvk schema.GroupVersionKind)
 	return obj, nil
 }
 
-func (s *GenericStorage) walkKind(gvk schema.GroupVersionKind, fn func(content []byte) error) error {
-	kindKey := KeyForKind(gvk)
-	entries, err := s.raw.List(kindKey)
+func (s *GenericStorage) walkKind(kind KindKey, fn func(content []byte) error) error {
+	entries, err := s.raw.List(kind)
 	if err != nil {
 		return err
 	}
@@ -280,12 +310,4 @@ func (s *GenericStorage) walkKind(gvk schema.GroupVersionKind, fn func(content [
 	}
 
 	return nil
-}
-
-func KeyForUID(gvk schema.GroupVersionKind, uid runtime.UID) Key {
-	return NewKey(runtime.Kind(gvk.Kind), uid)
-}
-
-func KeyForKind(gvk schema.GroupVersionKind) KindKey {
-	return NewKindKey(runtime.Kind(gvk.Kind))
 }

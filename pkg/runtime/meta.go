@@ -45,6 +45,8 @@ type TypeMeta struct {
 }
 
 // This is a helper for APIType generation
+// TODO: Maybe we'll solve the lack of this method in upstream metav1.TypeMeta using
+// GetObjectKind(), which actually returns a pointer to TypeMeta behind the ObjectKind interface
 func (t *TypeMeta) GetTypeMeta() *TypeMeta {
 	return t
 }
@@ -61,6 +63,7 @@ func (t *TypeMeta) SetGroupVersionKind(gvk schema.GroupVersionKind) {
 	t.TypeMeta.GetObjectKind().SetGroupVersionKind(gvk)
 }
 
+// TODO: Do we really need this anymore?
 type Kind string
 
 var _ fmt.Stringer = Kind("")
@@ -102,6 +105,7 @@ func ParseKind(input string) Kind {
 // ObjectMeta have to be embedded into any serializable object.
 // It provides the .GetName() and .GetUID() methods that help
 // implement the Object interface
+// TODO: Switch over to metav1.ObjectMeta?
 type ObjectMeta struct {
 	Name        string            `json:"name"`
 	UID         UID               `json:"uid,omitempty"`

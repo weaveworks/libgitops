@@ -211,7 +211,7 @@ func (c *objectConvertor) ConvertToVersion(in runtime.Object, groupVersioner run
 	}
 
 	// Get the groupversionkind for the in object
-	inGVK, err := gvkForObject(c.scheme, in)
+	inGVK, err := GVKForObject(c.scheme, in)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get GVK for hub: %w", err)
 	}
@@ -276,7 +276,7 @@ func (c *objectConvertor) ConvertFieldLabel(gvk schema.GroupVersionKind, label, 
 // be returned from this function
 func validateConvertible(in conversion.Convertible, scheme *runtime.Scheme) (schema.GroupVersionKind, error) {
 	// Fetch the current in object's GVK
-	gvk, err := gvkForObject(scheme, in)
+	gvk, err := GVKForObject(scheme, in)
 	if err != nil {
 		return schema.GroupVersionKind{}, err
 	}
@@ -325,7 +325,7 @@ func findHubType(currentGVK schema.GroupVersionKind, scheme *runtime.Scheme) (co
 // populateGVK finds the gvk of the objects and populates TypeMeta with that information
 func populateGVK(obj runtime.Object, scheme *runtime.Scheme) error {
 	// Fetch the current in object's GVK
-	gvk, err := gvkForObject(scheme, obj)
+	gvk, err := GVKForObject(scheme, obj)
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,7 @@ func (d *defaulter) Default(objs ...runtime.Object) error {
 
 func (d *defaulter) runDefaulting(obj runtime.Object) error {
 	// First, get the groupversionkind of the object
-	gvk, err := gvkForObject(d.scheme, obj)
+	gvk, err := GVKForObject(d.scheme, obj)
 	if err != nil {
 		return err
 	}

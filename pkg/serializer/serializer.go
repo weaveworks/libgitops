@@ -237,7 +237,7 @@ func prioritizedVersionForGroup(scheme *runtime.Scheme, groupName string) (schem
 	return gvs[0], nil
 }
 
-func gvkForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
+func GVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
 	// If we already have TypeMeta filled in here, just use it
 	// TODO: This is probably not needed
 	gvk := obj.GetObjectKind().GroupVersionKind()
@@ -246,7 +246,8 @@ func gvkForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersi
 	}
 
 	// TODO: If there are two gvks returned, it's probably a misconfiguration in the scheme
-	// Verify that this is the case
+	// It might be expected though, and we can tolerate setting the gvk manually IFF there are more than
+	// one objectkind AND the given GVK is one of them
 
 	// Get the possible kinds for the object
 	gvks, unversioned, err := scheme.ObjectKinds(obj)

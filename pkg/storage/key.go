@@ -1,19 +1,59 @@
 package storage
 
 import (
-	"fmt"
-	"os"
-	"path"
-	"path/filepath"
-	"strings"
-
 	"github.com/weaveworks/libgitops/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// This can be used to match either of the keys
-type AnyKey fmt.Stringer
+type kindKey schema.GroupVersionKind
 
-// KindKey represents the internal format of Kind virtual paths
+func (gvk kindKey) GetGroup() string                { return gvk.Group }
+func (gvk kindKey) GetVersion() string              { return gvk.Version }
+func (gvk kindKey) GetKind() string                 { return gvk.Kind }
+func (gvk kindKey) GetGVK() schema.GroupVersionKind { return schema.GroupVersionKind(gvk) }
+func (gvk kindKey) EqualsGVK(kind KindKey, respectVersion bool) bool {
+	// Make sure kind and group match, otherwise return false
+	if gvk.GetKind() != kind.GetKind() || gvk.GetGroup() != kind.GetGroup() {
+		return false
+	}
+	// If we allow version mismatches (i.e. don't need to respect the version), return true
+	if !respectVersion {
+		return true
+	}
+	// Otherwise, return true if the version also is the same
+	return gvk.GetVersion() == kind.GetVersion()
+}
+
+var _ KindKey = kindKey{}
+
+type KindKey interface {
+	GetGroup() string
+	GetVersion() string
+	GetKind() string
+	GetGVK() schema.GroupVersionKind
+
+	EqualsGVK(kind KindKey, respectVersion bool) bool
+}
+
+type ObjectKey interface {
+	KindKey
+	runtime.Identifyable
+}
+
+type objectKey struct {
+	KindKey
+	runtime.Identifyable
+}
+
+func NewKindKey(gvk schema.GroupVersionKind) KindKey {
+	return kindKey(gvk)
+}
+
+func NewObjectKey(kind KindKey, id runtime.Identifyable) ObjectKey {
+	return &objectKey{kind, id}
+}
+
+/*// KindKey represents the internal format of Kind virtual paths
 type KindKey struct {
 	runtime.Kind
 }
@@ -29,6 +69,14 @@ func NewKindKey(kind runtime.Kind) KindKey {
 	return KindKey{
 		kind,
 	}
+}
+
+func KeyForKind(gvk schema.kindKey) KindKey {
+	return NewKindKey(runtime.Kind(gvk.Kind))
+}
+
+func KeyForUID(gvk schema.kindKey, uid runtime.UID) Key {
+	return NewKey(runtime.Kind(gvk.Kind), uid)
 }
 
 // NewKey generates a new virtual path Key for an Object
@@ -65,4 +113,4 @@ func (k Key) String() string {
 // ToKindKey creates a KindKey out of a Key
 func (k Key) ToKindKey() KindKey {
 	return k.KindKey
-}
+}*/

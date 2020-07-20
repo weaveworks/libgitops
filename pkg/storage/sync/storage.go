@@ -9,7 +9,6 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/watch"
 	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type UpdateStream chan update.Update
@@ -62,23 +61,23 @@ func (ss *SyncStorage) getEventStream() watch.AssociatedEventStream {
 }
 
 // Set is propagated to all Storages
-func (ss *SyncStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
+func (ss *SyncStorage) Set(obj runtime.Object) error {
 	return ss.runAll(func(s storage.Storage) error {
-		return s.Set(gvk, obj)
+		return s.Set(obj)
 	})
 }
 
 // Patch is propagated to all Storages
-func (ss *SyncStorage) Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error {
+func (ss *SyncStorage) Patch(key storage.ObjectKey, patch []byte) error {
 	return ss.runAll(func(s storage.Storage) error {
-		return s.Patch(gvk, uid, patch)
+		return s.Patch(key, patch)
 	})
 }
 
 // Delete is propagated to all Storages
-func (ss *SyncStorage) Delete(gvk schema.GroupVersionKind, uid runtime.UID) error {
+func (ss *SyncStorage) Delete(key storage.ObjectKey) error {
 	return ss.runAll(func(s storage.Storage) error {
-		return s.Delete(gvk, uid)
+		return s.Delete(key)
 	})
 }
 
@@ -137,23 +136,30 @@ func (ss *SyncStorage) monitorFunc() {
 		upd, ok := <-ss.eventStream
 		if ok {
 			log.Debugf("SyncStorage: Received update %v %t", upd, ok)
+
+			gvk := upd.APIType.GroupVersionKind()
+			uid := upd.APIType.GetUID().String()
+			key := storage.NewObjectKey(storage.NewKindKey(gvk), runtime.NewIdentifier(uid))
+			log.Debugf("SyncStorage: Object has gvk=%q and uid=%q", gvk, uid)
+
 			switch upd.Event {
 			case update.ObjectEventModify, update.ObjectEventCreate:
 				// First load the Object using the Storage given in the update,
 				// then set it using the client constructed above
-				obj, err := upd.Storage.Get(upd.APIType.GroupVersionKind(), upd.APIType.GetUID())
+
+				obj, err := upd.Storage.Get(key)
 				if err != nil {
 					log.Errorf("Failed to get Object with UID %q: %v", upd.APIType.GetUID(), err)
 					continue
 				}
 
-				if err = ss.Set(obj.GroupVersionKind(), obj); err != nil {
+				if err = ss.Set(obj); err != nil {
 					log.Errorf("Failed to set Object with UID %q: %v", upd.APIType.GetUID(), err)
 					continue
 				}
 			case update.ObjectEventDelete:
 				// For deletion we use the generated "fake" APIType object
-				if err := ss.Delete(upd.APIType.GroupVersionKind(), upd.APIType.GetUID()); err != nil {
+				if err := ss.Delete(key); err != nil {
 					log.Errorf("Failed to delete Object with UID %q: %v", upd.APIType.GetUID(), err)
 					continue
 				}
