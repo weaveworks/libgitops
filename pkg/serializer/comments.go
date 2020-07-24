@@ -3,6 +3,7 @@ package serializer
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
@@ -116,4 +117,54 @@ func noAnnotationWrapper(metaobj metav1.Object, fn func() error) error {
 	}
 	// If the annotation isn't present, just run the function
 	return fn()
+}
+
+// GetCommentSource retrieves the YAML tree used as the source for transferring comments for the given runtime.Object.
+// This may be used externally to implement e.g. re-parenting of the comment source tree when moving structs around.
+func GetCommentSource(obj runtime.Object) (*yaml.RNode, error) {
+	// Cast the object to a metav1.Object to get access to annotations.
+	// If this fails, the given object does not support storing comments.
+	metaObj, ok := toMetaObject(obj)
+	if !ok {
+		return nil, errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
+	}
+
+	// Fetch the source string for the comments. If this fails, the given object does not have any stored comments.
+	sourceStr, ok := getAnnotation(metaObj, preserveCommentsAnnotation)
+	if !ok {
+		return nil, errors.New("the given object does not have stored comments")
+	}
+
+	// Decode the base64-encoded comment source string.
+	sourceBytes, err := base64.StdEncoding.DecodeString(sourceStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the decoded source data into a *yaml.RNode and return it.
+	return yaml.Parse(string(sourceBytes))
+}
+
+// SetCommentSource sets the given YAML tree as the source for transferring comments for the given runtime.Object.
+// This may be used externally to implement e.g. re-parenting of the comment source tree when moving structs around.
+func SetCommentSource(obj runtime.Object, source *yaml.RNode) error {
+	// Convert the given tree into a string. This also handles the source == nil case.
+	str, err := source.String()
+	if err != nil {
+		return err
+	}
+
+	// Cast the object to a metav1.Object to get access to annotations.
+	// If this fails, the given object does not support storing comments.
+	metaObj, ok := toMetaObject(obj)
+	if !ok {
+		return errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
+	}
+
+	// base64-encode the comments string.
+	encodedStr := base64.StdEncoding.EncodeToString([]byte(str))
+
+	// Set the value of the comments annotation to the encoded string.
+	setAnnotation(metaObj, preserveCommentsAnnotation, encodedStr)
+	return nil
 }
