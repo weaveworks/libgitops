@@ -34,7 +34,8 @@ func TestCopyComments(t *testing.T) {
 	}{
 		{
 			name: "copy_comments",
-			from: `# A
+			from: `
+# A
 #
 # B
 
@@ -46,12 +47,14 @@ spec: # comment 1
   replicas: 3 # comment 3
   # comment 4
 `,
-			to: `apiVersion: apps/v1
+			to: `
+apiVersion: apps/v1
 kind: Deployment
 spec:
   replicas: 4
 `,
-			expected: `# A
+			expected: `
+# A
 #
 # B
 
@@ -63,9 +66,7 @@ spec: # comment 1
   replicas: 4 # comment 3
   # comment 4
 `,
-		},
-
-		{
+		}, {
 			name: "associative_list",
 			from: `
 apiVersion: apps/v1
@@ -97,11 +98,10 @@ spec:
       - name: foo
         image: bar # comment 1
 `,
-		},
-
-		{
+		}, {
 			name: "keep_comments",
-			from: `# A
+			from: `
+# A
 #
 # B
 
@@ -113,12 +113,14 @@ spec: # comment 1
   replicas: 3 # comment 3
   # comment 4
 `,
-			to: `apiVersion: apps/v1
+			to: `
+apiVersion: apps/v1
 kind: Deployment
 spec:
   replicas: 4 # comment 5
 `,
-			expected: `# A
+			expected: `
+# A
 #
 # B
 
@@ -130,9 +132,7 @@ spec: # comment 1
   replicas: 4 # comment 5
   # comment 4
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments",
 			from: `
 apiVersion: apps/v1
@@ -152,9 +152,7 @@ kind: Deployment
 items:
 - a # comment
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments_2",
 			from: `
 apiVersion: apps/v1
@@ -176,9 +174,7 @@ items:
 # comment
 - a
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments_middle",
 			from: `
 apiVersion: apps/v1
@@ -204,9 +200,7 @@ items:
 - b # comment
 - e
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments_moved",
 			from: `
 apiVersion: apps/v1
@@ -232,9 +226,7 @@ items:
 - c
 - b
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments_no_match",
 			from: `
 apiVersion: apps/v1
@@ -254,9 +246,7 @@ kind: Deployment
 items:
 - b
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments_add",
 			from: `
 apiVersion: apps/v1
@@ -278,9 +268,7 @@ items:
 - a # comment
 - b
 `,
-		},
-
-		{
+		}, {
 			name: "copy_item_comments_remove",
 			from: `
 apiVersion: apps/v1
@@ -301,9 +289,7 @@ kind: Deployment
 items:
 - a # comment
 `,
-		},
-
-		{
+		}, {
 			name: "copy_comments_folded_style",
 			from: `
 apiVersion: v1
@@ -324,10 +310,11 @@ kind: ConfigMap
 data:
   somekey: "012345678901234567890123456789012345678901234567890123456789012345678901234" # x
 `,
-		},
-		{
+		}, {
 			name: "copy_comments_move_to_top",
 			from: `
+# Top comment
+
 apiVersion: v1
 kind: ConfigMap # Foo
 # Bar
@@ -339,11 +326,12 @@ data:
 apiVersion: v1
 `,
 			expected: `
+# Top comment
 # Comments lost during file manipulation:
-# Field name "data": "Bar"
-# Field name "somekey": "Baz"
-# Field name "012345678901234567890123456789012345678901234567890123456789012345678901234": "x"
-# Field name "ConfigMap": "Foo"
+# Field "data": "Bar"
+# Field "somekey": "Baz"
+# Field "somekey": "x"
+# Field "kind": "Foo"
 
 apiVersion: v1
 `,

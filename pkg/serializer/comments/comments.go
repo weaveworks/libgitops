@@ -18,9 +18,6 @@
 package comments
 
 import (
-	"fmt"
-	"strings"
-
 	"sigs.k8s.io/kustomize/kyaml/openapi"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 	"sigs.k8s.io/kustomize/kyaml/yaml/walk"
@@ -29,7 +26,7 @@ import (
 // CopyComments recursively copies the comments on fields in from to fields in to
 func CopyComments(from, to *yaml.RNode, moveCommentsTop bool) error {
 	// create the copier struct for the specified mode
-	c := &copier{moveCommentsTop, nil}
+	c := &copier{moveCommentsTop, nil, make(map[int]trackedKey)}
 
 	// copy over comments for the root tree(s)
 	c.copyFieldComments(from, to)
@@ -55,13 +52,8 @@ type copier struct {
 	moveCommentsTop bool
 	// if moveCommentsTop is true, this slice will be populated with lost comment entries while iterating
 	lostComments []lostComment
-}
-
-// lostComment specifies a mapping between a fieldName (in the old structure) which doesn't exist in the
-// new tree, and its related comment
-type lostComment struct {
-	fieldName string
-	comment   string
+	// if moveCommentsTop is true, this map will be populated with tracked YAML keys for lines while iterating
+	trackedKeys map[int]trackedKey
 }
 
 func (c *copier) VisitMap(s walk.Sources, _ *openapi.ResourceSchema) (*yaml.RNode, error) {
@@ -122,40 +114,4 @@ func (c *copier) copyFieldComments(from, to *yaml.RNode) {
 	if to.Document().FootComment == "" {
 		to.Document().FootComment = from.Document().FootComment
 	}
-}
-
-// rememberLostComments goes through the comments attached to the from node
-// and adds them to the internal lostComments slice for usage after the tree
-// walk
-func (c *copier) rememberLostComments(from *yaml.RNode) {
-	fromName := from.Document().Value
-	fComments := []string{
-		from.Document().LineComment,
-		from.Document().HeadComment,
-		from.Document().FootComment,
-	}
-	for _, cStr := range fComments {
-		cStr = strings.TrimPrefix(cStr, "#")
-		cStr = strings.TrimSuffix(cStr, "\n")
-		cStr = strings.TrimSpace(cStr)
-
-		if cStr != "" {
-			c.lostComments = append(c.lostComments, lostComment{
-				fieldName: fromName,
-				comment:   cStr,
-			})
-		}
-	}
-}
-
-// restoreLostComments writes the cached lost comments to the top of the to
-// YAML tree
-func (c *copier) restoreLostComments(to *yaml.RNode) {
-	for i, c := range c.lostComments {
-		if i == 0 {
-			to.Document().HeadComment += "\nComments lost during file manipulation:"
-		}
-		to.Document().HeadComment += fmt.Sprintf("\n# Field name %q: %q", c.fieldName, c.comment)
-	}
-	to.Document().HeadComment = strings.TrimPrefix(to.Document().HeadComment, "\n")
 }
