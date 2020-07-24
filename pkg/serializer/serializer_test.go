@@ -136,17 +136,17 @@ func addExternalTypes(extgv schema.GroupVersion) func(*runtime.Scheme) error {
 	}
 }
 
-func assert(err error) {
+func panicIfErr(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
 
 func init() {
-	assert(intsb.AddToScheme(scheme))
-	assert(ext1sb.AddToScheme(scheme))
-	assert(ext2sb.AddToScheme(scheme))
-	assert(scheme.SetVersionPriority(ext1gv))
+	panicIfErr(intsb.AddToScheme(scheme))
+	panicIfErr(ext1sb.AddToScheme(scheme))
+	panicIfErr(ext2sb.AddToScheme(scheme))
+	panicIfErr(scheme.SetVersionPriority(ext1gv))
 }
 
 func registerOldCRD(scheme *runtime.Scheme) error {
