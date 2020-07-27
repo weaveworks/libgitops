@@ -100,11 +100,14 @@ func TestGetCommentSource(t *testing.T) {
 				t.Errorf("expected error %t, but received %t: %v", tc.expectedErr, actualErr != nil, actualErr)
 			}
 
-			if actualErr == nil {
-				str, err := source.String()
-				require.NoError(t, err)
-				assert.Equal(t, tc.result, str)
+			if actualErr != nil {
+				// Already handled above.
+				return
 			}
+
+			str, err := source.String()
+			require.NoError(t, err)
+			assert.Equal(t, tc.result, str)
 		})
 	}
 }
@@ -146,21 +149,24 @@ func TestSetCommentSource(t *testing.T) {
 				t.Errorf("expected error %t, but received %t: %v", tc.expectedErr, actualErr != nil, actualErr)
 			}
 
-			if actualErr == nil {
-				meta, ok := toMetaObject(tc.obj)
-				if !ok {
-					t.Fatal("cannot extract metav1.ObjectMeta")
-				}
-
-				annotation, ok := getAnnotation(meta, preserveCommentsAnnotation)
-				if !ok {
-					t.Fatal("expected annotation to be set, but it is not")
-				}
-
-				str, err := base64.StdEncoding.DecodeString(annotation)
-				require.NoError(t, err)
-				assert.Equal(t, tc.result, string(str))
+			if actualErr != nil {
+				// Already handled above.
+				return
 			}
+
+			meta, ok := toMetaObject(tc.obj)
+			if !ok {
+				t.Fatal("cannot extract metav1.ObjectMeta")
+			}
+
+			annotation, ok := getAnnotation(meta, preserveCommentsAnnotation)
+			if !ok {
+				t.Fatal("expected annotation to be set, but it is not")
+			}
+
+			str, err := base64.StdEncoding.DecodeString(annotation)
+			require.NoError(t, err)
+			assert.Equal(t, tc.result, string(str))
 		})
 	}
 }
