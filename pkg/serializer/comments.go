@@ -15,6 +15,11 @@ import (
 
 const preserveCommentsAnnotation = "serializer.libgitops.weave.works/original-data"
 
+var (
+	errNoObjectMeta     = errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
+	errNoStoredComments = errors.New("the given object does not have stored comments")
+)
+
 // tryToPreserveComments tries to save the original file data (base64-encoded) into an annotation.
 // This original file data can be used at encoding-time to preserve comments
 func (d *decoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct ContentType) {
@@ -24,24 +29,22 @@ func (d *decoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct Conte
 		return
 	}
 
-	// Convert the object to a metav1.Object (this requires embedding ObjectMeta)
-	metaobj, ok := toMetaObject(obj)
-	if !ok {
-		// If the object doesn't have ObjectMeta embedded, just do nothing
+	// Preserve the original file content in the annotation (this requires embedding ObjectMeta).
+	if err := setCommentSourceBytes(obj, doc); err == errNoObjectMeta {
+		// If the object doesn't have ObjectMeta embedded, just do nothing.
 		logrus.Debugf("Couldn't convert object with GVK %q to metav1.Object, although opts.PreserveComments is enabled", obj.GetObjectKind().GroupVersionKind())
-		return
+	} else if err != nil {
+		// Sanity check, should never happen.
+		panic(err)
 	}
-
-	// Preserve the original file content in the annotation
-	setAnnotation(metaobj, preserveCommentsAnnotation, base64.StdEncoding.EncodeToString(doc))
 }
 
 // tryToPreserveComments tries to locate the possibly-saved original file data in the object's annotation
-func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw FrameWriter, obj runtime.Object, metaobj metav1.Object) error {
+func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw FrameWriter, obj runtime.Object, metaObj metav1.Object) error {
 	// If the user did not opt into preserving comments, just sanitize ObjectMeta temporarily and and return
 	if !*e.opts.PreserveComments {
 		// Normal encoding without the annotation (so it doesn't leak by accident)
-		return noAnnotationWrapper(metaobj, e.normalEncodeFunc(versionEncoder, fw, obj))
+		return noAnnotationWrapper(metaObj, e.normalEncodeFunc(versionEncoder, fw, obj))
 	}
 
 	// The user requested to preserve comments, but content type is not YAML, so log, sanitize and return
@@ -49,41 +52,27 @@ func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw Fr
 		logrus.Debugf("Asked to preserve comments, but ContentType is not YAML, so ignoring")
 
 		// Normal encoding without the annotation (so it doesn't leak by accident)
-		return noAnnotationWrapper(metaobj, e.normalEncodeFunc(versionEncoder, fw, obj))
+		return noAnnotationWrapper(metaObj, e.normalEncodeFunc(versionEncoder, fw, obj))
 	}
 
-	// Get the encoded previous file data from the annotation or fall back to "normal" encoding
-	encodedPriorData, ok := getAnnotation(metaobj, preserveCommentsAnnotation)
-	if !ok {
-		// no need to delete the annotation as we know it doesn't exist, just do a normal encode
+	priorNode, err := getCommentSourceMeta(metaObj)
+	if err == errNoStoredComments {
+		// No need to delete the annotation as we know it doesn't exist, just do a normal encode
 		return e.normalEncodeFunc(versionEncoder, fw, obj)()
-	}
-
-	// Decode the base64-encoded bytes of the original object (including the comments)
-	priorData, err := base64.StdEncoding.DecodeString(encodedPriorData)
-	if err != nil {
-		// fatal error
+	} else if err != nil {
 		return err
 	}
 
-	// Unmarshal the original YAML document into a *yaml.RNode, including comments
-	priorNode, err := yaml.Parse(string(priorData))
-	if err != nil {
-		// fatal error
-		return err
-	}
-
-	// Encode the new object into a temporary buffer, it should not be written as the "final result" to the fw
+	// Encode the new object into a temporary buffer, it should not be written as the "final result" to the FrameWriter
 	buf := new(bytes.Buffer)
-	if err := noAnnotationWrapper(metaobj, e.normalEncodeFunc(versionEncoder, NewYAMLFrameWriter(buf), obj)); err != nil {
+	if err := noAnnotationWrapper(metaObj, e.normalEncodeFunc(versionEncoder, NewYAMLFrameWriter(buf), obj)); err != nil {
 		// fatal error
 		return err
 	}
-	updatedData := buf.Bytes()
 
 	// Parse the new, upgraded, encoded YAML into *yaml.RNode for addition
 	// of comments from prevNode
-	afterNode, err := yaml.Parse(string(updatedData))
+	afterNode, err := yaml.Parse(buf.String())
 	if err != nil {
 		// fatal error
 		return err
@@ -129,10 +118,16 @@ func GetCommentSource(obj runtime.Object) (*yaml.RNode, error) {
 		return nil, errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
 	}
 
+	// Use getCommentSourceMeta to retrieve the comments from the metav1.Object.
+	return getCommentSourceMeta(metaObj)
+}
+
+// getCommentSourceMeta retrieves the YAML tree used as the source for transferring comments for the given metav1.Object.
+func getCommentSourceMeta(metaObj metav1.Object) (*yaml.RNode, error) {
 	// Fetch the source string for the comments. If this fails, the given object does not have any stored comments.
 	sourceStr, ok := getAnnotation(metaObj, preserveCommentsAnnotation)
 	if !ok {
-		return nil, errors.New("the given object does not have stored comments")
+		return nil, errNoStoredComments
 	}
 
 	// Decode the base64-encoded comment source string.
@@ -154,15 +149,20 @@ func SetCommentSource(obj runtime.Object, source *yaml.RNode) error {
 		return err
 	}
 
+	return setCommentSourceBytes(obj, []byte(str))
+}
+
+// SetCommentSource sets the given bytes as the source for transferring comments for the given runtime.Object.
+func setCommentSourceBytes(obj runtime.Object, source []byte) error {
 	// Cast the object to a metav1.Object to get access to annotations.
 	// If this fails, the given object does not support storing comments.
 	metaObj, ok := toMetaObject(obj)
 	if !ok {
-		return errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
+		return errNoObjectMeta
 	}
 
 	// base64-encode the comments string.
-	encodedStr := base64.StdEncoding.EncodeToString([]byte(str))
+	encodedStr := base64.StdEncoding.EncodeToString(source)
 
 	// Set the value of the comments annotation to the encoded string.
 	setAnnotation(metaObj, preserveCommentsAnnotation, encodedStr)
