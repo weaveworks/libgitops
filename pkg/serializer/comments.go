@@ -16,8 +16,8 @@ import (
 const preserveCommentsAnnotation = "serializer.libgitops.weave.works/original-data"
 
 var (
-	errNoObjectMeta     = errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
-	errNoStoredComments = errors.New("the given object does not have stored comments")
+	ErrNoObjectMeta     = errors.New("the given object cannot store comments, it is not metav1.ObjectMeta compliant")
+	ErrNoStoredComments = errors.New("the given object does not have stored comments")
 )
 
 // tryToPreserveComments tries to save the original file data (base64-encoded) into an annotation.
@@ -30,7 +30,7 @@ func (d *decoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct Conte
 	}
 
 	// Preserve the original file content in the annotation (this requires embedding ObjectMeta).
-	if err := setCommentSourceBytes(obj, doc); err == errNoObjectMeta {
+	if err := setCommentSourceBytes(obj, doc); err == ErrNoObjectMeta {
 		// If the object doesn't have ObjectMeta embedded, just do nothing.
 		logrus.Debugf("Couldn't convert object with GVK %q to metav1.Object, although opts.PreserveComments is enabled", obj.GetObjectKind().GroupVersionKind())
 	} else if err != nil {
@@ -56,7 +56,7 @@ func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw Fr
 	}
 
 	priorNode, err := getCommentSourceMeta(metaObj)
-	if err == errNoStoredComments {
+	if err == ErrNoStoredComments {
 		// No need to delete the annotation as we know it doesn't exist, just do a normal encode
 		return e.normalEncodeFunc(versionEncoder, fw, obj)()
 	} else if err != nil {
@@ -127,7 +127,7 @@ func getCommentSourceMeta(metaObj metav1.Object) (*yaml.RNode, error) {
 	// Fetch the source string for the comments. If this fails, the given object does not have any stored comments.
 	sourceStr, ok := getAnnotation(metaObj, preserveCommentsAnnotation)
 	if !ok {
-		return nil, errNoStoredComments
+		return nil, ErrNoStoredComments
 	}
 
 	// Decode the base64-encoded comment source string.
@@ -158,7 +158,7 @@ func setCommentSourceBytes(obj runtime.Object, source []byte) error {
 	// If this fails, the given object does not support storing comments.
 	metaObj, ok := toMetaObject(obj)
 	if !ok {
-		return errNoObjectMeta
+		return ErrNoObjectMeta
 	}
 
 	// base64-encode the comments string.
