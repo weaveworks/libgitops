@@ -49,7 +49,7 @@ func setAnnotation(metaObj metav1.Object, key, val string) {
 	}
 
 	// Set the key-value mapping and write back to the object
-	a[preserveCommentsAnnotation] = val
+	a[key] = val
 	// This wouldn't be needed if a was non-nil (as maps are reference types), but in the case
 	// of the map being nil, this is a must in order to apply the change
 	metaObj.SetAnnotations(a)

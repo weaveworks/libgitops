@@ -2,8 +2,9 @@ package comments
 
 import (
 	"fmt"
-	"sigs.k8s.io/kustomize/kyaml/yaml"
 	"strings"
+
+	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
 // lostComment specifies a mapping between a fieldName (in the old structure), which doesn't exist in the

@@ -34,7 +34,7 @@ docker-%:
 
 test: docker-test-internal
 test-internal:
-	go test $(addsuffix /...,$(addprefix ./,${SRC_PKGS}))
+	go test -v $(addsuffix /...,$(addprefix ./,${SRC_PKGS}))
 
 tidy: docker-tidy-internal
 tidy-internal: /go/bin/goimports
