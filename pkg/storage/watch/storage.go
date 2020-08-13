@@ -1,7 +1,6 @@
 package watch
 
 import (
-	"fmt"
 	"io/ioutil"
 
 	log "github.com/sirupsen/logrus"
@@ -10,7 +9,8 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 	"github.com/weaveworks/libgitops/pkg/util/watcher"
-	"sigs.k8s.io/yaml"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // EventDeleteObjectName represents the name of the sent object in the GenericWatchStorage's event stream
@@ -90,11 +90,18 @@ func (s *GenericWatchStorage) Close() error {
 func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string) {
 	log.Debug("GenericWatchStorage: Monitoring thread started")
 	defer log.Debug("GenericWatchStorage: Monitoring thread stopped")
+	var content []byte
 
 	// Send a MODIFY event for all files (and fill the mappings
 	// of the MappedRawStorage) before starting to monitor changes
 	for _, file := range files {
-		obj, err := s.resolveAPIType(file)
+		content, err := ioutil.ReadFile(file)
+		if err != nil {
+			log.Warnf("Ignoring %q: %v", file, err)
+			continue
+		}
+
+		obj, err := runtime.NewPartialObject(content)
 		if err != nil {
 			log.Warnf("Ignoring %q: %v", file, err)
 			continue
@@ -129,12 +136,21 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 
 				// This creates a "fake" Object from the key to be used for
 				// deletion, as the original has already been removed from disk
-				obj = runtime.NewAPIType()
-				obj.SetName(EventDeleteObjectName)
-				obj.SetUID(runtime.UID(key.GetIdentifier()))
-				obj.SetGroupVersionKind(key.GetGVK())
+				obj = &runtime.PartialObjectImpl{
+					&metav1.TypeMeta{},
+					&metav1.ObjectMeta{
+						Name: EventDeleteObjectName,
+						UID:  types.UID(key.GetIdentifier()),
+					},
+				}
 			} else {
-				if obj, err = s.resolveAPIType(event.Path); err != nil {
+				content, err = ioutil.ReadFile(event.Path)
+				if err != nil {
+					log.Warnf("Ignoring %q: %v", event.Path, err)
+					continue
+				}
+
+				if obj, err = runtime.NewPartialObject(content); err != nil {
 					log.Warnf("Ignoring %q: %v", event.Path, err)
 					continue
 				}
@@ -191,14 +207,16 @@ func (s *GenericWatchStorage) addMapping(raw storage.RawStorage, obj runtime.Obj
 		return
 	}
 
+	// Let the embedded storage decide using its identifiers how to
 	key, err := s.Storage.ObjectKeyFor(obj)
 	if err != nil {
-		log.Errorf("couldn't get object key for: gvk=%s, uid=%s, name=%s", obj.GroupVersionKind(), obj.GetUID(), obj.GetName())
+		log.Errorf("couldn't get object key for: gvk=%s, uid=%s, name=%s", obj.GetObjectKind().GroupVersionKind(), obj.GetUID(), obj.GetName())
 	}
 
 	mapped.AddMapping(key, file)
 }
 
+/*
 func (s *GenericWatchStorage) resolveAPIType(path string) (runtime.Object, error) {
 	obj := runtime.NewAPIType()
 	content, err := ioutil.ReadFile(path)
@@ -211,7 +229,7 @@ func (s *GenericWatchStorage) resolveAPIType(path string) (runtime.Object, error
 		return nil, err
 	}
 
-	gvk := obj.GroupVersionKind()
+	gvk := obj.GetObjectKind().GroupVersionKind()
 
 	// Don't decode API objects unknown to the scheme (e.g. Kubernetes manifests)
 	if !s.Serializer().Scheme().Recognizes(gvk) {
@@ -224,4 +242,4 @@ func (s *GenericWatchStorage) resolveAPIType(path string) (runtime.Object, error
 	}
 
 	return obj, nil
-}
+}*/

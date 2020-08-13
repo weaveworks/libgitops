@@ -12,7 +12,13 @@ import (
 // NewManifestStorage constructs a new storage that watches unstructured manifests in the specified directory,
 // decodable using the given serializer.
 func NewManifestStorage(manifestDir string, ser serializer.Serializer) (*ManifestStorage, error) {
-	ws, err := watch.NewGenericWatchStorage(storage.NewGenericStorage(storage.NewGenericMappedRawStorage(manifestDir), ser))
+	ws, err := watch.NewGenericWatchStorage(
+		storage.NewGenericStorage(
+			storage.NewGenericMappedRawStorage(manifestDir),
+			ser,
+			[]runtime.IdentifierFactory{runtime.Metav1NameIdentifier},
+		),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +44,7 @@ func NewTwoWayManifestStorage(manifestDir, dataDir string, ser serializer.Serial
 
 	ss := sync.NewSyncStorage(
 		storage.NewGenericStorage(
-			storage.NewGenericRawStorage(dataDir, gv), ser, identifiers),
+			storage.NewGenericRawStorage(dataDir, gv, serializer.ContentTypeJSON), ser, identifiers),
 		ws)
 
 	return &ManifestStorage{

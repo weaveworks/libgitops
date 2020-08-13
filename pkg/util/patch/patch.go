@@ -43,7 +43,7 @@ func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error)
 		return
 	}
 
-	emptyObj, err := p.serializer.Scheme().New(old.GroupVersionKind())
+	emptyObj, err := p.serializer.Scheme().New(old.GetObjectKind().GroupVersionKind())
 	if err != nil {
 		return
 	}

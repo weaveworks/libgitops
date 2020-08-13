@@ -137,9 +137,9 @@ func (ss *SyncStorage) monitorFunc() {
 		if ok {
 			log.Debugf("SyncStorage: Received update %v %t", upd, ok)
 
-			gvk := upd.APIType.GroupVersionKind()
-			uid := upd.APIType.GetUID().String()
-			key := storage.NewObjectKey(storage.NewKindKey(gvk), runtime.NewIdentifier(uid))
+			gvk := upd.APIType.GetObjectKind().GroupVersionKind()
+			uid := upd.APIType.GetUID()
+			key := storage.NewObjectKey(storage.NewKindKey(gvk), runtime.NewIdentifier(string(uid)))
 			log.Debugf("SyncStorage: Object has gvk=%q and uid=%q", gvk, uid)
 
 			switch upd.Event {
