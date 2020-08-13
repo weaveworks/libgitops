@@ -1,5 +1,6 @@
 package filterer
 
+/*
 import (
 	"fmt"
 
@@ -124,3 +125,4 @@ func (f *Filterer) parseFilter(gvk schema.GroupVersionKind, filter BaseFilter) (
 
 	return
 }
+*/

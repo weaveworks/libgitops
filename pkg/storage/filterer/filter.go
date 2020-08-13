@@ -1,11 +1,6 @@
 package filterer
 
-import (
-	"fmt"
-
-	"github.com/weaveworks/libgitops/pkg/runtime"
-)
-
+/*
 // BaseFilter provides shared functionality for filter types
 type BaseFilter interface {
 	// AmbiguousError specifies what to error if
@@ -68,3 +63,4 @@ func IsNonexistentError(err error) bool {
 	_, ok := err.(*NonexistentError)
 	return ok
 }
+*/

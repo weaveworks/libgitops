@@ -1,5 +1,6 @@
 package filterer
 
+/*
 import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
 )
@@ -36,3 +37,4 @@ func (m *GenericMatch) Object() runtime.Object {
 func (m *GenericMatch) Exact() bool {
 	return m.exact
 }
+*/
