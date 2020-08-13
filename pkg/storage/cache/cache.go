@@ -1,6 +1,6 @@
 package cache
 
-import (
+/*import (
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
@@ -168,10 +168,11 @@ func (c *cache) Flush() error {
 
 	for _, obj := range allObjects {
 		// Request the storage to save each Object
-		if err := c.storage.Set(obj.GroupVersionKind(), obj); err != nil {
+		if err := c.storage.Set(obj); err != nil {
 			return err
 		}
 	}
 
 	return nil
 }
+*/

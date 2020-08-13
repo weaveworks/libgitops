@@ -1,5 +1,5 @@
 package cache
-
+/*
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"
@@ -63,7 +63,7 @@ func store(i *index, obj runtime.Object, apiType bool) error {
 		return err
 	}
 
-	gvk := co.object.GroupVersionKind()
+	gvk := co.object.GetObjectKind().GroupVersionKind()
 
 	if _, ok := i.objects[gvk]; !ok {
 		i.objects[gvk] = make(map[runtime.UID]*cacheObject)
@@ -95,7 +95,7 @@ func (i *index) storeMeta(obj runtime.Object) error {
 
 func (i *index) storeAllMeta(objs []runtime.Object) (err error) {
 	for _, obj := range objs {
-		if uids, ok := i.objects[obj.GroupVersionKind()]; ok {
+		if uids, ok := i.objects[obj.GetObjectKind().GroupVersionKind()]; ok {
 			if _, ok := uids[obj.GetUID()]; ok {
 				continue
 			}
@@ -149,3 +149,4 @@ func (i *index) list(gvk schema.GroupVersionKind) ([]runtime.Object, error) {
 func (i *index) listMeta(gvk schema.GroupVersionKind) ([]runtime.Object, error) {
 	return list(i, gvk, true)
 }
+*/

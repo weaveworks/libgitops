@@ -1,5 +1,5 @@
 package cache
-
+/*
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"
@@ -87,5 +87,6 @@ func (c *cacheObject) loadAPI() (runtime.Object, error) {
 		return c.object, nil
 	}
 
-	return runtime.APITypeFrom(c.object), nil
+	return runtime.PartialObjectFrom(c.object), nil
 }
+*/
