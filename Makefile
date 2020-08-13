@@ -49,7 +49,7 @@ autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-
 	touch /tmp/boilerplate
 
 	/go/bin/deepcopy-gen \
-		--input-dirs ${API_DIRS} \
+		--input-dirs ${API_DIRS},${PROJECT}/pkg/runtime \
 		--bounding-dirs ${BOUNDING_API_DIRS} \
 		-O zz_generated.deepcopy \
 		-h /tmp/boilerplate
