@@ -41,24 +41,32 @@ type RawStorage interface {
 	GetKey(path string) (ObjectKey, error)
 }
 
-func NewGenericRawStorage(dir string, gv schema.GroupVersion) RawStorage {
+func NewGenericRawStorage(dir string, gv schema.GroupVersion, ct serializer.ContentType) RawStorage {
+	ext := extForContentType(ct)
+	if ext == "" {
+		panic("Invalid content type")
+	}
 	return &GenericRawStorage{
 		dir: dir,
 		gv:  gv,
+		ct: ct,
+		ext: ext,
 	}
 }
 
 // GenericRawStorage is a rawstorage which stores objects as JSON files on disk,
-// in the form: <dir>/<kind>/<uid>/metadata.json.
+// in the form: <dir>/<kind>/<identifier>/metadata.json.
 // The GenericRawStorage only supports one GroupVersion at a time, and will error if given
 // any other resources
 type GenericRawStorage struct {
 	dir string
 	gv  schema.GroupVersion
+	ct serializer.ContentType
+	ext string
 }
 
 func (r *GenericRawStorage) keyPath(key ObjectKey) string {
-	return path.Join(r.dir, key.GetKind(), key.GetIdentifier(), "metadata.json")
+	return path.Join(r.dir, key.GetKind(), key.GetIdentifier(), fmt.Sprintf("metadata%s", r.ext))
 }
 
 func (r *GenericRawStorage) kindKeyPath(kindKey KindKey) string {
@@ -157,7 +165,7 @@ func (r *GenericRawStorage) Checksum(key ObjectKey) (s string, err error) {
 }
 
 func (r *GenericRawStorage) ContentType(_ ObjectKey) serializer.ContentType {
-	return serializer.ContentTypeJSON // The GenericRawStorage always uses JSON
+	return r.ct
 }
 
 func (r *GenericRawStorage) WatchDir() string {
