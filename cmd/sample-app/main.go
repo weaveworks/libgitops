@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,19 +16,22 @@ import (
 	"github.com/labstack/echo"
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
-	"github.com/weaveworks/libgitops/cmd/sample-app/client"
-	"github.com/weaveworks/libgitops/pkg/filter"
-	"github.com/weaveworks/libgitops/pkg/gitdir"
+	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
-	"github.com/weaveworks/libgitops/pkg/storage/cache"
-	"github.com/weaveworks/libgitops/pkg/storage/manifest"
+	"github.com/weaveworks/libgitops/pkg/storage"
+)
+
+var (
+	carGVK = v1alpha1.SchemeGroupVersion.WithKind("Car")
 )
 
 const ManifestDir = "/tmp/libgitops/manifest"
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	// Parse the version flag
 	parseVersionFlag()
 
@@ -40,7 +44,7 @@ func main() {
 
 func run() error {
 	// Construct the GitDirectory implementation which backs the storage
-	gitDir, err := gitdir.NewGitDirectory("https://github.com/luxas/ignite-gitops", gitdir.GitDirectoryOptions{
+	/*gitDir, err := gitdir.NewGitDirectory("https://github.com/luxas/ignite-gitops", gitdir.GitDirectoryOptions{
 		Branch:   "master",
 		Interval: 10 * time.Second,
 	})
@@ -51,7 +55,7 @@ func run() error {
 	// Wait for the repo to be cloned
 	if err := gitDir.WaitForClone(); err != nil {
 		return err
-	}
+	}*/
 
 	// Create the manifest directory
 	if err := os.MkdirAll(ManifestDir, 0755); err != nil {
@@ -62,27 +66,34 @@ func run() error {
 	logs.Logger.SetLevel(logrus.DebugLevel)
 
 	// Set up the ManifestStorage
-	ms, err := manifest.NewManifestStorage(ManifestDir, scheme.Serializer)
+	/*ms, err := manifest.NewManifestStorage(ManifestDir, scheme.Serializer)
 	if err != nil {
 		return err
-	}
+	}*/
+	ms := storage.NewGenericStorage(
+		storage.NewGenericRawStorage(ManifestDir, v1alpha1.SchemeGroupVersion, serializer.ContentTypeYAML),
+		scheme.Serializer,
+		[]runtime.IdentifierFactory{runtime.Metav1NameIdentifier},
+	)
+
 	defer func() { _ = ms.Close() }()
-	Client := client.NewClient(cache.NewCache(ms))
+	//Client := client.NewClient(cache.NewCache(ms))
 
 	// Set up the echo server
 	e := echo.New()
+	e.Debug = true
 	e.GET("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "Welcome!")
 	})
 
 	e.GET("/:name", func(c echo.Context) error {
-		kind := "car"
 		name := c.Param("name")
 		if len(name) == 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "Please set ref")
+			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		obj, err := Client.Dynamic(runtime.Kind(kind)).Find(filter.NewIDNameFilter(name))
+		objKey := storage.NewObjectKey(storage.NewKindKey(carGVK), runtime.NewIdentifier("default/"+name))
+		obj, err := ms.Get(objKey)
 		if err != nil {
 			return err
 		}
@@ -99,12 +110,13 @@ func run() error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		obj := Client.Cars().New()
-		obj.ObjectMeta.UID = "599615df99804ae8"
-		obj.ObjectMeta.Name = name
-		obj.Spec.Brand = "Acura"
+		obj := &v1alpha1.Car{}
+		//obj.ObjectMeta.UID = "599615df99804ae8"
+		obj.Name = name
+		obj.Namespace = "default"
+		obj.Spec.Brand = fmt.Sprintf("Acura-%03d", rand.Intn(1000))
 
-		err := Client.Cars().Set(obj)
+		err := ms.Set(obj)
 		if err != nil {
 			return err
 		}
@@ -113,7 +125,7 @@ func run() error {
 
 	// Start the server
 	go func() {
-		if err := e.Start(":8080"); err != nil {
+		if err := e.Start(":8888"); err != nil {
 			e.Logger.Info("shutting down the server")
 		}
 	}()
