@@ -3,13 +3,13 @@ package storage
 import (
 	"bytes"
 	"fmt"
+	"io"
 
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/yaml"
 )
 
 // Storage is an interface for persisting and retrieving API objects to/from a backend
@@ -98,7 +98,7 @@ func (s *GenericStorage) New(kind KindKey) (runtime.Object, error) {
 	// from defaulting external TypeMeta information was set. Set the
 	// desired gvk here so it's correctly handled in all code that gets
 	// the gvk from the Object
-	metaObj.SetGroupVersionKind(kind.GetGVK())
+	metaObj.GetObjectKind().SetGroupVersionKind(kind.GetGVK())
 	return metaObj, nil
 }
 
@@ -192,16 +192,11 @@ func (s *GenericStorage) List(kind KindKey) (result []runtime.Object, walkerr er
 func (s *GenericStorage) ListMeta(kind KindKey) (result []runtime.Object, walkerr error) {
 	gvk := kind.GetGVK()
 	walkerr = s.walkKind(kind, func(content []byte) error {
-		obj := runtime.NewAPIType()
-		// The yaml package supports both YAML and JSON
-		if err := yaml.Unmarshal(content, obj); err != nil {
+
+		obj, err := s.decodeMeta(content, gvk)
+		if err != nil {
 			return err
 		}
-		// Set the desired gvk from the caller of this Object
-		// In practice, this means, although we got an external type,
-		// we might want internal Objects later in the client. Hence,
-		// set the right expectation here
-		obj.SetGroupVersionKind(gvk)
 
 		result = append(result, obj)
 		return nil
@@ -268,23 +263,17 @@ func (s *GenericStorage) decode(content []byte, gvk schema.GroupVersionKind) (ru
 	}
 
 	// Set the desired gvk of this Object from the caller
-	metaObj.SetGroupVersionKind(gvk)
+	metaObj.GetObjectKind().SetGroupVersionKind(gvk)
 	return metaObj, nil
 }
 
 func (s *GenericStorage) decodeMeta(content []byte, gvk schema.GroupVersionKind) (runtime.Object, error) {
-	// Create a new APType object
-	obj := runtime.NewAPIType()
-
-	// Decode the bytes into the APIType object
-	err := s.serializer.Decoder().DecodeInto(serializer.NewYAMLFrameReader(serializer.FromBytes(content)), obj)
+	partobjs, err := DecodePartialObjects(serializer.FromBytes(content), s.serializer.Scheme(), false, &gvk)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set the desired gvk of this APIType object from the caller
-	obj.SetGroupVersionKind(gvk)
-	return obj, nil
+	return partobjs[0], nil
 }
 
 func (s *GenericStorage) walkKind(kind KindKey, fn func(content []byte) error) error {
@@ -310,4 +299,47 @@ func (s *GenericStorage) walkKind(kind KindKey, fn func(content []byte) error) e
 	}
 
 	return nil
+}
+
+// DecodePartialObjects reads any set of frames from the given ReadCloser, decodes the frames into
+// PartialObjects, validates that the decoded objects are known to the scheme, and optionally sets a default
+// group
+func DecodePartialObjects(rc io.ReadCloser, scheme *kruntime.Scheme, allowMultiple bool, defaultGVK *schema.GroupVersionKind) ([]runtime.PartialObject, error) {
+	fr := serializer.NewYAMLFrameReader(rc)
+
+	frames, err := serializer.ReadFrameList(fr)
+	if err != nil {
+		return nil, err
+	}
+
+	// If we only allow one frame, signal that early
+	if !allowMultiple && len(frames) != 1 {
+		return nil, fmt.Errorf("DecodePartialObjects: unexpected number of frames received from ReadCloser: %d expected 1", len(frames))
+	}
+
+	objs := make([]runtime.PartialObject, 0, len(frames))
+	for _, frame := range frames {
+		partobj, err := runtime.NewPartialObject(frame)
+		if err != nil {
+			return nil, err
+		}
+
+		gvk := partobj.GetObjectKind().GroupVersionKind()
+
+		// Don't decode API objects unknown to the scheme (e.g. Kubernetes manifests)
+		if !scheme.Recognizes(gvk) {
+			return nil, fmt.Errorf("unknown GroupVersionKind: %s", partobj.GetObjectKind().GroupVersionKind())
+		}
+
+		if defaultGVK != nil {
+			// Set the desired gvk from the caller of this Object, if defaultGVK is set
+			// In practice, this means, although we got an external type,
+			// we might want internal Objects later in the client. Hence,
+			// set the right expectation here
+			partobj.GetObjectKind().SetGroupVersionKind(gvk)
+		}
+
+		objs = append(objs, partobj)
+	}
+	return objs, nil
 }
