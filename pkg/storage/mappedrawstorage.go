@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/serializer"
@@ -22,12 +23,16 @@ type MappedRawStorage interface {
 	// RemoveMapping removes the physical file
 	// path mapping matching the given Key
 	RemoveMapping(key ObjectKey)
+	
+	// SetMappings overwrites all known mappings
+	SetMappings(m map[ObjectKey]string)
 }
 
 func NewGenericMappedRawStorage(dir string) MappedRawStorage {
 	return &GenericMappedRawStorage{
 		dir:          dir,
 		fileMappings: make(map[ObjectKey]string),
+		mux: &sync.Mutex{},
 	}
 }
 
@@ -36,10 +41,13 @@ func NewGenericMappedRawStorage(dir string) MappedRawStorage {
 type GenericMappedRawStorage struct {
 	dir          string
 	fileMappings map[ObjectKey]string
+	mux *sync.Mutex
 }
 
 func (r *GenericMappedRawStorage) realPath(key ObjectKey) (path string, err error) {
+	r.mux.Lock()
 	path, ok := r.fileMappings[key]
+	r.mux.Unlock()
 	if !ok {
 		err = fmt.Errorf("GenericMappedRawStorage: %q not tracked", key)
 	}
@@ -150,10 +158,21 @@ func (r *GenericMappedRawStorage) GetKey(path string) (ObjectKey, error) {
 
 func (r *GenericMappedRawStorage) AddMapping(key ObjectKey, path string) {
 	log.Debugf("GenericMappedRawStorage: AddMapping: %q -> %q", key, path)
+	r.mux.Lock()
 	r.fileMappings[key] = path
+	r.mux.Unlock()
 }
 
 func (r *GenericMappedRawStorage) RemoveMapping(key ObjectKey) {
 	log.Debugf("GenericMappedRawStorage: RemoveMapping: %q", key)
+	r.mux.Lock()
 	delete(r.fileMappings, key)
+	r.mux.Unlock()
+}
+
+func (r *GenericMappedRawStorage) SetMappings(m map[ObjectKey]string) {
+	log.Debugf("GenericMappedRawStorage: SetMappings: %v", m)
+	r.mux.Lock()
+	r.fileMappings = m
+	r.mux.Unlock()
 }
