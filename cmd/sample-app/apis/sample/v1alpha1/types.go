@@ -56,21 +56,3 @@ type MotorcycleStatus struct {
 	VehicleStatus `json:",inline"`
 	CurrentWeight float64 `json:"currentWeight"`
 }
-
-/*
-{
-	"kind": "Car",
-	"apiVersion"
-	"metadata": {
-		"name": "BlueCar",
-		"uid": "123",
-		""
-	},
-	"spec": {
-		""
-	},
-	"status": {
-
-	}
-}
-*/
