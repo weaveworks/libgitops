@@ -136,6 +136,8 @@ func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.Object, error) {
 
 // Set saves the Object to disk
 func (s *GenericStorage) Set(obj runtime.Object) error {
+	// TODO: Make sure we don't save a partial object
+
 	key, err := s.ObjectKeyFor(obj)
 	if err != nil {
 		return err

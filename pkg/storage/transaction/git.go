@@ -14,7 +14,7 @@ import (
 var excludeDirs = []string{".git"}
 
 func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (TransactionStorage, error) {
-	// Make sure the repo is cloned
+	// Make sure the repo is cloned. If this func has already been called, it will be a no-op.
 	gitDir.StartCheckoutLoop()
 
 	raw := storage.NewGenericMappedRawStorage(gitDir.Dir())
@@ -26,10 +26,11 @@ func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (Tran
 		raw:         raw,
 		gitDir:      gitDir,
 	}
-	// Do a first resync now
-	if err := gitStorage.resync(); err != nil {
+	// Do a first sync now, and then start the background loop
+	if err := gitStorage.sync(); err != nil {
 		return nil, err
 	}
+	gitStorage.syncLoop()
 
 	return gitStorage, nil
 }
@@ -54,20 +55,20 @@ func (s *GitStorage) Pull(ctx context.Context) error {
 	return s.gitDir.Pull(ctx)
 }
 
-func (s *GitStorage) resyncLoop() {
+func (s *GitStorage) syncLoop() {
 	go func() {
 		for {
 			if commit, ok := <-s.gitDir.CommitChannel(); ok {
-				logrus.Debugf("GitStorage: Got info about commit %q, resyncing...", commit)
-				if err := s.resync(); err != nil {
-					logrus.Errorf("GitStorage: Got resync error: %v", err)
+				logrus.Debugf("GitStorage: Got info about commit %q, syncing...", commit)
+				if err := s.sync(); err != nil {
+					logrus.Errorf("GitStorage: Got sync error: %v", err)
 				}
 			}
 		}
 	}()
 }
 
-func (s *GitStorage) resync() error {
+func (s *GitStorage) sync() error {
 	mappings, err := computeMappings(s.gitDir.Dir(), s.s)
 	if err != nil {
 		return err
@@ -83,7 +84,8 @@ func (s *GitStorage) Transaction(ctx context.Context, streamName string, fn Tran
 	}
 	s.Suspend()
 	defer s.Resume()
-	defer s.gitDir.ToMainBranch() // TODO ordering
+	// TODO ordering of the defers, and return deferred error
+	defer func() { _ = s.gitDir.ToMainBranch() }()
 
 	if err := s.gitDir.NewBranch(streamName); err != nil {
 		return err

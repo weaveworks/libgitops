@@ -245,9 +245,9 @@ func GVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersi
 		return gvk, nil
 	}
 
-	// TODO: If there are two gvks returned, it's probably a misconfiguration in the scheme
-	// It might be expected though, and we can tolerate setting the gvk manually IFF there are more than
-	// one objectkind AND the given GVK is one of them
+	// TODO: If there are two GVKs returned, it's probably a misconfiguration in the scheme
+	// It might be expected though, and we can tolerate setting the GVK manually IFF there are more than
+	// one ObjectKind AND the given GVK is one of them.
 
 	// Get the possible kinds for the object
 	gvks, unversioned, err := scheme.ObjectKinds(obj)

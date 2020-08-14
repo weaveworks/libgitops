@@ -32,6 +32,8 @@ type CommitSpec struct {
 type TransactionStorage interface {
 	storage.ReadStorage
 
+	// TODO: Do we need Suspend/Resume/Pull?
+
 	Suspend()
 	Resume()
 

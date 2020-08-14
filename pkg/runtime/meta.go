@@ -17,7 +17,8 @@ type PartialObjectImpl struct {
 
 func (po *PartialObjectImpl) IsPartialObject() {}
 
-// This constructor ensures the PartialObjectImpl fields are not nil
+// This constructor ensures the PartialObjectImpl fields are not nil.
+// TODO: Make this multi-document-aware?
 func NewPartialObject(frame []byte) (PartialObject, error) {
 	obj := &PartialObjectImpl{}
 
@@ -46,6 +47,6 @@ type PartialObject interface {
 	Object
 
 	// IsPartialObject is a dummy function for signalling that this is a partially-loaded object
-	// i.e. only TypeMeta and ObjectMeta is stored in memory
+	// i.e. only TypeMeta and ObjectMeta are stored in memory.
 	IsPartialObject()
 }
