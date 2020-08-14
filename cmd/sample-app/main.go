@@ -226,7 +226,3 @@ func parseVersionFlag() {
 		os.Exit(0)
 	}
 }
-
-func stringVar(s string) *string {
-	return &s
-}
