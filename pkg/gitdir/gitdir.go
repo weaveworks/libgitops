@@ -2,6 +2,7 @@ package gitdir
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -19,9 +20,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+var (
+	ErrReadOnly = errors.New("can't commit, this repo is read-only")
+)
+
 const (
 	userName  = "Weave libgitops"
 	userEmail = "support@weave.works"
+	defaultMsg = "Update files changed by libgitops"
 
 	defaultBranch   = "master"
 	defaultRemote   = "origin"
@@ -85,6 +91,11 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 		cloneDir:  tmpDir,
 		auth:      nil,
 		readwrite: false, // only switch to read-write if we've got the right credentials
+
+		// TODO: This needs to be large, otherwise it can start blocking unnecessarily if nobody reads it
+		commitChan: make(chan string, 1024),
+		lock: &sync.Mutex{},
+		//pullMux: &sync.Mutex{},
 	}
 	// Set up the parent context for this class. d.cancel() is called only at Cleanup()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
@@ -137,7 +148,7 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 	}
 
 	// Start (non-blocking) syncing goroutines directly
-	d.startLoops()
+	//d.startLoops()
 	return d, nil
 }
 
@@ -161,38 +172,63 @@ type GitDirectory struct {
 
 	// latest known commit to the system
 	lastCommit string
+	// events channel from new commits
+	commitChan chan string
 
 	// the context and its cancel function for the lifetime of this struct (until Cleanup())
 	ctx    context.Context
 	cancel context.CancelFunc
 	// the lock for git operations (so pushing and pulling aren't done simultaneously)
-	lock sync.Mutex
+	lock *sync.Mutex
+	//pullMux *sync.Mutex
 }
 
 func (d *GitDirectory) Dir() string {
 	return d.cloneDir
 }
 
-func (d *GitDirectory) startLoops() {
-	go d.checkoutLoop()
-	if d.readwrite {
-		go d.commitLoop()
+func (d *GitDirectory) StartCheckoutLoop() {
+	if d.wt != nil {
+		return // already initialized
 	}
+	// First, clone the repo
+	if err := d.clone(); err != nil {
+		log.Fatalf("Failed to clone git repo: %v", err)
+	}
+	go d.checkoutLoop()
+}
+
+func (d *GitDirectory) StartCommitLoop() error {
+	if !d.readwrite {
+		return ErrReadOnly
+	}
+	if d.wt != nil {
+		return nil // already initialized
+	}
+	go d.commitLoop()
+	return nil
+}
+
+func (d *GitDirectory) Suspend() {
+	d.lock.Lock()
+}
+
+func (d *GitDirectory) Resume() {
+	d.lock.Unlock()
+}
+
+func (d *GitDirectory) CommitChannel() chan string {
+	return d.commitChan
 }
 
 func (d *GitDirectory) checkoutLoop() {
 	log.Info("Starting the checkout loop...")
 
-	// First, clone the repo
-	if err := d.clone(); err != nil {
-		log.Fatalf("Failed to clone git repo: %v", err)
-	}
-
 	wait.NonSlidingUntilWithContext(d.ctx, func(_ context.Context) {
 
 		log.Trace("checkoutLoop: Will perform pull operation")
 		// Perform a pull & checkout of the new revision
-		if err := d.doPull(); err != nil {
+		if err := d.Pull(d.ctx); err != nil {
 			log.Errorf("checkoutLoop: git pull failed with error: %v", err)
 			return
 		}
@@ -213,8 +249,11 @@ func (d *GitDirectory) commitLoop() {
 
 		log.Trace("commitLoop: Will perform commit operation, if any")
 
-		// Perform the commit
-		if err := d.doCommit(); err != nil {
+		// Perform the commit, but aquire the lock first
+		// Lock the mutex now that we're starting, and unlock it when exiting
+		d.lock.Lock()
+		defer d.lock.Unlock()
+		if err := d.Commit(d.ctx, userName, userEmail, defaultMsg); err != nil {
 			log.Errorf("checkoutLoop: git commit & push failed with error: %v", err)
 			return
 		}
@@ -230,7 +269,7 @@ func (d *GitDirectory) clone() error {
 
 	log.Infof("Starting to clone the repository %s with timeout %s", d.url, d.timeout)
 	// Do a clone operation to the temporary directory, with a timeout
-	err := d.withTimeout(func(ctx context.Context) error {
+	err := d.contextWithTimeout(d.ctx, func(ctx context.Context) error {
 		var err error
 		d.repo, err = git.PlainCloneContext(ctx, d.Dir(), false, &git.CloneOptions{
 			URL:           d.url,
@@ -275,15 +314,15 @@ func (d *GitDirectory) clone() error {
 	return nil
 }
 
-func (d *GitDirectory) doPull() error {
+func (d *GitDirectory) Pull(ctx context.Context) error {
 	// Lock the mutex now that we're starting, and unlock it when exiting
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
 	// Perform the git pull operation using the timeout
-	err := d.withTimeout(func(ctx context.Context) error {
+	err := d.contextWithTimeout(ctx, func(innerCtx context.Context) error {
 		log.Trace("checkoutLoop: Starting pull operation")
-		return d.wt.PullContext(ctx, &git.PullOptions{
+		return d.wt.PullContext(innerCtx, &git.PullOptions{
 			Auth:         d.auth,
 			SingleBranch: true,
 		})
@@ -318,20 +357,32 @@ func (d *GitDirectory) doPull() error {
 	return nil
 }
 
+func (d *GitDirectory) NewBranch(branchName string) error {
+	return d.wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(branchName),
+		Create: true,
+		//Force: true,
+	})
+}
+
+func (d *GitDirectory) ToMainBranch() error {
+	return d.wt.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(d.branch),
+		//Force: true,
+	})
+}
+
 // observeCommit sets the lastCommit variable so that we know the latest state
 func (d *GitDirectory) observeCommit(commit plumbing.Hash, userInitiated bool) {
 	d.lastCommit = commit.String()
+	d.commitChan <- commit.String()
 	log.Infof("New commit observed on branch %q: %s. User initiated: %t", d.branch, commit, userInitiated)
 }
 
-func (d *GitDirectory) doCommit() error {
-	// Lock the mutex now that we're starting, and unlock it when exiting
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
+func (d *GitDirectory) Commit(ctx context.Context, authorName, authorEmail, msg string) error {
 	s, err := d.wt.Status()
 	if err != nil {
-		return fmt.Errorf("couldn't get status: %v", err)
+		return fmt.Errorf("git status failed: %v", err)
 	}
 	if s.IsClean() {
 		log.Debugf("No changed files in git repo, nothing to commit...")
@@ -340,22 +391,22 @@ func (d *GitDirectory) doCommit() error {
 
 	// Do a commit and push
 	log.Debug("commitLoop: Committing all local changes")
-	hash, err := d.wt.Commit("Update files changed by libgitops", &git.CommitOptions{
+	hash, err := d.wt.Commit(msg, &git.CommitOptions{
 		All: true,
 		Author: &object.Signature{
-			Name:  userName,
-			Email: userEmail,
+			Name:  authorName,
+			Email: authorEmail,
 			When:  time.Now(),
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("git commit and/or push error: %v", err)
+		return fmt.Errorf("git commit error: %v", err)
 	}
 
 	// Perform the git push operation using the timeout
-	err = d.withTimeout(func(ctx context.Context) error {
+	err = d.contextWithTimeout(ctx, func(innerCtx context.Context) error {
 		log.Debug("commitLoop: Will push with timeout")
-		return d.repo.PushContext(ctx, &git.PushOptions{
+		return d.repo.PushContext(innerCtx, &git.PushOptions{
 			Auth: d.auth,
 		})
 	})
@@ -378,10 +429,10 @@ func (d *GitDirectory) doCommit() error {
 	return nil
 }
 
-func (d *GitDirectory) withTimeout(fn func(context.Context) error) error {
+func (d *GitDirectory) contextWithTimeout(ctx context.Context, fn func(context.Context) error) error {
 	// Create a new context with a timeout. The push operation either succeeds in time, times out,
 	// or is cancelled by Cleanup(). In case of a successful run, the context is always cancelled afterwards.
-	ctx, cancel := context.WithTimeout(d.ctx, d.timeout)
+	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 
 	// Run the function using the context and cancel directly afterwards
