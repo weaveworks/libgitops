@@ -1,6 +1,9 @@
 package filterer
 
 /*
+
+TODO: Revisit if we need this file/package in the future.
+
 // BaseFilter provides shared functionality for filter types
 type BaseFilter interface {
 	// AmbiguousError specifies what to error if

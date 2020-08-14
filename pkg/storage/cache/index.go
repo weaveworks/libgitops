@@ -1,6 +1,9 @@
 package cache
 
 /*
+
+TODO: Revisit if we need this file/package in the future.
+
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"

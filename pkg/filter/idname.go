@@ -1,6 +1,8 @@
-// +build ignore
-
 package filter
+
+/*
+
+TODO: Revisit if we need this file/package in the future.
 
 import (
 	"strings"
@@ -76,3 +78,4 @@ func formatMatches(input []filterer.Match) string {
 
 	return sb.String()
 }
+*/

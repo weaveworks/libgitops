@@ -1,6 +1,8 @@
-// +build ignore
-
 package filter
+
+/*
+
+TODO: Revisit if we need this file/package in the future.
 
 import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
@@ -32,3 +34,4 @@ func (f *AllFilter) NonexistentError() *filterer.NonexistentError {
 
 // SetKind is a no-op as this filter doesn't have a dedicated kind
 func (f *AllFilter) SetKind(_ runtime.Kind) {}
+*/

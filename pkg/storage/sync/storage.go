@@ -1,5 +1,9 @@
 package sync
 
+/*
+
+TODO: Revisit if we need this file/package in the future.
+
 import (
 	"fmt"
 
@@ -181,3 +185,4 @@ func (ss *SyncStorage) monitorFunc() {
 		}
 	}
 }
+*/

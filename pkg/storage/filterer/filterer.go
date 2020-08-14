@@ -1,6 +1,9 @@
 package filterer
 
 /*
+
+TODO: Revisit if we need this file/package in the future.
+
 import (
 	"fmt"
 

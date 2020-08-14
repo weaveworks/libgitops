@@ -1,5 +1,9 @@
 // +build ignore
 
+/*
+
+TODO: Revisit if we need this file/package in the future.
+
 package filter
 
 import (
@@ -40,3 +44,4 @@ func (f *NameFilter) AmbiguousError(_ []filterer.Match) *filterer.AmbiguousError
 func (f *NameFilter) NonexistentError() *filterer.NonexistentError {
 	return filterer.NewNonexistentError("can't find %s: no name matches for %q", f.kind, f.name)
 }
+*/
