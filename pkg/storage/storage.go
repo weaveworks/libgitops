@@ -9,6 +9,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -146,6 +147,12 @@ func (s *GenericStorage) Set(obj runtime.Object) error {
 		contentType = ct
 	}
 
+	// Set creationTimestamp if not already populated
+	t := obj.GetCreationTimestamp()
+	if t.IsZero() {
+		obj.SetCreationTimestamp(metav1.Now())
+	}
+
 	var objBytes bytes.Buffer
 	err = s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
 	if err != nil {
@@ -232,7 +239,7 @@ func (s *GenericStorage) ObjectKeyFor(obj runtime.Object) (ObjectKey, error) {
 			return nil, err
 		}
 	}
-	
+
 	id := s.identify(obj)
 	if id == nil {
 		return nil, fmt.Errorf("couldn't identify object")
