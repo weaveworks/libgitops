@@ -137,8 +137,8 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 				// This creates a "fake" Object from the key to be used for
 				// deletion, as the original has already been removed from disk
 				obj = &runtime.PartialObjectImpl{
-					&metav1.TypeMeta{},
-					&metav1.ObjectMeta{
+					TypeMeta: &metav1.TypeMeta{},
+					ObjectMeta: &metav1.ObjectMeta{
 						Name: EventDeleteObjectName,
 						UID:  types.UID(key.GetIdentifier()),
 					},
