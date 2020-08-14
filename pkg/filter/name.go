@@ -1,10 +1,8 @@
-// +build ignore
+package filter
 
 /*
 
 TODO: Revisit if we need this file/package in the future.
-
-package filter
 
 import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
