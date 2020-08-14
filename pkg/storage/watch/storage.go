@@ -30,7 +30,9 @@ type WatchStorage interface {
 
 type AssociatedEventStream chan update.AssociatedUpdate
 
-// NewGenericWatchStorage constructs a new WatchStorage
+// NewGenericWatchStorage constructs a new WatchStorage.
+// Note: This WatchStorage only works for one-frame files (i.e. only one YAML document per
+// file is supported).
 func NewGenericWatchStorage(s storage.Storage) (WatchStorage, error) {
 	ws := &GenericWatchStorage{
 		Storage: s,
@@ -136,13 +138,19 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 
 				// This creates a "fake" Object from the key to be used for
 				// deletion, as the original has already been removed from disk
+				apiVersion, kind := key.GetGVK().ToAPIVersionAndKind()
 				obj = &runtime.PartialObjectImpl{
-					TypeMeta: &metav1.TypeMeta{},
-					ObjectMeta: &metav1.ObjectMeta{
+					TypeMeta: metav1.TypeMeta{
+						APIVersion: apiVersion,
+						Kind:       kind,
+					},
+					ObjectMeta: metav1.ObjectMeta{
 						Name: EventDeleteObjectName,
 						UID:  types.UID(key.GetIdentifier()),
 					},
 				}
+				// remove the mapping for this key as it's now deleted
+				s.removeMapping(raw, key)
 			} else {
 				content, err = ioutil.ReadFile(event.Path)
 				if err != nil {
@@ -216,30 +224,12 @@ func (s *GenericWatchStorage) addMapping(raw storage.RawStorage, obj runtime.Obj
 	mapped.AddMapping(key, file)
 }
 
-/*
-func (s *GenericWatchStorage) resolveAPIType(path string) (runtime.Object, error) {
-	obj := runtime.NewAPIType()
-	content, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
+// removeMapping removes a mapping a file that doesn't exist
+func (s *GenericWatchStorage) removeMapping(raw storage.RawStorage, key storage.ObjectKey) {
+	mapped, ok := raw.(storage.MappedRawStorage)
+	if !ok {
+		return
 	}
 
-	// The yaml package supports both YAML and JSON
-	if err := yaml.Unmarshal(content, obj); err != nil {
-		return nil, err
-	}
-
-	gvk := obj.GetObjectKind().GroupVersionKind()
-
-	// Don't decode API objects unknown to the scheme (e.g. Kubernetes manifests)
-	if !s.Serializer().Scheme().Recognizes(gvk) {
-		return nil, fmt.Errorf("unknown API version %q and/or kind %q", obj.APIVersion, obj.Kind)
-	}
-
-	// Require the UID field to be set
-	if len(obj.GetUID()) == 0 {
-		return nil, fmt.Errorf(".metadata.uid not set")
-	}
-
-	return obj, nil
-}*/
+	mapped.RemoveMapping(key)
+}
