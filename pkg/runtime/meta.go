@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"fmt"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
@@ -13,8 +11,8 @@ import (
 // where .Name, .UID, .Kind and .APIVersion become easily available
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type PartialObjectImpl struct {
-	*metav1.TypeMeta   `json:",inline"`
-	*metav1.ObjectMeta `json:"metadata"`
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata"`
 }
 
 func (po *PartialObjectImpl) IsPartialObject() {}
@@ -32,32 +30,18 @@ func NewPartialObject(frame []byte) (PartialObject, error) {
 	return obj, nil
 }
 
-// PartialObjectFrom is used to create a bound PartialObjectImpl from an Object
-// TODO: Do we need to support other TypeMetas than *metav1.TypeMeta?
-func PartialObjectFrom(obj Object) (PartialObject, error) {
-	tm, ok := obj.GetObjectKind().(*metav1.TypeMeta)
-	if !ok {
-		return nil, fmt.Errorf("PartialObjectFrom: Cannot cast obj to *metav1.TypeMeta, is %T", obj.GetObjectKind())
-	}
-	om, ok := obj.GetObjectMeta().(*metav1.ObjectMeta)
-	if !ok {
-		return nil, fmt.Errorf("PartialObjectFrom: Cannot cast obj to *metav1.TypeMeta, is %T", obj.GetObjectKind())
-	}
-
-	return &PartialObjectImpl{tm, om}, nil
-}
-
 var _ Object = &PartialObjectImpl{}
 var _ PartialObject = &PartialObjectImpl{}
 
-// Object extends k8s.io/apimachinery's runtime.Object with
-// extra GetName() and GetUID() methods from ObjectMeta
+// Object is an union of the Object interfaces that are accessible for a
+// type that embeds both metav1.TypeMeta and metav1.ObjectMeta.
 type Object interface {
 	runtime.Object
 	metav1.ObjectMetaAccessor
 	metav1.Object
 }
 
+// PartialObject is a partially-decoded object, where only metadata has been loaded.
 type PartialObject interface {
 	Object
 

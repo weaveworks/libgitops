@@ -175,4 +175,19 @@ func (c *cache) Flush() error {
 
 	return nil
 }
+
+// PartialObjectFrom is used to create a bound PartialObjectImpl from an Object
+// Note: This might be useful later (maybe here or maybe in pkg/runtime) if re-enable the cache
+func PartialObjectFrom(obj Object) (PartialObject, error) {
+	tm, ok := obj.GetObjectKind().(*metav1.TypeMeta)
+	if !ok {
+		return nil, fmt.Errorf("PartialObjectFrom: Cannot cast obj to *metav1.TypeMeta, is %T", obj.GetObjectKind())
+	}
+	om, ok := obj.GetObjectMeta().(*metav1.ObjectMeta)
+	if !ok {
+		return nil, fmt.Errorf("PartialObjectFrom: Cannot cast obj to *metav1.TypeMeta, is %T", obj.GetObjectKind())
+	}
+	return &PartialObjectImpl{tm, om}, nil
+}
+
 */
