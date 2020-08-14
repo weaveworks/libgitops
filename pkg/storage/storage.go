@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
@@ -12,9 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// Storage is an interface for persisting and retrieving API objects to/from a backend
-// One Storage instance handles all different Kinds of Objects
-type Storage interface {
+type ReadStorage interface {
 	// New creates a new Object for the specified kind
 	New(kind KindKey) (runtime.Object, error)
 
@@ -22,13 +21,7 @@ type Storage interface {
 	Get(key ObjectKey) (runtime.Object, error)
 	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
 	GetMeta(key ObjectKey) (runtime.Object, error)
-	// Set saves the Object to disk. If the Object does not exist, the
-	// ObjectMeta.Created field is set automatically
-	Set(obj runtime.Object) error
-	// Patch performs a strategic merge patch on the Object with the given UID, using the byte-encoded patch given
-	Patch(key ObjectKey, patch []byte) error
-	// Delete removes an Object from the storage
-	Delete(key ObjectKey) error
+
 	// Checksum returns a string representing the state of an Object on disk
 	// The checksum should change if any modifications have been made to the
 	// Object on disk, it can be e.g. the Object's modification timestamp or
@@ -54,6 +47,23 @@ type Storage interface {
 	Serializer() serializer.Serializer
 	// Close closes all underlying resources (e.g. goroutines) used; before the application exits
 	Close() error
+}
+
+type WriteStorage interface {
+	// Set saves the Object to disk. If the Object does not exist, the
+	// ObjectMeta.Created field is set automatically
+	Set(obj runtime.Object) error
+	// Patch performs a strategic merge patch on the Object with the given UID, using the byte-encoded patch given
+	Patch(key ObjectKey, patch []byte) error
+	// Delete removes an Object from the storage
+	Delete(key ObjectKey) error
+}
+
+// Storage is an interface for persisting and retrieving API objects to/from a backend
+// One Storage instance handles all different Kinds of Objects
+type Storage interface {
+	ReadStorage
+	WriteStorage
 }
 
 // NewGenericStorage constructs a new Storage
@@ -109,7 +119,7 @@ func (s *GenericStorage) Get(key ObjectKey) (runtime.Object, error) {
 		return nil, err
 	}
 
-	return s.decode(content, key.GetGVK())
+	return s.decode(key, content)
 }
 
 // TODO: Verify this works
@@ -120,7 +130,7 @@ func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.Object, error) {
 		return nil, err
 	}
 
-	return s.decodeMeta(content, key.GetGVK())
+	return s.decodeMeta(key, content)
 }
 
 // Set saves the Object to disk
@@ -172,9 +182,8 @@ func (s *GenericStorage) Checksum(key ObjectKey) (string, error) {
 
 // List lists Objects for the specific kind
 func (s *GenericStorage) List(kind KindKey) (result []runtime.Object, walkerr error) {
-	gvk := kind.GetGVK()
-	walkerr = s.walkKind(kind, func(content []byte) error {
-		obj, err := s.decode(content, gvk)
+	walkerr = s.walkKind(kind, func(key ObjectKey, content []byte) error {
+		obj, err := s.decode(key, content)
 		if err != nil {
 			return err
 		}
@@ -190,10 +199,9 @@ func (s *GenericStorage) List(kind KindKey) (result []runtime.Object, walkerr er
 // This allows for faster runs (no need to unmarshal "the world"), and less
 // resource usage, when only metadata is unmarshalled into memory
 func (s *GenericStorage) ListMeta(kind KindKey) (result []runtime.Object, walkerr error) {
-	gvk := kind.GetGVK()
-	walkerr = s.walkKind(kind, func(content []byte) error {
+	walkerr = s.walkKind(kind, func(key ObjectKey, content []byte) error {
 
-		obj, err := s.decodeMeta(content, gvk)
+		obj, err := s.decodeMeta(key, content)
 		if err != nil {
 			return err
 		}
@@ -211,10 +219,20 @@ func (s *GenericStorage) Count(kind KindKey) (uint64, error) {
 }
 
 func (s *GenericStorage) ObjectKeyFor(obj runtime.Object) (ObjectKey, error) {
-	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
-	if err != nil {
-		return nil, err
+	var gvk schema.GroupVersionKind
+	var err error
+
+	_, isPartialObject := obj.(runtime.PartialObject)
+	if isPartialObject {
+		gvk = obj.GetObjectKind().GroupVersionKind()
+		// TODO: Error if empty
+	} else {
+		gvk, err = serializer.GVKForObject(s.serializer.Scheme(), obj)
+		if err != nil {
+			return nil, err
+		}
 	}
+	
 	id := s.identify(obj)
 	if id == nil {
 		return nil, fmt.Errorf("couldn't identify object")
@@ -244,14 +262,17 @@ func (s *GenericStorage) identify(obj runtime.Object) runtime.Identifyable {
 	return nil
 }
 
-func (s *GenericStorage) decode(content []byte, gvk schema.GroupVersionKind) (runtime.Object, error) {
+func (s *GenericStorage) decode(key ObjectKey, content []byte) (runtime.Object, error) {
+	gvk := key.GetGVK()
 	// Decode the bytes to the internal version of the Object, if desired
 	isInternal := gvk.Version == kruntime.APIVersionInternal
 
 	// Decode the bytes into an Object
+	ct := s.raw.ContentType(key)
+	logrus.Infof("Decoding with content type %s", ct)
 	obj, err := s.serializer.Decoder(
 		serializer.WithConvertToHubDecode(isInternal),
-	).Decode(serializer.NewJSONFrameReader(serializer.FromBytes(content)))
+	).Decode(serializer.NewFrameReader(ct, serializer.FromBytes(content)))
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +288,8 @@ func (s *GenericStorage) decode(content []byte, gvk schema.GroupVersionKind) (ru
 	return metaObj, nil
 }
 
-func (s *GenericStorage) decodeMeta(content []byte, gvk schema.GroupVersionKind) (runtime.Object, error) {
+func (s *GenericStorage) decodeMeta(key ObjectKey, content []byte) (runtime.Object, error) {
+	gvk := key.GetGVK()
 	partobjs, err := DecodePartialObjects(serializer.FromBytes(content), s.serializer.Scheme(), false, &gvk)
 	if err != nil {
 		return nil, err
@@ -276,24 +298,24 @@ func (s *GenericStorage) decodeMeta(content []byte, gvk schema.GroupVersionKind)
 	return partobjs[0], nil
 }
 
-func (s *GenericStorage) walkKind(kind KindKey, fn func(content []byte) error) error {
-	entries, err := s.raw.List(kind)
+func (s *GenericStorage) walkKind(kind KindKey, fn func(key ObjectKey, content []byte) error) error {
+	keys, err := s.raw.List(kind)
 	if err != nil {
 		return err
 	}
 
-	for _, entry := range entries {
+	for _, key := range keys {
 		// Allow metadata.json to not exist, although the directory does exist
-		if !s.raw.Exists(entry) {
+		if !s.raw.Exists(key) {
 			continue
 		}
 
-		content, err := s.raw.Read(entry)
+		content, err := s.raw.Read(key)
 		if err != nil {
 			return err
 		}
 
-		if err := fn(content); err != nil {
+		if err := fn(key, content); err != nil {
 			return err
 		}
 	}
@@ -328,6 +350,7 @@ func DecodePartialObjects(rc io.ReadCloser, scheme *kruntime.Scheme, allowMultip
 
 		// Don't decode API objects unknown to the scheme (e.g. Kubernetes manifests)
 		if !scheme.Recognizes(gvk) {
+			// TODO: Typed error
 			return nil, fmt.Errorf("unknown GroupVersionKind: %s", partobj.GetObjectKind().GroupVersionKind())
 		}
 
