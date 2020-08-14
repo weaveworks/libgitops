@@ -25,10 +25,8 @@ type WatchStorage interface {
 	// WatchStorage extends the Storage interface
 	storage.Storage
 	// GetTrigger returns a hook that can be used to detect a watch event
-	SetEventStream(AssociatedEventStream)
+	SetUpdateStream(update.UpdateStream)
 }
-
-type AssociatedEventStream chan update.AssociatedUpdate
 
 // NewGenericWatchStorage constructs a new WatchStorage.
 // Note: This WatchStorage only works for one-frame files (i.e. only one YAML document per
@@ -55,7 +53,7 @@ func NewGenericWatchStorage(s storage.Storage) (WatchStorage, error) {
 type GenericWatchStorage struct {
 	storage.Storage
 	watcher *watcher.FileWatcher
-	events  *AssociatedEventStream
+	events  update.UpdateStream
 	monitor *sync.Monitor
 }
 
@@ -79,8 +77,8 @@ func (s *GenericWatchStorage) Delete(key storage.ObjectKey) error {
 	return s.Storage.Delete(key)
 }
 
-func (s *GenericWatchStorage) SetEventStream(eventStream AssociatedEventStream) {
-	s.events = &eventStream
+func (s *GenericWatchStorage) SetUpdateStream(eventStream update.UpdateStream) {
+	s.events = eventStream
 }
 
 func (s *GenericWatchStorage) Close() error {
@@ -117,7 +115,7 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 
 	for {
 		if event, ok := <-s.watcher.GetFileUpdateStream(); ok {
-			var obj runtime.Object
+			var partObj runtime.PartialObject
 			var err error
 
 			var objectEvent update.ObjectEvent
@@ -139,14 +137,15 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 				// This creates a "fake" Object from the key to be used for
 				// deletion, as the original has already been removed from disk
 				apiVersion, kind := key.GetGVK().ToAPIVersionAndKind()
-				obj = &runtime.PartialObjectImpl{
+				partObj = &runtime.PartialObjectImpl{
 					TypeMeta: metav1.TypeMeta{
 						APIVersion: apiVersion,
 						Kind:       kind,
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Name: EventDeleteObjectName,
-						UID:  types.UID(key.GetIdentifier()),
+						// TODO: This doesn't take into account where e.g. the identifier is "{namespace}/{name}"
+						UID: types.UID(key.GetIdentifier()),
 					},
 				}
 				// remove the mapping for this key as it's now deleted
@@ -158,14 +157,14 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 					continue
 				}
 
-				if obj, err = runtime.NewPartialObject(content); err != nil {
+				if partObj, err = runtime.NewPartialObject(content); err != nil {
 					log.Warnf("Ignoring %q: %v", event.Path, err)
 					continue
 				}
 
 				if event.Event == watcher.FileEventMove {
 					// Update the mappings for the moved file (AddMapping overwrites)
-					s.addMapping(raw, obj, event.Path)
+					s.addMapping(raw, partObj, event.Path)
 
 					// Internal move events are a no-op
 					continue
@@ -175,7 +174,7 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 				// as Objects can get updated (via watcher.FileEventModify) to be conformant
 				if _, err = raw.GetKey(event.Path); err != nil {
 					// Add a mapping between this object and path
-					s.addMapping(raw, obj, event.Path)
+					s.addMapping(raw, partObj, event.Path)
 
 					// This is what actually determines if an Object is created,
 					// so update the event to update.ObjectEventCreate here
@@ -185,7 +184,7 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 
 			// Send the objectEvent to the events channel
 			if objectEvent != update.ObjectEventNone {
-				s.sendEvent(objectEvent, obj)
+				s.sendEvent(objectEvent, partObj)
 			}
 		} else {
 			return
@@ -193,15 +192,13 @@ func (s *GenericWatchStorage) monitorFunc(raw storage.RawStorage, files []string
 	}
 }
 
-func (s *GenericWatchStorage) sendEvent(event update.ObjectEvent, obj runtime.Object) {
+func (s *GenericWatchStorage) sendEvent(event update.ObjectEvent, partObj runtime.PartialObject) {
 	if s.events != nil {
 		log.Tracef("GenericWatchStorage: Sending event: %v", event)
-		*s.events <- update.AssociatedUpdate{
-			Update: update.Update{
-				Event:   event,
-				APIType: obj,
-			},
-			Storage: s,
+		s.events <- update.Update{
+			Event:         event,
+			PartialObject: partObj,
+			Storage:       s,
 		}
 	}
 }

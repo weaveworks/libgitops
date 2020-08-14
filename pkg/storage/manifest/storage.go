@@ -4,8 +4,8 @@ import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
-	"github.com/weaveworks/libgitops/pkg/storage/sync"
 	"github.com/weaveworks/libgitops/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 )
 
 // NewManifestStorage constructs a new storage that watches unstructured manifests in the specified directory,
@@ -22,19 +22,27 @@ func NewManifestStorage(manifestDir string, ser serializer.Serializer) (*Manifes
 		return nil, err
 	}
 
-	ss := sync.NewSyncStorage(ws)
+	// Create the ManifestStorage wrapper, with an events channel exposed by GetUpdateStream,
+	// subscribing to updates from the WatchStorage.
+	ms := &ManifestStorage{
+		Storage:     ws,
+		eventStream: make(update.UpdateStream, 4096),
+	}
+	ws.SetUpdateStream(ms.eventStream)
 
-	return &ManifestStorage{
-		Storage: ss,
-	}, nil
+	return ms, nil
 }
+
+// ManifestStorage implements update.EventStorage.
+var _ update.EventStorage = &ManifestStorage{}
 
 // ManifestStorage implements the storage interface for GitOps purposes
 type ManifestStorage struct {
 	storage.Storage
+	eventStream update.UpdateStream
 }
 
 // GetUpdateStream gets the channel with updates
-func (s *ManifestStorage) GetUpdateStream() sync.UpdateStream {
-	return s.Storage.(*sync.SyncStorage).GetUpdateStream()
+func (s *ManifestStorage) GetUpdateStream() update.UpdateStream {
+	return s.eventStream
 }
