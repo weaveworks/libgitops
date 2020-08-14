@@ -25,8 +25,8 @@ var (
 )
 
 const (
-	userName  = "Weave libgitops"
-	userEmail = "support@weave.works"
+	userName   = "Weave libgitops"
+	userEmail  = "support@weave.works"
 	defaultMsg = "Update files changed by libgitops"
 
 	defaultBranch   = "master"
@@ -94,7 +94,7 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 
 		// TODO: This needs to be large, otherwise it can start blocking unnecessarily if nobody reads it
 		commitChan: make(chan string, 1024),
-		lock: &sync.Mutex{},
+		lock:       &sync.Mutex{},
 		//pullMux: &sync.Mutex{},
 	}
 	// Set up the parent context for this class. d.cancel() is called only at Cleanup()

@@ -23,7 +23,7 @@ type MappedRawStorage interface {
 	// RemoveMapping removes the physical file
 	// path mapping matching the given Key
 	RemoveMapping(key ObjectKey)
-	
+
 	// SetMappings overwrites all known mappings
 	SetMappings(m map[ObjectKey]string)
 }
@@ -32,7 +32,7 @@ func NewGenericMappedRawStorage(dir string) MappedRawStorage {
 	return &GenericMappedRawStorage{
 		dir:          dir,
 		fileMappings: make(map[ObjectKey]string),
-		mux: &sync.Mutex{},
+		mux:          &sync.Mutex{},
 	}
 }
 
@@ -41,7 +41,7 @@ func NewGenericMappedRawStorage(dir string) MappedRawStorage {
 type GenericMappedRawStorage struct {
 	dir          string
 	fileMappings map[ObjectKey]string
-	mux *sync.Mutex
+	mux          *sync.Mutex
 }
 
 func (r *GenericMappedRawStorage) realPath(key ObjectKey) (path string, err error) {

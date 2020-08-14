@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	ErrAbortTransaction = errors.New("transaction aborted")
+	ErrAbortTransaction  = errors.New("transaction aborted")
 	ErrTransactionActive = errors.New("transaction is active")
 )
 
@@ -44,6 +44,6 @@ type TransactionStorage interface {
 	// The environment is made sure to be as up-to-date as possible before fn executes. When
 	// fn executes, the given storage can be used to modify the desired state. If you want to
 	// "commit" the changes made in fn, just return nil. If you want to abort, return ErrAbortTransaction.
-	// If you want to 
+	// If you want to
 	Transaction(ctx context.Context, streamName string, fn TransactionFunc) error
 }

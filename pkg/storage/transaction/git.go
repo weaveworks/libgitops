@@ -22,9 +22,9 @@ func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (Tran
 
 	gitStorage := &GitStorage{
 		ReadStorage: s,
-		s: s,
-		raw: raw,
-		gitDir: gitDir,
+		s:           s,
+		raw:         raw,
+		gitDir:      gitDir,
 	}
 	// Do a first resync now
 	if err := gitStorage.resync(); err != nil {
@@ -37,8 +37,8 @@ func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (Tran
 type GitStorage struct {
 	storage.ReadStorage
 
-	s storage.Storage
-	raw storage.MappedRawStorage
+	s      storage.Storage
+	raw    storage.MappedRawStorage
 	gitDir *gitdir.GitDirectory
 }
 
@@ -105,7 +105,7 @@ func computeMappings(dir string, s storage.Storage) (map[storage.ObjectKey]strin
 	if err != nil {
 		return nil, err
 	}
-	
+
 	m := map[storage.ObjectKey]string{}
 	for _, file := range files {
 		partObjs, err := storage.DecodePartialObjects(serializer.FromFile(file), s.Serializer().Scheme(), false, nil)

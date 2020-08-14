@@ -49,7 +49,7 @@ func NewGenericRawStorage(dir string, gv schema.GroupVersion, ct serializer.Cont
 	return &GenericRawStorage{
 		dir: dir,
 		gv:  gv,
-		ct: ct,
+		ct:  ct,
 		ext: ext,
 	}
 }
@@ -61,7 +61,7 @@ func NewGenericRawStorage(dir string, gv schema.GroupVersion, ct serializer.Cont
 type GenericRawStorage struct {
 	dir string
 	gv  schema.GroupVersion
-	ct serializer.ContentType
+	ct  serializer.ContentType
 	ext string
 }
 

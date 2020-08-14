@@ -34,7 +34,7 @@ var (
 )
 
 const (
-	ManifestDir = "/tmp/libgitops/manifest"
+	ManifestDir       = "/tmp/libgitops/manifest"
 	sshKnownHostsFile = "~/.ssh/known_hosts"
 )
 
@@ -78,9 +78,9 @@ func run(identityFile string) error {
 
 	// Construct the GitDirectory implementation which backs the storage
 	gitDir, err := gitdir.NewGitDirectory("git@github.com:luxas/ignite-gitops.git", gitdir.GitDirectoryOptions{
-		Branch:   "master",
-		Interval: 10 * time.Second,
-		IdentityFileContent: identityContent,
+		Branch:                "master",
+		Interval:              10 * time.Second,
+		IdentityFileContent:   identityContent,
 		KnownHostsFileContent: knownHostsContent,
 	})
 	if err != nil {
@@ -184,10 +184,10 @@ func run(identityFile string) error {
 			}
 
 			return &transaction.CommitSpec{
-				AuthorName: stringVar("Lucas Käldström"),
+				AuthorName:  stringVar("Lucas Käldström"),
 				AuthorEmail: stringVar("lucas.kaldstrom@hotmail.co.uk"),
-				Message: "Just updating some car status :)",
-			},nil
+				Message:     "Just updating some car status :)",
+			}, nil
 		})
 		if err != nil {
 			return err
