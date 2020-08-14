@@ -2,10 +2,7 @@ package watcher
 
 import (
 	"fmt"
-	"os"
 	"path"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/rjeczalik/notify"
@@ -126,28 +123,6 @@ type FileWatcher struct {
 	batcher *sync.BatchWriter
 }
 
-// getFiles discovers all subdirectories and
-// returns a list of valid files in them
-func (w *FileWatcher) getFiles() (files []string, err error) {
-	err = filepath.Walk(w.dir,
-		func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-
-			if !info.IsDir() {
-				// Only include valid files
-				if w.validFile(path) {
-					files = append(files, path)
-				}
-			}
-
-			return nil
-		})
-
-	return
-}
-
 func (w *FileWatcher) monitorFunc() {
 	log.Debug("FileWatcher: Monitoring thread started")
 	defer log.Debug("FileWatcher: Monitoring thread stopped")
@@ -234,29 +209,6 @@ func (w *FileWatcher) Close() {
 // the FileWatcher will skip the given event once
 func (w *FileWatcher) Suspend(updateEvent FileEvent) {
 	w.suspendEvent = updateEvent
-}
-
-// validSuffix is used to filter out all unsupported
-// files based on if their extension is unknown or
-// if their path contains an excluded directory
-func (w *FileWatcher) validFile(path string) bool {
-	parts := strings.Split(filepath.Clean(path), string(os.PathSeparator))
-	ext := filepath.Ext(parts[len(parts)-1])
-	for _, suffix := range w.opts.ValidExtensions {
-		if ext == suffix {
-			return true
-		}
-	}
-
-	for i := 0; i < len(parts)-1; i++ {
-		for _, exclude := range w.opts.ExcludeDirs {
-			if parts[i] == exclude {
-				return false
-			}
-		}
-	}
-
-	return false
 }
 
 func convertEvent(event notify.Event) FileEvent {

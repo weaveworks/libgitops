@@ -91,7 +91,6 @@ func RegisterConversions(s *runtime.Scheme) error {
 }
 
 func autoConvert_v1alpha1_Car_To_sample_Car(in *Car, out *sample.Car, s conversion.Scope) error {
-	out.TypeMeta = in.TypeMeta
 	out.ObjectMeta = in.ObjectMeta
 	if err := Convert_v1alpha1_CarSpec_To_sample_CarSpec(&in.Spec, &out.Spec, s); err != nil {
 		return err
@@ -108,7 +107,6 @@ func Convert_v1alpha1_Car_To_sample_Car(in *Car, out *sample.Car, s conversion.S
 }
 
 func autoConvert_sample_Car_To_v1alpha1_Car(in *sample.Car, out *Car, s conversion.Scope) error {
-	out.TypeMeta = in.TypeMeta
 	out.ObjectMeta = in.ObjectMeta
 	if err := Convert_sample_CarSpec_To_v1alpha1_CarSpec(&in.Spec, &out.Spec, s); err != nil {
 		return err
@@ -175,7 +173,6 @@ func Convert_sample_CarStatus_To_v1alpha1_CarStatus(in *sample.CarStatus, out *C
 }
 
 func autoConvert_v1alpha1_Motorcycle_To_sample_Motorcycle(in *Motorcycle, out *sample.Motorcycle, s conversion.Scope) error {
-	out.TypeMeta = in.TypeMeta
 	out.ObjectMeta = in.ObjectMeta
 	if err := Convert_v1alpha1_MotorcycleSpec_To_sample_MotorcycleSpec(&in.Spec, &out.Spec, s); err != nil {
 		return err
@@ -192,7 +189,6 @@ func Convert_v1alpha1_Motorcycle_To_sample_Motorcycle(in *Motorcycle, out *sampl
 }
 
 func autoConvert_sample_Motorcycle_To_v1alpha1_Motorcycle(in *sample.Motorcycle, out *Motorcycle, s conversion.Scope) error {
-	out.TypeMeta = in.TypeMeta
 	out.ObjectMeta = in.ObjectMeta
 	if err := Convert_sample_MotorcycleSpec_To_v1alpha1_MotorcycleSpec(&in.Spec, &out.Spec, s); err != nil {
 		return err

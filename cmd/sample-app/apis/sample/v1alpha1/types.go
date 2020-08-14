@@ -1,22 +1,17 @@
 package v1alpha1
 
 import (
-	"github.com/weaveworks/libgitops/pkg/runtime"
-)
-
-const (
-	KindCar        runtime.Kind = "Car"
-	KindMotorcycle runtime.Kind = "Motorcycle"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Car represents a car
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Car struct {
-	runtime.TypeMeta `json:",inline"`
+	metav1.TypeMeta `json:",inline"`
 	// runtime.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID
 	// Name is available at the .metadata.name JSON path
 	// ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)
-	runtime.ObjectMeta `json:"metadata"`
+	metav1.ObjectMeta `json:"metadata"`
 
 	Spec   CarSpec   `json:"spec"`
 	Status CarStatus `json:"status"`
@@ -42,11 +37,11 @@ type VehicleStatus struct {
 // Motorcycle represents a motorcycle
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Motorcycle struct {
-	runtime.TypeMeta `json:",inline"`
+	metav1.TypeMeta `json:",inline"`
 	// runtime.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID
 	// Name is available at the .metadata.name JSON path
 	// ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)
-	runtime.ObjectMeta `json:"metadata"`
+	metav1.ObjectMeta `json:"metadata"`
 
 	Spec   MotorcycleSpec   `json:"spec"`
 	Status MotorcycleStatus `json:"status"`
@@ -61,21 +56,3 @@ type MotorcycleStatus struct {
 	VehicleStatus `json:",inline"`
 	CurrentWeight float64 `json:"currentWeight"`
 }
-
-/*
-{
-	"kind": "Car",
-	"apiVersion"
-	"metadata": {
-		"name": "BlueCar",
-		"uid": "123",
-		""
-	},
-	"spec": {
-		""
-	},
-	"status": {
-
-	}
-}
-*/

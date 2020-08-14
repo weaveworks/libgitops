@@ -1,5 +1,9 @@
 package cache
 
+/*
+
+TODO: Revisit if we need this file/package in the future.
+
 import (
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"
@@ -168,10 +172,26 @@ func (c *cache) Flush() error {
 
 	for _, obj := range allObjects {
 		// Request the storage to save each Object
-		if err := c.storage.Set(obj.GroupVersionKind(), obj); err != nil {
+		if err := c.storage.Set(obj); err != nil {
 			return err
 		}
 	}
 
 	return nil
 }
+
+// PartialObjectFrom is used to create a bound PartialObjectImpl from an Object.
+// Note: This might be useful later (maybe here or maybe in pkg/runtime) if re-enable the cache
+func PartialObjectFrom(obj Object) (PartialObject, error) {
+	tm, ok := obj.GetObjectKind().(*metav1.TypeMeta)
+	if !ok {
+		return nil, fmt.Errorf("PartialObjectFrom: Cannot cast obj to *metav1.TypeMeta, is %T", obj.GetObjectKind())
+	}
+	om, ok := obj.GetObjectMeta().(*metav1.ObjectMeta)
+	if !ok {
+		return nil, fmt.Errorf("PartialObjectFrom: Cannot cast obj to *metav1.ObjectMeta, is %T", obj.GetObjectMeta())
+	}
+	return &PartialObjectImpl{tm, om}, nil
+}
+
+*/

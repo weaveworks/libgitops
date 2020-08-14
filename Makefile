@@ -2,8 +2,8 @@ UID_GID ?= $(shell id -u):$(shell id -g)
 GO_VERSION ?= 1.14.4
 GIT_VERSION := $(shell hack/ldflags.sh --version-only)
 PROJECT := github.com/weaveworks/libgitops
-BOUNDING_API_DIRS := ${PROJECT}/pkg,${PROJECT}/cmd/apis
-API_DIRS := ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1,${PROJECT}/pkg/runtime
+BOUNDING_API_DIRS := ${PROJECT}/cmd/apis/sample
+API_DIRS := ${PROJECT}/cmd/sample-app/apis/sample,${PROJECT}/cmd/sample-app/apis/sample/v1alpha1
 SRC_PKGS := cmd pkg
 DOCKER_ARGS := --rm
 CACHE_DIR := $(shell pwd)/bin/cache
@@ -49,10 +49,10 @@ autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-
 	touch /tmp/boilerplate
 
 	/go/bin/deepcopy-gen \
-		--input-dirs ${API_DIRS} \
+		--input-dirs ${API_DIRS},${PROJECT}/pkg/runtime \
 		--bounding-dirs ${BOUNDING_API_DIRS} \
 		-O zz_generated.deepcopy \
-		-h /tmp/boilerplate 
+		-h /tmp/boilerplate
 
 	/go/bin/defaulter-gen \
 		--input-dirs ${API_DIRS} \

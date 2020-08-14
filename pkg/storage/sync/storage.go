@@ -1,5 +1,9 @@
 package sync
 
+/*
+
+TODO: Revisit if we need this file/package in the future.
+
 import (
 	"fmt"
 
@@ -9,10 +13,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/watch"
 	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
-
-type UpdateStream chan update.Update
 
 const updateBuffer = 4096 // How many updates to buffer, 4096 should be enough for even a high update frequency
 
@@ -24,61 +25,58 @@ const updateBuffer = 4096 // How many updates to buffer, 4096 should be enough f
 // receive write operations, they can be thought of as write-only.
 type SyncStorage struct {
 	storage.Storage
-	storages     []storage.Storage
-	eventStream  watch.AssociatedEventStream
-	updateStream UpdateStream
-	monitor      *sync.Monitor
+	storages       []storage.Storage
+	inboundStream  update.UpdateStream
+	outboundStream update.UpdateStream
+	monitor        *sync.Monitor
 }
 
-var _ storage.Storage = &SyncStorage{}
+// SyncStorage implements update.EventStorage.
+var _ update.EventStorage = &SyncStorage{}
 
 // NewSyncStorage constructs a new SyncStorage
 func NewSyncStorage(rwStorage storage.Storage, wStorages ...storage.Storage) storage.Storage {
 	ss := &SyncStorage{
-		Storage:      rwStorage,
-		storages:     append(wStorages, rwStorage),
-		updateStream: make(UpdateStream, updateBuffer),
+		Storage:  rwStorage,
+		storages: append(wStorages, rwStorage),
 	}
 
 	for _, s := range ss.storages {
 		if watchStorage, ok := s.(watch.WatchStorage); ok {
-			watchStorage.SetEventStream(ss.getEventStream())
+			// Populate eventStream if we found a watchstorage
+			if ss.inboundStream == nil {
+				ss.inboundStream = make(update.UpdateStream, updateBuffer)
+			}
+			watchStorage.SetUpdateStream(ss.inboundStream)
 		}
 	}
 
-	if ss.eventStream != nil {
+	if ss.inboundStream != nil {
 		ss.monitor = sync.RunMonitor(ss.monitorFunc)
+		ss.outboundStream = make(update.UpdateStream, updateBuffer)
 	}
 
 	return ss
 }
 
-func (ss *SyncStorage) getEventStream() watch.AssociatedEventStream {
-	if ss.eventStream == nil {
-		ss.eventStream = make(watch.AssociatedEventStream)
-	}
-
-	return ss.eventStream
-}
-
 // Set is propagated to all Storages
-func (ss *SyncStorage) Set(gvk schema.GroupVersionKind, obj runtime.Object) error {
+func (ss *SyncStorage) Set(obj runtime.Object) error {
 	return ss.runAll(func(s storage.Storage) error {
-		return s.Set(gvk, obj)
+		return s.Set(obj)
 	})
 }
 
 // Patch is propagated to all Storages
-func (ss *SyncStorage) Patch(gvk schema.GroupVersionKind, uid runtime.UID, patch []byte) error {
+func (ss *SyncStorage) Patch(key storage.ObjectKey, patch []byte) error {
 	return ss.runAll(func(s storage.Storage) error {
-		return s.Patch(gvk, uid, patch)
+		return s.Patch(key, patch)
 	})
 }
 
 // Delete is propagated to all Storages
-func (ss *SyncStorage) Delete(gvk schema.GroupVersionKind, uid runtime.UID) error {
+func (ss *SyncStorage) Delete(key storage.ObjectKey) error {
 	return ss.runAll(func(s storage.Storage) error {
-		return s.Delete(gvk, uid)
+		return s.Delete(key)
 	})
 }
 
@@ -90,13 +88,20 @@ func (ss *SyncStorage) Close() error {
 		}
 	}
 
-	close(ss.eventStream) // Close the event stream
-	ss.monitor.Wait()     // Wait for the monitor goroutine
+	// Close the event streams if set
+	if ss.inboundStream != nil {
+		close(ss.inboundStream)
+	}
+	if ss.outboundStream != nil {
+		close(ss.outboundStream)
+	}
+	// Wait for the monitor goroutine
+	ss.monitor.Wait()
 	return nil
 }
 
-func (ss *SyncStorage) GetUpdateStream() UpdateStream {
-	return ss.updateStream
+func (ss *SyncStorage) GetUpdateStream() update.UpdateStream {
+	return ss.outboundStream
 }
 
 // runAll runs the given function for all Storages in parallel and aggregates all errors
@@ -134,27 +139,34 @@ func (ss *SyncStorage) monitorFunc() {
 	// This is difficult to do though, as we have don't know which state is the latest
 	// For now, only update the state on write when the daemon is running
 	for {
-		upd, ok := <-ss.eventStream
+		upd, ok := <-ss.inboundStream
 		if ok {
 			log.Debugf("SyncStorage: Received update %v %t", upd, ok)
+
+			gvk := upd.PartialObject.GetObjectKind().GroupVersionKind()
+			uid := upd.PartialObject.GetUID()
+			key := storage.NewObjectKey(storage.NewKindKey(gvk), runtime.NewIdentifier(string(uid)))
+			log.Debugf("SyncStorage: Object has gvk=%q and uid=%q", gvk, uid)
+
 			switch upd.Event {
 			case update.ObjectEventModify, update.ObjectEventCreate:
 				// First load the Object using the Storage given in the update,
 				// then set it using the client constructed above
-				obj, err := upd.Storage.Get(upd.APIType.GroupVersionKind(), upd.APIType.GetUID())
+
+				obj, err := upd.Storage.Get(key)
 				if err != nil {
-					log.Errorf("Failed to get Object with UID %q: %v", upd.APIType.GetUID(), err)
+					log.Errorf("Failed to get Object with UID %q: %v", upd.PartialObject.GetUID(), err)
 					continue
 				}
 
-				if err = ss.Set(obj.GroupVersionKind(), obj); err != nil {
-					log.Errorf("Failed to set Object with UID %q: %v", upd.APIType.GetUID(), err)
+				if err = ss.Set(obj); err != nil {
+					log.Errorf("Failed to set Object with UID %q: %v", upd.PartialObject.GetUID(), err)
 					continue
 				}
 			case update.ObjectEventDelete:
 				// For deletion we use the generated "fake" APIType object
-				if err := ss.Delete(upd.APIType.GroupVersionKind(), upd.APIType.GetUID()); err != nil {
-					log.Errorf("Failed to delete Object with UID %q: %v", upd.APIType.GetUID(), err)
+				if err := ss.Delete(key); err != nil {
+					log.Errorf("Failed to delete Object with UID %q: %v", upd.PartialObject.GetUID(), err)
 					continue
 				}
 			}
@@ -163,8 +175,8 @@ func (ss *SyncStorage) monitorFunc() {
 			// in which case issue a warning. The channel can hold as many
 			// updates as updateBuffer specifies.
 			select {
-			case ss.updateStream <- upd.Update:
-				log.Debugf("SyncStorage: Sent update: %v", upd.Update)
+			case ss.outboundStream <- upd:
+				log.Debugf("SyncStorage: Sent update: %v", upd)
 			default:
 				log.Warn("SyncStorage: Failed to send update, channel full")
 			}
@@ -173,3 +185,4 @@ func (ss *SyncStorage) monitorFunc() {
 		}
 	}
 }
+*/

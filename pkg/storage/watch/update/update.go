@@ -8,14 +8,18 @@ import (
 // Update bundles an FileEvent with an
 // APIType for Storage retrieval.
 type Update struct {
-	Event   ObjectEvent
-	APIType runtime.Object
+	Event         ObjectEvent
+	PartialObject runtime.PartialObject
+	Storage       storage.Storage
 }
 
-// AssociatedUpdate bundles together an Update and a Storage
-// implementation. This is used by SyncStorage to query the
-// correct Storage for the updated Object.
-type AssociatedUpdate struct {
-	Update
-	Storage storage.Storage
+// UpdateStream is a channel of updates.
+type UpdateStream chan Update
+
+// EventStorage is a storage that exposes an UpdateStream.
+type EventStorage interface {
+	storage.Storage
+
+	// GetUpdateStream can be subscribed to for receiving update events.
+	GetUpdateStream() UpdateStream
 }

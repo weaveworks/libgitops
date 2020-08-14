@@ -1,63 +1,58 @@
 package sample
 
 import (
-	"github.com/weaveworks/libgitops/pkg/runtime"
-)
-
-const (
-	KindCar        runtime.Kind = "Car"
-	KindMotorcycle runtime.Kind = "Motorcycle"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Car represents a car
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Car struct {
-	runtime.TypeMeta `json:",inline"`
+	metav1.TypeMeta
 	// runtime.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID
 	// Name is available at the .metadata.name JSON path
 	// ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)
-	runtime.ObjectMeta `json:"metadata"`
+	metav1.ObjectMeta
 
-	Spec   CarSpec   `json:"spec"`
-	Status CarStatus `json:"status"`
+	Spec   CarSpec
+	Status CarStatus
 }
 
 type CarSpec struct {
-	Engine    string `json:"engine"`
-	YearModel string `json:"yearModel"`
-	Brand     string `json:"brand"`
+	Engine    string
+	YearModel string
+	Brand     string
 }
 
 type CarStatus struct {
-	VehicleStatus `json:",inline"`
-	Persons       uint64 `json:"persons"`
+	VehicleStatus
+	Persons uint64
 }
 
 type VehicleStatus struct {
-	Speed        float64 `json:"speed"`
-	Acceleration float64 `json:"acceleration"`
-	Distance     uint64  `json:"distance"`
+	Speed        float64
+	Acceleration float64
+	Distance     uint64
 }
 
 // Motorcycle represents a motorcycle
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type Motorcycle struct {
-	runtime.TypeMeta `json:",inline"`
+	metav1.TypeMeta
 	// runtime.ObjectMeta is also embedded into the struct, and defines the human-readable name, and the machine-readable ID
 	// Name is available at the .metadata.name JSON path
 	// ID is available at the .metadata.uid JSON path (the Go type is k8s.io/apimachinery/pkg/types.UID, which is only a typed string)
-	runtime.ObjectMeta `json:"metadata"`
+	metav1.ObjectMeta
 
-	Spec   MotorcycleSpec   `json:"spec"`
-	Status MotorcycleStatus `json:"status"`
+	Spec   MotorcycleSpec
+	Status MotorcycleStatus
 }
 
 type MotorcycleSpec struct {
-	Color    string `json:"color"`
-	BodyType string `json:"bodyType"`
+	Color    string
+	BodyType string
 }
 
 type MotorcycleStatus struct {
-	VehicleStatus `json:",inline"`
-	CurrentWeight float64 `json:"currentWeight"`
+	VehicleStatus
+	CurrentWeight float64
 }

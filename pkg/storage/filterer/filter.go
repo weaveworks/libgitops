@@ -1,10 +1,8 @@
 package filterer
 
-import (
-	"fmt"
+/*
 
-	"github.com/weaveworks/libgitops/pkg/runtime"
-)
+TODO: Revisit if we need this file/package in the future.
 
 // BaseFilter provides shared functionality for filter types
 type BaseFilter interface {
@@ -68,3 +66,4 @@ func IsNonexistentError(err error) bool {
 	_, ok := err.(*NonexistentError)
 	return ok
 }
+*/

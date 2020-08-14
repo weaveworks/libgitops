@@ -15,6 +15,7 @@ type EncodingOptions struct {
 	// Only applicable to ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in DecodingOptions, too. (Default: false)
+	// TODO: Make this a BestEffort & Strict mode
 	PreserveComments *bool
 
 	// TODO: Maybe consider an option to always convert to the preferred version (not just internal)
@@ -77,7 +78,7 @@ func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodingOptions) Encoder {
 func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	for _, obj := range objs {
 		// Get the kind for the given object
-		gvk, err := gvkForObject(e.scheme, obj)
+		gvk, err := GVKForObject(e.scheme, obj)
 		if err != nil {
 			return err
 		}

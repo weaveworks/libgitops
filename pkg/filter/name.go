@@ -1,5 +1,9 @@
 package filter
 
+/*
+
+TODO: Revisit if we need this file/package in the future.
+
 import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/storage/filterer"
@@ -38,3 +42,4 @@ func (f *NameFilter) AmbiguousError(_ []filterer.Match) *filterer.AmbiguousError
 func (f *NameFilter) NonexistentError() *filterer.NonexistentError {
 	return filterer.NewNonexistentError("can't find %s: no name matches for %q", f.kind, f.name)
 }
+*/

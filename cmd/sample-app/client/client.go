@@ -1,4 +1,7 @@
 // TODO: Docs
+
+// +build ignore
+
 package client
 
 import (
