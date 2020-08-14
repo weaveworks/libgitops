@@ -23,10 +23,15 @@ func (gvk kindKey) EqualsGVK(kind KindKey, respectVersion bool) bool {
 	// Otherwise, return true if the version also is the same
 	return gvk.GetVersion() == kind.GetVersion()
 }
+func (gvk kindKey) String() string { return gvk.GetGVK().String() }
 
+// kindKey implements KindKey.
 var _ KindKey = kindKey{}
 
 type KindKey interface {
+	// String implements fmt.Stringer
+	String() string
+
 	GetGroup() string
 	GetVersion() string
 	GetKind() string
@@ -40,17 +45,22 @@ type ObjectKey interface {
 	runtime.Identifyable
 }
 
+// objectKey implements ObjectKey.
+var _ ObjectKey = &objectKey{}
+
 type objectKey struct {
 	KindKey
 	runtime.Identifyable
 }
+
+func (key objectKey) String() string { return key.KindKey.String() + " " + key.GetIdentifier() }
 
 func NewKindKey(gvk schema.GroupVersionKind) KindKey {
 	return kindKey(gvk)
 }
 
 func NewObjectKey(kind KindKey, id runtime.Identifyable) ObjectKey {
-	return &objectKey{kind, id}
+	return objectKey{kind, id}
 }
 
 /*// KindKey represents the internal format of Kind virtual paths
