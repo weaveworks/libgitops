@@ -1,45 +1,54 @@
 package filter
 
-/*
-
-TODO: Revisit if we need this file/package in the future.
-
 import (
+	"fmt"
+	"strings"
+
 	"github.com/weaveworks/libgitops/pkg/runtime"
-	"github.com/weaveworks/libgitops/pkg/storage/filterer"
 )
 
-// The NameFilter matches Objects by their exact name
+// NameFilter implements ObjectFilter and ListOption.
+var _ ObjectFilter = NameFilter{}
+var _ ListOption = NameFilter{}
+
+// NameFilter is an ObjectFilter that compares runtime.Object.GetName()
+// to the Name field by either equality or prefix.
 type NameFilter struct {
-	name string
-	kind runtime.Kind
+	// Name matches the object by .metadata.name.
+	// +required
+	Name string
+	// Namespace matches the object by .metadata.namespace. If left as
+	// an empty string, it is ignored when filtering.
+	// +optional
+	Namespace string
+	// MatchPrefix whether the name (not namespace) matching should be exact, or prefix-based.
+	// +optional
+	MatchPrefix bool
 }
 
-var _ filterer.MetaFilter = &NameFilter{}
-
-func NewNameFilter(n string) *NameFilter {
-	return &NameFilter{
-		name: n,
+// Filter implements ObjectFilter
+func (f NameFilter) Filter(obj runtime.Object) (bool, error) {
+	// Require f.Name to always be set.
+	if len(f.Name) == 0 {
+		return false, fmt.Errorf("the NameFilter.Name field must not be empty: %w", ErrInvalidFilterParams)
 	}
-}
 
-func (f *NameFilter) FilterMeta(object runtime.Object) (filterer.Match, error) {
-	if object.GetName() == f.name {
-		return filterer.NewMatch(object, true), nil
+	// If f.Namespace is set, and it does not match the object, return false
+	if len(f.Namespace) > 0 && f.Namespace != obj.GetNamespace() {
+		return false, nil
 	}
 
-	return nil, nil
+	// If the Name should be matched by the prefix, use strings.HasPrefix
+	if f.MatchPrefix {
+		return strings.HasPrefix(obj.GetName(), f.Name), nil
+	}
+	// Otherwise, just use an equality check
+	return f.Name == obj.GetName(), nil
 }
 
-func (f *NameFilter) SetKind(k runtime.Kind) {
-	f.kind = k
+// ApplyToListOptions implements ListOption, and adds itself converted to
+// a ListFilter to ListOptions.Filters.
+func (f NameFilter) ApplyToListOptions(target *ListOptions) error {
+	target.Filters = append(target.Filters, ObjectToListFilter(f))
+	return nil
 }
-
-func (f *NameFilter) AmbiguousError(_ []filterer.Match) *filterer.AmbiguousError {
-	return filterer.NewAmbiguousError("ambiguous %s query: %q matched multiple names", f.kind, f.name)
-}
-
-func (f *NameFilter) NonexistentError() *filterer.NonexistentError {
-	return filterer.NewNonexistentError("can't find %s: no name matches for %q", f.kind, f.name)
-}
-*/

@@ -6,6 +6,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// DefaultNamespace describes the default namespace name used for the system.
+const DefaultNamespace = "default"
+
 // Identifyable is an object which can be identified
 type Identifyable interface {
 	// GetIdentifier can return e.g. a "namespace/name" combination, which is not guaranteed
