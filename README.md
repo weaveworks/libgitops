@@ -136,6 +136,67 @@ See the [`pkg/gitdir`](pkg/gitdir) package for details.
 This package contains utilities used by the rest of the library. The most interesting thing here is the `Patcher`
 under [`pkg/util/patch`](pkg/util/patch), which can be used to apply patches to `pkg/runtime.Object` compliant types.
 
+## Sample implementations
+
+All sample binaries in this repo are operating on a sample type called `Car`, that looks something like this:
+
+```yaml
+apiVersion: sample-app.weave.works/v1alpha1
+kind: Car
+metadata:
+  creationTimestamp: "2020-08-17T14:33:16Z"
+  name: foo
+  namespace: default
+spec:
+  brand: SAAB
+  engine: The best one
+  yearModel: "2008"
+status:
+  acceleration: 0
+  distance: 12176941420362965433
+  persons: 0
+  speed: 53.37474583162469
+```
+
+All binaries lets you access the data and fake a modification event using a sample webserver running on `localhost:8888`.
+
+### sample-gitops
+
+This is a sample binary that:
+
+a) clones a Git repo of your choice to a temporary directory, and authenticates using given `id_rsa` and `known_hosts` files. Create a Git repo with e.g. the sample file above, and set up SSH connection.
+b) exposes all `Car`s in your Git repository at URL `GET localhost:8888/git/`
+c) lets you fake a "reconciler spec/status write" event at path `PUT localhost:8888/git/<name>`, where `name` is the name of the `Car` in your repo you want to modify
+d) re-syncs every 10 seconds, and tries to pull the git repo
+e) has an inotify watch on the temporary Git clone, so it will log all objects that have been changed as they happen in Git (e.g. from new commits)
+
+When you modify a the "desired state/current status" using e.g. `curl -sSL -X PUT localhost:8888/git/foo`, the following will happen:
+
+a) a `Transaction` will be started, which means `git pull` and `git checkout -b <name>-update-<random>` will happen underneath
+b) `Storage.Get` for the `Car` with the given name will be requested
+c) the Car's `.status.distance` and `.status.speed` fields are updated to random numbers, and `Storage.Update` is run
+d) the transaction is "committed" by returning a `transaction.PullRequestResult`
+e) when the transaction ends, `git commit -A -m <message>`, `git push` and `git checkout <main>` will be ran. The `git pull` loop is resumed.
+f) as a `transaction.PullRequestResult` was returned (and not `transaction.CommitResult`), the code will also use a `transaction.PullRequestProvider` to create a PR towards the repo. The configured provider is for now Github-only, and configured through the `GITHUB_TOKEN` variable.
+g) the PR will be created for the given branch, with assignees, labels and a milestone as configured
+h) once the PR is merged, the `git pull` loop will eventually download the new commit, and the inotify watch will tell which files were changed.
+
+#### Usage
+
+```console
+$ make
+...
+$ bin/sample-gitops --help
+Usage of bin/sample-gitops:
+    --author-email string    Author email for Git commits (default "support@weave.works")
+    --author-name string     Author name for Git commits (default "Weave libgitops")
+    --git-url string         HTTPS Git URL; where the Git repository is, e.g. https://github.com/luxas/ignite-gitops
+    --identity-file string   Path to where the SSH private key is
+    --version                Show version information and exit
+```
+
+You also need to set `GITHUB_TOKEN` in order to be able to create the PR.
+
 ## Getting Help
 
 If you have any questions about, feedback for or problems with `libgitops`:
