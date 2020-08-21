@@ -161,7 +161,7 @@ func (r *GenericRawStorage) List(kind KindKey) ([]ObjectKey, error) {
 
 // This returns the modification time as a UnixNano string
 // If the file doesn't exist, return ErrNotFound
-func (r *GenericRawStorage) Checksum(key ObjectKey) (s string, err error) {
+func (r *GenericRawStorage) Checksum(key ObjectKey) (string, error) {
 	// Validate GroupVersion first
 	if err := r.validateGroupVersion(key); err != nil {
 		return "", err
@@ -172,12 +172,7 @@ func (r *GenericRawStorage) Checksum(key ObjectKey) (s string, err error) {
 		return "", ErrNotFound
 	}
 
-	fi, err := os.Stat(r.keyPath(key))
-	if err != nil {
-		return "", err
-	}
-
-	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), nil
+	return checksumFromModTime(r.keyPath(key))
 }
 
 func (r *GenericRawStorage) ContentType(_ ObjectKey) serializer.ContentType {
@@ -210,4 +205,13 @@ func (r *GenericRawStorage) GetKey(p string) (ObjectKey, error) {
 	}
 
 	return NewObjectKey(NewKindKey(gvk), runtime.NewIdentifier(uid)), nil
+}
+
+func checksumFromModTime(path string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), nil
 }

@@ -87,10 +87,10 @@ type ReadStorage interface {
 
 type WriteStorage interface {
 	// Create creates an entry for and stores the given Object in the storage. The Object must be new to the storage.
-	// The ObjectMeta.Created field is set automatically to the current time if it is unset.
+	// The ObjectMeta.CreationTimestamp field is set automatically to the current time if it is unset.
 	Create(obj runtime.Object) error
 	// Update updates the state of the given Object in the storage. The Object must exist in the storage.
-	// The ObjectMeta.Created field is set automatically to the current time if it is unset.
+	// The ObjectMeta.CreationTimestamp field is set automatically to the current time if it is unset.
 	Update(obj runtime.Object) error
 
 	// Patch performs a strategic merge patch on the Object with the given UID, using the byte-encoded patch given

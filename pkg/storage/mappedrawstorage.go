@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
@@ -60,6 +59,7 @@ func (r *GenericMappedRawStorage) realPath(key ObjectKey) (string, error) {
 	return path, nil
 }
 
+// If the file doesn't exist, returns ErrNotFound + ErrNotTracked.
 func (r *GenericMappedRawStorage) Read(key ObjectKey) ([]byte, error) {
 	file, err := r.realPath(key)
 	if err != nil {
@@ -89,6 +89,7 @@ func (r *GenericMappedRawStorage) Write(key ObjectKey, content []byte) error {
 	return ioutil.WriteFile(file, content, 0644)
 }
 
+// If the file doesn't exist, returns ErrNotFound + ErrNotTracked.
 func (r *GenericMappedRawStorage) Delete(key ObjectKey) (err error) {
 	file, err := r.realPath(key)
 	if err != nil {
@@ -121,20 +122,15 @@ func (r *GenericMappedRawStorage) List(kind KindKey) ([]ObjectKey, error) {
 	return result, nil
 }
 
-// This returns the modification time as a UnixNano string
-// If the file doesn't exist, return ErrNotFound
-func (r *GenericMappedRawStorage) Checksum(key ObjectKey) (s string, err error) {
-	file, err := r.realPath(key)
-	if err != nil {
-		return
-	}
-
-	fi, err := os.Stat(file)
+// This returns the modification time as a UnixNano string.
+// If the file doesn't exist, returns ErrNotFound + ErrNotTracked.
+func (r *GenericMappedRawStorage) Checksum(key ObjectKey) (string, error) {
+	path, err := r.realPath(key)
 	if err != nil {
 		return "", err
 	}
 
-	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), nil
+	return checksumFromModTime(path)
 }
 
 func (r *GenericMappedRawStorage) ContentType(key ObjectKey) (ct serializer.ContentType) {
