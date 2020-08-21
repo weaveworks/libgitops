@@ -20,6 +20,9 @@ type UpdateStream chan Update
 type EventStorage interface {
 	storage.Storage
 
-	// GetUpdateStream can be subscribed to for receiving update events.
-	GetUpdateStream() UpdateStream
+	// SetUpdateStream gives the EventStorage a channel to send events to.
+	// The caller is responsible for choosing a large enough buffer to avoid
+	// blocking the underlying EventStorage implementation unnecessarily.
+	// TODO: In the future maybe enable sending events to multiple listeners?
+	SetUpdateStream(UpdateStream)
 }
