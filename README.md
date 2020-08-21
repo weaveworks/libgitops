@@ -175,27 +175,27 @@ status:
   speed: 53.37474583162469
 ```
 
-All binaries lets you access the data and fake a modification event using a sample webserver running on `localhost:8888`.
+All binaries let you access the data and fake a modification event using a sample webserver running on `localhost:8888`.
 
 ### sample-gitops
 
 This is a sample binary that:
 
-a) clones a Git repo of your choice to a temporary directory, and authenticates using given `id_rsa` and `known_hosts` files. Create a Git repo with e.g. the sample file above, and set up SSH connection.
+a) clones a Git repo of your choice to a temporary directory, and authenticates using given `id_rsa` and `known_hosts` files. Create a Git repo with e.g. the sample file above, and set up SSH credentials.
 b) exposes all `Car`s in your Git repository at URL `GET localhost:8888/git/`
 c) lets you fake a "reconciler spec/status write" event at path `PUT localhost:8888/git/<name>`, where `name` is the name of the `Car` in your repo you want to modify
 d) re-syncs every 10 seconds, and tries to pull the git repo
 e) has an inotify watch on the temporary Git clone, so it will log all objects that have been changed as they happen in Git (e.g. from new commits)
 
-When you modify a the "desired state/current status" using e.g. `curl -sSL -X PUT localhost:8888/git/foo`, the following will happen:
+When you modify the "desired state/current status" using e.g. `curl -sSL -X PUT localhost:8888/git/foo`, the following will happen:
 
-a) a `Transaction` will be started, which means `git pull` and `git checkout -b <name>-update-<random>` will happen underneath
+a) a `Transaction` will be started, which means `git pull` and `git checkout -b <name>-update-<random_sha>` will be executed
 b) `Storage.Get` for the `Car` with the given name will be requested
 c) the Car's `.status.distance` and `.status.speed` fields are updated to random numbers, and `Storage.Update` is run
 d) the transaction is "committed" by returning a `transaction.PullRequestResult`
-e) when the transaction ends, `git commit -A -m <message>`, `git push` and `git checkout <main>` will be ran. The `git pull` loop is resumed.
-f) as a `transaction.PullRequestResult` was returned (and not `transaction.CommitResult`), the code will also use a `transaction.PullRequestProvider` to create a PR towards the repo. The configured provider is for now Github-only, and configured through the `GITHUB_TOKEN` variable.
-g) the PR will be created for the given branch, with assignees, labels and a milestone as configured
+e) when the transaction ends, `git commit -A -m <message>`, `git push` and `git checkout <main>` will be executed. The `git pull` loop is resumed.
+f) as a `transaction.PullRequestResult` was returned (and not `transaction.CommitResult`), the code will also use a `transaction.PullRequestProvider` to create a PR towards the repo. The configured provider is for now GitHub-only, and configured through passing the `GITHUB_TOKEN` environment variable.
+g) the PR will be created for the given branch, with the given assignees, labels and milestone
 h) once the PR is merged, the `git pull` loop will eventually download the new commit, and the inotify watch will tell which files were changed.
 
 #### sample-gitops Usage
