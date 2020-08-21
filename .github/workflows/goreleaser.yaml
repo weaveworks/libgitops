@@ -25,7 +25,7 @@ jobs:
       - name: Generate release notes
         run: |
           echo 'CHANGELOG' > /tmp/release.txt
-          github-release-notes -org weaveworks -repo libgitops -since-latest-release >> /tmp/release.txt
+          github-release-notes -org weaveworks -repo libgitops -since-latest-release -include-author -include-commits >> /tmp/release.txt
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v2
         with:
