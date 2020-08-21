@@ -18,7 +18,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage"
 )
 
-var manifestDirFlag = pflag.String("data-dir", "/tmp/libgitops/manifest", "Where to store the JSON files")
+var manifestDirFlag = pflag.String("data-dir", "/tmp/libgitops/manifest", "Where to store the YAML files")
 
 func main() {
 	// Parse the version flag
@@ -38,7 +38,7 @@ func run() error {
 	}
 
 	// Set the log level
-	logs.Logger.SetLevel(logrus.TraceLevel)
+	logs.Logger.SetLevel(logrus.InfoLevel)
 
 	plainStorage := storage.NewGenericStorage(
 		storage.NewGenericRawStorage(*manifestDirFlag, v1alpha1.SchemeGroupVersion, serializer.ContentTypeYAML),

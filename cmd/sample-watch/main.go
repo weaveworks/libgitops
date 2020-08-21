@@ -37,7 +37,7 @@ func run() error {
 	}
 
 	// Set the log level
-	logs.Logger.SetLevel(logrus.TraceLevel)
+	logs.Logger.SetLevel(logrus.InfoLevel)
 
 	watchStorage, err := watch.NewManifestStorage(*watchDirFlag, scheme.Serializer)
 	if err != nil {
