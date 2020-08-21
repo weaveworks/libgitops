@@ -2,18 +2,21 @@ package transaction
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/gitdir"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/util"
 	"github.com/weaveworks/libgitops/pkg/util/watcher"
 )
 
 var excludeDirs = []string{".git"}
 
-func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (TransactionStorage, error) {
+func NewGitStorage(gitDir gitdir.GitDirectory, prProvider PullRequestProvider, ser serializer.Serializer) (TransactionStorage, error) {
 	// Make sure the repo is cloned. If this func has already been called, it will be a no-op.
 	gitDir.StartCheckoutLoop()
 
@@ -25,6 +28,7 @@ func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (Tran
 		s:           s,
 		raw:         raw,
 		gitDir:      gitDir,
+		prProvider:  prProvider,
 	}
 	// Do a first sync now, and then start the background loop
 	if err := gitStorage.sync(); err != nil {
@@ -38,21 +42,10 @@ func NewGitStorage(gitDir *gitdir.GitDirectory, ser serializer.Serializer) (Tran
 type GitStorage struct {
 	storage.ReadStorage
 
-	s      storage.Storage
-	raw    storage.MappedRawStorage
-	gitDir *gitdir.GitDirectory
-}
-
-func (s *GitStorage) Resume() {
-	s.gitDir.Resume()
-}
-
-func (s *GitStorage) Suspend() {
-	s.gitDir.Suspend()
-}
-
-func (s *GitStorage) Pull(ctx context.Context) error {
-	return s.gitDir.Pull(ctx)
+	s          storage.Storage
+	raw        storage.MappedRawStorage
+	gitDir     gitdir.GitDirectory
+	prProvider PullRequestProvider
 }
 
 func (s *GitStorage) syncLoop() {
@@ -79,22 +72,59 @@ func (s *GitStorage) sync() error {
 }
 
 func (s *GitStorage) Transaction(ctx context.Context, streamName string, fn TransactionFunc) error {
-	if err := s.Pull(ctx); err != nil {
-		return err
+	// Append random bytes to the end of the stream name if it ends with a dash
+	if strings.HasSuffix(streamName, "-") {
+		suffix, err := util.RandomSHA(4)
+		if err != nil {
+			return err
+		}
+		streamName += suffix
 	}
-	s.Suspend()
-	defer s.Resume()
-	// TODO ordering of the defers, and return deferred error
-	defer func() { _ = s.gitDir.ToMainBranch() }()
 
-	if err := s.gitDir.NewBranch(streamName); err != nil {
+	// Make sure we have the latest available state
+	if err := s.gitDir.Pull(ctx); err != nil {
 		return err
 	}
-	spec, err := fn(ctx, s.s)
+	// Make sure no other Git ops can take place during the transaction, wait for other ongoing operations.
+	s.gitDir.Suspend()
+	defer s.gitDir.Resume()
+	// Always switch back to the main branch afterwards.
+	// TODO ordering of the defers, and return deferred error
+	defer func() { _ = s.gitDir.CheckoutMainBranch() }()
+
+	// Check out a new branch with the given name
+	if err := s.gitDir.CheckoutNewBranch(streamName); err != nil {
+		return err
+	}
+	// Invoke the transaction
+	result, err := fn(ctx, s.s)
 	if err != nil {
 		return err
 	}
-	return s.gitDir.Commit(ctx, *spec.AuthorName, *spec.AuthorEmail, spec.Message)
+	// Make sure the result is valid
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("transaction result is not valid: %w", err)
+	}
+	// Perform the commit
+	if err := s.gitDir.Commit(ctx, result.GetAuthorName(), result.GetAuthorEmail(), result.GetMessage()); err != nil {
+		return err
+	}
+	// Return if no PR should be made
+	prResult, ok := result.(PullRequestResult)
+	if !ok {
+		return nil
+	}
+	// If a PR was asked for, and no provider was given, error out
+	if s.prProvider == nil {
+		return ErrNoPullRequestProvider
+	}
+	// Create the PR using the provider.
+	return s.prProvider.CreatePullRequest(ctx, &GenericPullRequestSpec{
+		PullRequestResult: prResult,
+		MainBranch:        s.gitDir.MainBranch(),
+		MergeBranch:       streamName,
+		RepositoryRef:     s.gitDir.RepositoryRef(),
+	})
 }
 
 func computeMappings(dir string, s storage.Storage) (map[storage.ObjectKey]string, error) {
@@ -108,6 +138,8 @@ func computeMappings(dir string, s storage.Storage) (map[storage.ObjectKey]strin
 		return nil, err
 	}
 
+	// TODO: Compute the difference between the earlier state, and implement EventStorage so the user
+	// can automatically subscribe to changes of objects between versions.
 	m := map[storage.ObjectKey]string{}
 	for _, file := range files {
 		partObjs, err := storage.DecodePartialObjects(serializer.FromFile(file), s.Serializer().Scheme(), false, nil)
