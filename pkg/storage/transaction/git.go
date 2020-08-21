@@ -18,7 +18,9 @@ var excludeDirs = []string{".git"}
 
 func NewGitStorage(gitDir gitdir.GitDirectory, prProvider PullRequestProvider, ser serializer.Serializer) (TransactionStorage, error) {
 	// Make sure the repo is cloned. If this func has already been called, it will be a no-op.
-	gitDir.StartCheckoutLoop()
+	if err := gitDir.StartCheckoutLoop(); err != nil {
+		return nil, err
+	}
 
 	raw := storage.NewGenericMappedRawStorage(gitDir.Dir())
 	s := storage.NewGenericStorage(raw, ser, []runtime.IdentifierFactory{runtime.Metav1NameIdentifier})
