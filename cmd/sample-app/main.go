@@ -2,106 +2,44 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"fmt"
-	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"os"
-	"os/signal"
-	"time"
 
 	"github.com/labstack/echo"
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
+	"github.com/weaveworks/libgitops/cmd/common"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
-	"github.com/weaveworks/libgitops/cmd/sample-app/version"
-	"github.com/weaveworks/libgitops/pkg/gitdir"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
-	"github.com/weaveworks/libgitops/pkg/storage/transaction"
-)
-
-var (
-	carGVK = v1alpha1.SchemeGroupVersion.WithKind("Car")
-
-	identityFlag    = pflag.String("identity-file", "", "Path to where the SSH private key is")
-	authorNameFlag  = pflag.String("author-name", defaultAuthorName, "Author name for Git commits")
-	authorEmailFlag = pflag.String("author-email", defaultAuthorEmail, "Author email for Git commits")
-	gitURLFlag      = pflag.String("git-url", "", "SSH Git URL; where the Git repository is, e.g. git@github.com:luxas/ignite-gitops.git")
+	"github.com/weaveworks/libgitops/pkg/storage/manifest"
 )
 
 const (
-	ManifestDir       = "/tmp/libgitops/manifest"
-	sshKnownHostsFile = "~/.ssh/known_hosts"
-
-	defaultAuthorName  = "Weave libgitops"
-	defaultAuthorEmail = "support@weave.works"
+	ManifestDir = "/tmp/libgitops/manifest"
+	WatchDir    = "/tmp/libgitops/watch"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 func main() {
 	// Parse the version flag
-	parseVersionFlag()
+	common.ParseVersionFlag()
 
 	// Run the application
-	if err := run(*identityFlag, *gitURLFlag); err != nil {
+	if err := run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 }
 
-func expandAndRead(filePath string) ([]byte, error) {
-	expandedPath, err := homedir.Expand(filePath)
-	if err != nil {
-		return nil, err
-	}
-	return ioutil.ReadFile(expandedPath)
-}
-
-func run(identityFile, gitURL string) error {
-	if len(identityFile) == 0 {
-		return fmt.Errorf("--identity-file is required")
-	}
-	if len(gitURL) == 0 {
-		return fmt.Errorf("--git-url is required")
-	}
-
-	identityContent, err := expandAndRead(identityFile)
-	if err != nil {
-		return err
-	}
-
-	knownHostsContent, err := expandAndRead(sshKnownHostsFile)
-	if err != nil {
-		return err
-	}
-
-	// Construct the GitDirectory implementation which backs the storage
-	gitDir, err := gitdir.NewGitDirectory(gitURL, gitdir.GitDirectoryOptions{
-		Branch:                "master",
-		Interval:              10 * time.Second,
-		IdentityFileContent:   identityContent,
-		KnownHostsFileContent: knownHostsContent,
-	})
-	if err != nil {
-		return err
-	}
-
-	gitStorage, err := transaction.NewGitStorage(gitDir, scheme.Serializer)
-	if err != nil {
-		return err
-	}
-
-	// Create the manifest directory
+func run() error {
+	// Create the manifest and watch directories
 	if err := os.MkdirAll(ManifestDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(WatchDir, 0755); err != nil {
 		return err
 	}
 
@@ -115,12 +53,19 @@ func run(identityFile, gitURL string) error {
 	)
 	defer func() { _ = plainStorage.Close() }()
 
-	// Set up the echo server
-	e := echo.New()
-	e.Debug = true
-	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "Welcome!")
-	})
+	watchStorage, err := manifest.NewManifestStorage(WatchDir, scheme.Serializer)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = watchStorage.Close() }()
+
+	go func() {
+		for upd := range watchStorage.GetUpdateStream() {
+			logrus.Infof("Got %s update for: %v %v", upd.Event, upd.PartialObject.GetObjectKind().GroupVersionKind(), upd.PartialObject.GetObjectMeta())
+		}
+	}()
+
+	e := common.NewEcho()
 
 	e.GET("/plain/:name", func(c echo.Context) error {
 		name := c.Param("name")
@@ -128,7 +73,7 @@ func run(identityFile, gitURL string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		obj, err := plainStorage.Get(carKeyForName(name))
+		obj, err := plainStorage.Get(common.CarKeyForName(name))
 		if err != nil {
 			return err
 		}
@@ -145,8 +90,7 @@ func run(identityFile, gitURL string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		err := plainStorage.Create(newCar(name))
-		if err != nil {
+		if err := plainStorage.Create(common.NewCar(name)); err != nil {
 			return err
 		}
 		return c.String(200, "OK!")
@@ -158,96 +102,40 @@ func run(identityFile, gitURL string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		if err := setNewCarStatus(plainStorage, carKeyForName(name)); err != nil {
+		if err := common.SetNewCarStatus(plainStorage, common.CarKeyForName(name)); err != nil {
 			return err
 		}
 		return c.String(200, "OK!")
 	})
 
-	e.GET("/git/", func(c echo.Context) error {
-		objs, err := gitStorage.List(storage.NewKindKey(carGVK))
-		if err != nil {
-			return err
-		}
-		return c.JSON(http.StatusOK, objs)
-	})
-
-	e.PUT("/git/:name", func(c echo.Context) error {
+	e.GET("/watch/:name", func(c echo.Context) error {
 		name := c.Param("name")
 		if len(name) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		objKey := storage.NewObjectKey(storage.NewKindKey(carGVK), runtime.NewIdentifier("default/"+name))
-		err := gitStorage.Transaction(context.Background(), "foo-branch-", func(ctx context.Context, s storage.Storage) (*transaction.CommitSpec, error) {
-			if err := setNewCarStatus(s, objKey); err != nil {
-				return nil, err
-			}
-
-			return &transaction.CommitSpec{
-				AuthorName:  authorNameFlag,
-				AuthorEmail: authorEmailFlag,
-				Message:     "Just updating some car status :)",
-			}, nil
-		})
+		obj, err := watchStorage.Get(common.CarKeyForName(name))
 		if err != nil {
 			return err
 		}
+		var content bytes.Buffer
+		if err := scheme.Serializer.Encoder().Encode(serializer.NewJSONFrameWriter(&content), obj); err != nil {
+			return err
+		}
+		return c.JSONBlob(http.StatusOK, content.Bytes())
+	})
 
+	e.PUT("/watch/:name", func(c echo.Context) error {
+		name := c.Param("name")
+		if len(name) == 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
+		}
+
+		if err := common.SetNewCarStatus(plainStorage, common.CarKeyForName(name)); err != nil {
+			return err
+		}
 		return c.String(200, "OK!")
 	})
 
-	// Start the server
-	go func() {
-		if err := e.Start(":8888"); err != nil {
-			e.Logger.Info("shutting down the server")
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
-
-	// Wait for interrupt signal to gracefully shutdown the application with a timeout of 10 seconds
-	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	return e.Shutdown(ctx)
-}
-
-func parseVersionFlag() {
-	var showVersion bool
-
-	pflag.BoolVar(&showVersion, "version", showVersion, "Show version information and exit")
-	pflag.Parse()
-	if showVersion {
-		fmt.Printf("sample-app version: %#v\n", version.Get())
-		os.Exit(0)
-	}
-}
-
-func carKeyForName(name string) storage.ObjectKey {
-	return storage.NewObjectKey(storage.NewKindKey(carGVK), runtime.NewIdentifier("default/"+name))
-}
-
-func newCar(name string) *v1alpha1.Car {
-	obj := &v1alpha1.Car{}
-	obj.Name = name
-	obj.Namespace = "default"
-	obj.Spec.Brand = fmt.Sprintf("Acura-%03d", rand.Intn(1000))
-
-	return obj
-}
-
-func setNewCarStatus(s storage.Storage, key storage.ObjectKey) error {
-	obj, err := s.Get(key)
-	if err != nil {
-		return err
-	}
-
-	car := obj.(*v1alpha1.Car)
-	car.Status.Distance = rand.Uint64()
-	car.Status.Speed = rand.Float64() * 100
-
-	return s.Update(car)
+	return common.StartEcho(e)
 }

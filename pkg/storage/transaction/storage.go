@@ -8,38 +8,15 @@ import (
 )
 
 var (
-	ErrAbortTransaction  = errors.New("transaction aborted")
-	ErrTransactionActive = errors.New("transaction is active")
+	ErrAbortTransaction      = errors.New("transaction aborted")
+	ErrTransactionActive     = errors.New("transaction is active")
+	ErrNoPullRequestProvider = errors.New("no pull request provider given")
 )
 
-type TransactionFunc func(ctx context.Context, s storage.Storage) (*CommitSpec, error)
-
-type CommitSpec struct {
-	// AuthorName can also be specified when creating the TransactionStorage,
-	// but here it can be overridden.
-	// +optional
-	AuthorName *string
-	// AuthorEmail can also be specified when creating the TransactionStorage,
-	// but here it can be overridden.
-	// +optional
-	AuthorEmail *string
-
-	// Message specifies a description of the transaction aim.
-	// +required
-	Message string
-}
+type TransactionFunc func(ctx context.Context, s storage.Storage) (CommitResult, error)
 
 type TransactionStorage interface {
 	storage.ReadStorage
-
-	// TODO: Do we need Suspend/Resume/Pull?
-
-	Suspend()
-	Resume()
-
-	// Pull will force a re-sync from upstream. ErrTransactionActive will be returned
-	// if a transaction is active at that time.
-	Pull(ctx context.Context) error
 
 	// Transaction creates a new "stream" (for Git: branch) with the given name, or
 	// prefix if streamName ends with a dash (in that case, a 8-char hash will be appended).

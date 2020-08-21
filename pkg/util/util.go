@@ -2,6 +2,8 @@ package util
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -39,4 +41,14 @@ func MatchPrefix(prefix string, fields ...string) ([]string, bool) {
 
 func BoolPtr(b bool) *bool {
 	return &b
+}
+
+// RandomSHA returns a hex-encoded string from {byteLen} random bytes.
+func RandomSHA(byteLen int) (string, error) {
+	b := make([]byte, byteLen)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
