@@ -9,19 +9,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fluxcd/toolkit/pkg/ssh/knownhosts"
+	"github.com/fluxcd/go-git-providers/gitprovider"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/http"
-	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 var (
-	ErrNotStarted = errors.New("the GitDirectory hasn't been started (and hence, cloned) yet")
+	// ErrNotStarted happens if you try to operate on the gitDirectory before you have started
+	// it with StartCheckoutLoop.
+	ErrNotStarted = errors.New("the gitDirectory hasn't been started (and hence, cloned) yet")
+	// ErrCannotWriteToReadOnly happens if you try to do a write operation for a non-authenticated Git repo.
+	ErrCannotWriteToReadOnly = errors.New("the gitDirectory is read-only, cannot write")
 )
 
 const (
@@ -31,6 +32,8 @@ const (
 	defaultTimeout  = 1 * time.Minute
 )
 
+// GitDirectoryOptions provides options for the gitDirectory.
+// TODO: Refactor this into the controller-runtime Options factory pattern.
 type GitDirectoryOptions struct {
 	// Options
 	Branch   string        // default "master"
@@ -39,16 +42,7 @@ type GitDirectoryOptions struct {
 	// TODO: Support folder prefixes
 
 	// Authentication
-	// For HTTPS basic auth. The password should be e.g. a GitHub access token
-	Username, Password *string
-	// For Git SSH protocol. This is the bytes of e.g. ~/.ssh/id_rsa, given that ~/.ssh/id_rsa.pub is
-	// registered with and trusted by the Git provider.
-	IdentityFileContent []byte
-
-	// The file content (in bytes) of the known_hosts file to use for remote (e.g. GitHub) public key verification
-	// If you want to use the default git CLI behavior, populate this byte slice with contents from
-	// ioutil.ReadFile("~/.ssh/known_hosts").
-	KnownHostsFileContent []byte
+	AuthMethod AuthMethod
 }
 
 func (o *GitDirectoryOptions) Default() {
@@ -63,8 +57,53 @@ func (o *GitDirectoryOptions) Default() {
 	}
 }
 
+// GitDirectory is an abstraction layer for a temporary Git clone. It pulls
+// and checks out new changes periodically in the background. It also allows
+// high-level access to write operations, like creating a new branch, committing,
+// and pushing.
+type GitDirectory interface {
+	// Dir returns the backing temporary directory of the git clone.
+	Dir() string
+	// MainBranch returns the configured main branch.
+	MainBranch() string
+	// RepositoryRef returns the repository reference.
+	RepositoryRef() gitprovider.RepositoryRef
+
+	// StartCheckoutLoop clones the repo synchronously, and then starts the checkout loop non-blocking.
+	// If the checkout loop has been started already, this is a no-op.
+	StartCheckoutLoop() error
+	// Suspend waits for any pending transactions or operations, and then locks the internal mutex so that
+	// no other operations can start. This means the periodic background checkout loop will momentarily stop.
+	Suspend()
+	// Resume unlocks the mutex locked in Suspend(), so that other Git operations, like the background checkout
+	// loop can resume its operation.
+	Resume()
+
+	// Pull performs a pull & checkout to the latest revision.
+	// ErrNotStarted is returned if the repo hasn't been cloned yet.
+	Pull(ctx context.Context) error
+
+	// CheckoutNewBranch creates a new branch and checks out to it.
+	// ErrNotStarted is returned if the repo hasn't been cloned yet.
+	CheckoutNewBranch(branchName string) error
+	// CheckoutMainBranch goes back to the main branch.
+	// ErrNotStarted is returned if the repo hasn't been cloned yet.
+	CheckoutMainBranch() error
+
+	// Commit creates a commit of all changes in the current worktree with the given parameters.
+	// It also automatically pushes the branch after the commit.
+	// ErrNotStarted is returned if the repo hasn't been cloned yet.
+	// ErrCannotWriteToReadOnly is returned if opts.AuthMethod wasn't provided.
+	Commit(ctx context.Context, authorName, authorEmail, msg string) error
+	// CommitChannel is a channel to where new observed Git SHAs are written.
+	CommitChannel() chan string
+
+	// Cleanup terminates any pending operations, and removes the temporary directory.
+	Cleanup() error
+}
+
 // Create a new GitDirectory implementation. In order to start using this, run StartCheckoutLoop().
-func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error) {
+func NewGitDirectory(repoRef gitprovider.RepositoryRef, opts GitDirectoryOptions) (GitDirectory, error) {
 	log.Info("Initializing the Git repo...")
 
 	// Default the options
@@ -77,17 +116,10 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 	}
 	log.Debugf("Created temporary directory for the git clone at %q", tmpDir)
 
-	// Create the struct
-	d := &GitDirectory{
-		url:      url,
-		branch:   opts.Branch,
-		interval: opts.Interval,
-		timeout:  opts.Timeout,
-
-		cloneDir:  tmpDir,
-		auth:      nil,
-		readwrite: false, // only switch to read-write if we've got the right credentials
-
+	d := &gitDirectory{
+		repoRef:             repoRef,
+		GitDirectoryOptions: opts,
+		cloneDir:            tmpDir,
 		// TODO: This needs to be large, otherwise it can start blocking unnecessarily if nobody reads it
 		commitChan: make(chan string, 1024),
 		lock:       &sync.Mutex{},
@@ -95,48 +127,9 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 	// Set up the parent context for this class. d.cancel() is called only at Cleanup()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 
-	// Parse the endpoint URL
-	ep, err := transport.NewEndpoint(url)
-	if err != nil {
-		return nil, err
-	}
-
-	// Choose authentication method based on the credentials
-	switch ep.Protocol {
-	case "ssh":
-		// If we haven't got the right credentials, just continue in read-only mode
-		if len(opts.IdentityFileContent) == 0 || len(opts.KnownHostsFileContent) == 0 {
-			break
-		}
-		pk, err := ssh.NewPublicKeys("git", opts.IdentityFileContent, "")
-		if err != nil {
-			return nil, err
-		}
-		callback, err := knownhosts.New(opts.KnownHostsFileContent)
-		if err != nil {
-			return nil, err
-		}
-		pk.HostKeyCallback = callback
-		d.auth = pk
-		d.readwrite = true
-	case "https":
-		// If we haven't got the right credentials, just continue in read-only mode
-		if opts.Username == nil || opts.Password == nil {
-			break
-		}
-		d.auth = &http.BasicAuth{
-			Username: *opts.Username,
-			Password: *opts.Password,
-		}
-		d.readwrite = true
-	case "file":
-		d.readwrite = true // assuming enough file privileges to access the repo
-	default:
-		return nil, fmt.Errorf("unsupported endpoint scheme: %s for URL %q", ep.Protocol, url)
-	}
 	log.Trace("URL endpoint parsed and authentication method chosen")
 
-	if d.readwrite {
+	if d.canWrite() {
 		log.Infof("Running in read-write mode, will commit back current status to the repo")
 	} else {
 		log.Infof("Running in read-only mode, won't write status back to the repo")
@@ -145,19 +138,14 @@ func NewGitDirectory(url string, opts GitDirectoryOptions) (*GitDirectory, error
 	return d, nil
 }
 
-// GitDirectory is an implementation which keeps a directory
-type GitDirectory struct {
+// gitDirectory is an implementation which keeps a directory
+type gitDirectory struct {
 	// user-specified options
-	url      string
-	branch   string
-	interval time.Duration
-	timeout  time.Duration
-	auth     transport.AuthMethod
+	repoRef gitprovider.RepositoryRef
+	GitDirectoryOptions
 
 	// the temporary directory used for the clone
 	cloneDir string
-	// whether we're operating in read-write or read-only mode
-	readwrite bool
 
 	// go-git objects. wt is the worktree of the repo, persistent during the lifetime of repo.
 	repo *git.Repository
@@ -175,36 +163,45 @@ type GitDirectory struct {
 	lock *sync.Mutex
 }
 
-func (d *GitDirectory) Dir() string {
+func (d *gitDirectory) Dir() string {
 	return d.cloneDir
 }
 
+func (d *gitDirectory) MainBranch() string {
+	return d.Branch
+}
+
+func (d *gitDirectory) RepositoryRef() gitprovider.RepositoryRef {
+	return d.repoRef
+}
+
 // StartCheckoutLoop clones the repo synchronously, and then starts the checkout loop non-blocking.
-// If the checkout loop has been started already, this directly exits.
-func (d *GitDirectory) StartCheckoutLoop() {
+// If the checkout loop has been started already, this is a no-op.
+func (d *gitDirectory) StartCheckoutLoop() error {
 	if d.wt != nil {
-		return // already initialized
+		return nil // already initialized
 	}
 	// First, clone the repo
 	if err := d.clone(); err != nil {
-		log.Fatalf("Failed to clone git repo: %v", err)
+		return err
 	}
 	go d.checkoutLoop()
+	return nil
 }
 
-func (d *GitDirectory) Suspend() {
+func (d *gitDirectory) Suspend() {
 	d.lock.Lock()
 }
 
-func (d *GitDirectory) Resume() {
+func (d *gitDirectory) Resume() {
 	d.lock.Unlock()
 }
 
-func (d *GitDirectory) CommitChannel() chan string {
+func (d *gitDirectory) CommitChannel() chan string {
 	return d.commitChan
 }
 
-func (d *GitDirectory) checkoutLoop() {
+func (d *gitDirectory) checkoutLoop() {
 	log.Info("Starting the checkout loop...")
 
 	wait.NonSlidingUntilWithContext(d.ctx, func(_ context.Context) {
@@ -216,24 +213,54 @@ func (d *GitDirectory) checkoutLoop() {
 			return
 		}
 
-	}, d.interval)
+	}, d.Interval)
 	log.Info("Exiting the checkout loop...")
 }
 
-func (d *GitDirectory) clone() error {
+func (d *gitDirectory) cloneURL() string {
+	return d.repoRef.GetCloneURL(d.AuthMethod.TransportType())
+}
+
+func (d *gitDirectory) canWrite() bool {
+	return d.AuthMethod != nil
+}
+
+// verifyRead makes sure it's ok to start a read-something-from-git process
+func (d *gitDirectory) verifyRead() error {
+	// Safeguard against not starting yet
+	if d.wt == nil {
+		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
+	}
+	return nil
+}
+
+// verifyWrite makes sure it's ok to start a write-something-to-git process
+func (d *gitDirectory) verifyWrite() error {
+	// We need all read privileges first
+	if err := d.verifyRead(); err != nil {
+		return err
+	}
+	// Make sure we don't write to a possibly read-only repo
+	if !d.canWrite() {
+		return ErrCannotWriteToReadOnly
+	}
+	return nil
+}
+
+func (d *gitDirectory) clone() error {
 	// Lock the mutex now that we're starting, and unlock it when exiting
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	log.Infof("Starting to clone the repository %s with timeout %s", d.url, d.timeout)
+	log.Infof("Starting to clone the repository %s with timeout %s", d.repoRef, d.Timeout)
 	// Do a clone operation to the temporary directory, with a timeout
 	err := d.contextWithTimeout(d.ctx, func(ctx context.Context) error {
 		var err error
 		d.repo, err = git.PlainCloneContext(ctx, d.Dir(), false, &git.CloneOptions{
-			URL:           d.url,
-			Auth:          d.auth,
+			URL:           d.cloneURL(),
+			Auth:          d.AuthMethod,
 			RemoteName:    defaultRemote,
-			ReferenceName: plumbing.NewBranchReferenceName(d.branch),
+			ReferenceName: plumbing.NewBranchReferenceName(d.Branch),
 			SingleBranch:  true,
 			NoCheckout:    false,
 			//Depth:             1, // ref: https://github.com/src-d/go-git/issues/1143
@@ -248,7 +275,7 @@ func (d *GitDirectory) clone() error {
 	case nil:
 		// no-op, just continue.
 	case context.DeadlineExceeded:
-		return fmt.Errorf("git clone operation took longer than deadline %s", d.timeout)
+		return fmt.Errorf("git clone operation took longer than deadline %s", d.Timeout)
 	case context.Canceled:
 		log.Tracef("context was cancelled")
 		return nil // if Cleanup() was called, just exit the goroutine
@@ -272,21 +299,21 @@ func (d *GitDirectory) clone() error {
 	return nil
 }
 
-func (d *GitDirectory) Pull(ctx context.Context) error {
+func (d *gitDirectory) Pull(ctx context.Context) error {
 	// Lock the mutex now that we're starting, and unlock it when exiting
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	// Safeguard against not starting yet
-	if d.wt == nil {
-		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
+	// Make sure it's okay to read
+	if err := d.verifyRead(); err != nil {
+		return err
 	}
 
 	// Perform the git pull operation using the timeout
 	err := d.contextWithTimeout(ctx, func(innerCtx context.Context) error {
 		log.Trace("checkoutLoop: Starting pull operation")
 		return d.wt.PullContext(innerCtx, &git.PullOptions{
-			Auth:         d.auth,
+			Auth:         d.AuthMethod,
 			SingleBranch: true,
 		})
 	})
@@ -295,7 +322,7 @@ func (d *GitDirectory) Pull(ctx context.Context) error {
 	case nil, git.NoErrAlreadyUpToDate:
 		// no-op, just continue. Allow the git.NoErrAlreadyUpToDate error
 	case context.DeadlineExceeded:
-		return fmt.Errorf("git pull operation took longer than deadline %s", d.timeout)
+		return fmt.Errorf("git pull operation took longer than deadline %s", d.Timeout)
 	case context.Canceled:
 		log.Tracef("context was cancelled")
 		return nil // if Cleanup() was called, just exit the goroutine
@@ -320,10 +347,10 @@ func (d *GitDirectory) Pull(ctx context.Context) error {
 	return nil
 }
 
-func (d *GitDirectory) NewBranch(branchName string) error {
-	// Safeguard against not starting yet
-	if d.wt == nil {
-		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
+func (d *gitDirectory) CheckoutNewBranch(branchName string) error {
+	// Make sure it's okay to write
+	if err := d.verifyWrite(); err != nil {
+		return err
 	}
 
 	return d.wt.Checkout(&git.CheckoutOptions{
@@ -332,10 +359,10 @@ func (d *GitDirectory) NewBranch(branchName string) error {
 	})
 }
 
-func (d *GitDirectory) ToMainBranch() error {
-	// Safeguard against not starting yet
-	if d.wt == nil {
-		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
+func (d *gitDirectory) CheckoutMainBranch() error {
+	// Make sure it's okay to write
+	if err := d.verifyWrite(); err != nil {
+		return err
 	}
 
 	// Best-effort clean
@@ -344,22 +371,26 @@ func (d *GitDirectory) ToMainBranch() error {
 	})
 	// Force-checkout the main branch
 	return d.wt.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(d.branch),
+		Branch: plumbing.NewBranchReferenceName(d.Branch),
 		Force:  true,
 	})
 }
 
 // observeCommit sets the lastCommit variable so that we know the latest state
-func (d *GitDirectory) observeCommit(commit plumbing.Hash) {
+func (d *gitDirectory) observeCommit(commit plumbing.Hash) {
 	d.lastCommit = commit.String()
 	d.commitChan <- commit.String()
-	log.Infof("New commit observed on branch %q: %s", d.branch, commit)
+	log.Infof("New commit observed on branch %q: %s", d.Branch, commit)
 }
 
-func (d *GitDirectory) Commit(ctx context.Context, authorName, authorEmail, msg string) error {
-	// Safeguard against not starting yet
-	if d.wt == nil {
-		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
+// Commit creates a commit of all changes in the current worktree with the given parameters.
+// It also automatically pushes the branch after the commit.
+// ErrNotStarted is returned if the repo hasn't been cloned yet.
+// ErrCannotWriteToReadOnly is returned if opts.AuthMethod wasn't provided.
+func (d *gitDirectory) Commit(ctx context.Context, authorName, authorEmail, msg string) error {
+	// Make sure it's okay to write
+	if err := d.verifyWrite(); err != nil {
+		return err
 	}
 
 	s, err := d.wt.Status()
@@ -389,7 +420,7 @@ func (d *GitDirectory) Commit(ctx context.Context, authorName, authorEmail, msg 
 	err = d.contextWithTimeout(ctx, func(innerCtx context.Context) error {
 		log.Debug("commitLoop: Will push with timeout")
 		return d.repo.PushContext(innerCtx, &git.PushOptions{
-			Auth: d.auth,
+			Auth: d.AuthMethod,
 		})
 	})
 	// Handle errors
@@ -397,7 +428,7 @@ func (d *GitDirectory) Commit(ctx context.Context, authorName, authorEmail, msg 
 	case nil, git.NoErrAlreadyUpToDate:
 		// no-op, just continue. Allow the git.NoErrAlreadyUpToDate error
 	case context.DeadlineExceeded:
-		return fmt.Errorf("git push operation took longer than deadline %s", d.timeout)
+		return fmt.Errorf("git push operation took longer than deadline %s", d.Timeout)
 	case context.Canceled:
 		log.Tracef("context was cancelled")
 		return nil // if Cleanup() was called, just exit the goroutine
@@ -411,10 +442,10 @@ func (d *GitDirectory) Commit(ctx context.Context, authorName, authorEmail, msg 
 	return nil
 }
 
-func (d *GitDirectory) contextWithTimeout(ctx context.Context, fn func(context.Context) error) error {
+func (d *gitDirectory) contextWithTimeout(ctx context.Context, fn func(context.Context) error) error {
 	// Create a new context with a timeout. The push operation either succeeds in time, times out,
 	// or is cancelled by Cleanup(). In case of a successful run, the context is always cancelled afterwards.
-	ctx, cancel := context.WithTimeout(ctx, d.timeout)
+	ctx, cancel := context.WithTimeout(ctx, d.Timeout)
 	defer cancel()
 
 	// Run the function using the context and cancel directly afterwards
@@ -430,7 +461,7 @@ func (d *GitDirectory) contextWithTimeout(ctx context.Context, fn func(context.C
 }
 
 // Cleanup cancels running goroutines and operations, and removes the temporary clone directory
-func (d *GitDirectory) Cleanup() error {
+func (d *gitDirectory) Cleanup() error {
 	// Cancel the context for the two running goroutines, and any possible long-running operations
 	d.cancel()
 
