@@ -622,6 +622,48 @@ func TestDefaulter(t *testing.T) {
 	}
 }
 
+func Test_defaulter_NewDefaultedObject(t *testing.T) {
+	tests := []struct {
+		name    string
+		gvk     schema.GroupVersionKind
+		want    runtime.Object
+		wantErr bool
+	}{
+		{
+			name: "internal complex",
+			gvk:  intgv.WithKind("Complex"),
+			// TODO: Now the v2 defaults are applied, because both v1 and v2 defaulting functions are
+			// applied on the same reflect Type (the same ExternalComplex struct), and hence both functions
+			// are run.
+			// This test illustrates though that an internal object can be created and defaulted though, using
+			// the NewDefaultedObject function.
+			want: &runtimetest.InternalComplex{Integer64: 5},
+		},
+		{
+			name: "crdoldversion",
+			gvk:  ext1gv.WithKind("CRD"),
+			want: &CRDOldVersion{TestString: "foo"},
+		},
+		{
+			name: "crdnewversion",
+			gvk:  ext2gv.WithKind("CRD"),
+			want: &CRDNewVersion{OtherString: "bar"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ourserializer.Defaulter().NewDefaultedObject(tt.gvk)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("defaulter.NewDefaultedObject() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("defaulter.NewDefaultedObject() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 /*
 // TODO: If we ever support keeping comments on the List -> YAML documents conversion, re-enable this unit test
 

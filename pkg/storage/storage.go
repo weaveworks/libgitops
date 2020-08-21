@@ -15,9 +15,6 @@ import (
 )
 
 type ReadStorage interface {
-	// New creates a new Object for the specified kind
-	New(kind KindKey) (runtime.Object, error)
-
 	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content
 	Get(key ObjectKey) (runtime.Object, error)
 	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
@@ -84,33 +81,6 @@ var _ Storage = &GenericStorage{}
 
 func (s *GenericStorage) Serializer() serializer.Serializer {
 	return s.serializer
-}
-
-// New creates a new Object for the specified kind
-// TODO: Create better error handling if the GVK specified is not recognized
-func (s *GenericStorage) New(kind KindKey) (runtime.Object, error) {
-	obj, err := s.serializer.Scheme().New(kind.GetGVK())
-	if err != nil {
-		return nil, err
-	}
-
-	// Default the new object, this will take care of internal defaulting automatically
-	if err := s.serializer.Defaulter().Default(obj); err != nil {
-		return nil, err
-	}
-
-	// Cast to runtime.Object, and make sure it works
-	metaObj, ok := obj.(runtime.Object)
-	if !ok {
-		return nil, fmt.Errorf("can't convert to libgitops.runtime.Object")
-	}
-	// Set the desired gvk from the caller of this Object
-	// In practice, this means, although we created an internal type,
-	// from defaulting external TypeMeta information was set. Set the
-	// desired gvk here so it's correctly handled in all code that gets
-	// the gvk from the Object
-	metaObj.GetObjectKind().SetGroupVersionKind(kind.GetGVK())
-	return metaObj, nil
 }
 
 // Get returns a new Object for the resource at the specified kind/uid path, based on the file content
