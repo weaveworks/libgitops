@@ -153,6 +153,111 @@ See the [`pkg/gitdir`](pkg/gitdir) package for details.
 This package contains utilities used by the rest of the library. The most interesting thing here is the `Patcher`
 under [`pkg/util/patch`](pkg/util/patch), which can be used to apply patches to `pkg/runtime.Object` compliant types.
 
+## Sample implementations
+
+All sample binaries in this repo are operating on a sample type called `Car`, that looks something like this:
+
+```yaml
+apiVersion: sample-app.weave.works/v1alpha1
+kind: Car
+metadata:
+  creationTimestamp: "2020-08-17T14:33:16Z"
+  name: foo
+  namespace: default
+spec:
+  brand: SAAB
+  engine: The best one
+  yearModel: "2008"
+status:
+  acceleration: 0
+  distance: 12176941420362965433
+  persons: 0
+  speed: 53.37474583162469
+```
+
+All binaries let you access the data and fake a modification event using a sample webserver running on `localhost:8888`.
+
+### sample-gitops
+
+This is a sample binary that:
+
+a) clones a Git repo of your choice to a temporary directory, and authenticates using given `id_rsa` and `known_hosts` files. Create a Git repo with e.g. the sample file above, and set up SSH credentials.
+b) exposes all `Car`s in your Git repository at URL `GET localhost:8888/git/`
+c) lets you fake a "reconciler spec/status write" event at path `PUT localhost:8888/git/<name>`, where `name` is the name of the `Car` in your repo you want to modify
+d) re-syncs every 10 seconds, and tries to pull the git repo
+e) has an inotify watch on the temporary Git clone, so it will log all objects that have been changed as they happen in Git (e.g. from new commits)
+
+When you modify the "desired state/current status" using e.g. `curl -sSL -X PUT localhost:8888/git/foo`, the following will happen:
+
+a) a `Transaction` will be started, which means `git pull` and `git checkout -b <name>-update-<random_sha>` will be executed
+b) `Storage.Get` for the `Car` with the given name will be requested
+c) the Car's `.status.distance` and `.status.speed` fields are updated to random numbers, and `Storage.Update` is run
+d) the transaction is "committed" by returning a `transaction.PullRequestResult`
+e) when the transaction ends, `git commit -A -m <message>`, `git push` and `git checkout <main>` will be executed. The `git pull` loop is resumed.
+f) as a `transaction.PullRequestResult` was returned (and not `transaction.CommitResult`), the code will also use a `transaction.PullRequestProvider` to create a PR towards the repo. The configured provider is for now GitHub-only, and configured through passing the `GITHUB_TOKEN` environment variable.
+g) the PR will be created for the given branch, with the given assignees, labels and milestone
+h) once the PR is merged, the `git pull` loop will eventually download the new commit, and the inotify watch will tell which files were changed.
+
+#### sample-gitops Usage
+
+```console
+$ make
+...
+$ bin/sample-gitops --help
+Usage of bin/sample-gitops:
+    --author-email string    Author email for Git commits (default "support@weave.works")
+    --author-name string     Author name for Git commits (default "Weave libgitops")
+    --git-url string         HTTPS Git URL; where the Git repository is, e.g. https://github.com/luxas/ignite-gitops
+    --identity-file string   Path to where the SSH private key is
+    --pr-assignees strings   What user logins to assign for the created PR. The user must have pull access to the repo.
+    --pr-milestone string    What milestone to tag the PR with
+    --version                Show version information and exit
+```
+
+You also need to set `GITHUB_TOKEN` in order to be able to create the PR.
+
+### sample-watch
+
+sample-watch demonstrates use of the inotify `GenericWatchStorage` on a customizable directory.
+
+When running it, create a file (e.g. the example above) anywhere in the folder you're watching.
+You'll see it being noticed in the log. Once that's done, you can curl it like this: `curl -sSL localhost:8888/watch/<name>`, where name equals `.metadata.name` of the object you just put in the dir.
+
+You can also write a new status using `curl -sSL -X PUT localhost:8888/watch/foo`, so that the next time you get it as per above, you can see the status has changed.
+
+#### sample-watch Usage
+
+```console
+$ make
+...
+$ bin/sample-watch --help
+Usage of bin/sample-watch:
+    --version            Show version information and exit
+    --watch-dir string   Where to watch for YAML/JSON manifests (default "/tmp/libgitops/watch")
+```
+
+### sample-app
+
+sample-app is using the `GenericStorage` and `GenericRawStorage` on the directory of your choice. The path where the objects are stored are of the form `<top-level-dir>/<kind>/<identifier>/metadata.json`.
+
+Use it as follows:
+
+a) create a new `Car` using `curl -sSL -X POST localhost:8888/plain/foo`
+b) see the object in e.g. using `cat /tmp/libgitops/manifest/Car/default/foo/metadata.yaml`
+c) get it through the webserver using `curl -sSL localhost:8888/plain/foo`
+d) update status through `curl -sSL -X PUT localhost:8888/plain/foo`
+
+#### sample-app Usage
+
+```console
+$ make
+...
+$ bin/sample-app --help
+Usage of bin/sample-app:
+    --data-dir string   Where to store the YAML files (default "/tmp/libgitops/manifest")
+    --version           Show version information and exit
+```
+
 ## Getting Help
 
 If you have any questions about, feedback for or problems with `libgitops`:
