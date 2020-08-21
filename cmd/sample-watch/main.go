@@ -11,14 +11,13 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/weaveworks/libgitops/cmd/common"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
-	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
 	"github.com/weaveworks/libgitops/pkg/logs"
-	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
-	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 )
 
-var manifestDirFlag = pflag.String("data-dir", "/tmp/libgitops/manifest", "Where to store the JSON files")
+var watchDirFlag = pflag.String("watch-dir", "/tmp/libgitops/watch", "Where to watch for YAML/JSON manifests")
 
 func main() {
 	// Parse the version flag
@@ -32,30 +31,38 @@ func main() {
 }
 
 func run() error {
-	// Create the manifest directory
-	if err := os.MkdirAll(*manifestDirFlag, 0755); err != nil {
+	// Create the watch directory
+	if err := os.MkdirAll(*watchDirFlag, 0755); err != nil {
 		return err
 	}
 
 	// Set the log level
 	logs.Logger.SetLevel(logrus.TraceLevel)
 
-	plainStorage := storage.NewGenericStorage(
-		storage.NewGenericRawStorage(*manifestDirFlag, v1alpha1.SchemeGroupVersion, serializer.ContentTypeYAML),
-		scheme.Serializer,
-		[]runtime.IdentifierFactory{runtime.Metav1NameIdentifier},
-	)
-	defer func() { _ = plainStorage.Close() }()
+	watchStorage, err := watch.NewManifestStorage(*watchDirFlag, scheme.Serializer)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = watchStorage.Close() }()
+
+	updates := make(chan update.Update, 4096)
+	watchStorage.SetUpdateStream(updates)
+
+	go func() {
+		for upd := range updates {
+			logrus.Infof("Got %s update for: %v %v", upd.Event, upd.PartialObject.GetObjectKind().GroupVersionKind(), upd.PartialObject.GetObjectMeta())
+		}
+	}()
 
 	e := common.NewEcho()
 
-	e.GET("/plain/:name", func(c echo.Context) error {
+	e.GET("/watch/:name", func(c echo.Context) error {
 		name := c.Param("name")
 		if len(name) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		obj, err := plainStorage.Get(common.CarKeyForName(name))
+		obj, err := watchStorage.Get(common.CarKeyForName(name))
 		if err != nil {
 			return err
 		}
@@ -66,25 +73,13 @@ func run() error {
 		return c.JSONBlob(http.StatusOK, content.Bytes())
 	})
 
-	e.POST("/plain/:name", func(c echo.Context) error {
+	e.PUT("/watch/:name", func(c echo.Context) error {
 		name := c.Param("name")
 		if len(name) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		if err := plainStorage.Create(common.NewCar(name)); err != nil {
-			return err
-		}
-		return c.String(200, "OK!")
-	})
-
-	e.PUT("/plain/:name", func(c echo.Context) error {
-		name := c.Param("name")
-		if len(name) == 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
-		}
-
-		if err := common.SetNewCarStatus(plainStorage, common.CarKeyForName(name)); err != nil {
+		if err := common.SetNewCarStatus(watchStorage, common.CarKeyForName(name)); err != nil {
 			return err
 		}
 		return c.String(200, "OK!")

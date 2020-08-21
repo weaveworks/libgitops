@@ -8,7 +8,7 @@ SRC_PKGS := cmd pkg
 DOCKER_ARGS := --rm
 CACHE_DIR := $(shell pwd)/bin/cache
 API_DOCS := api/sample-app.md api/runtime.md
-BINARIES := bin/sample-app bin/sample-gitops
+BINARIES := bin/sample-app bin/sample-gitops bin/sample-watch
 
 # If we're not running in CI, run Docker interactively
 ifndef CI

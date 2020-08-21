@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/weaveworks/libgitops/pkg/storage/watch"
-	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -23,6 +21,8 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/transaction"
 	githubpr "github.com/weaveworks/libgitops/pkg/storage/transaction/pullrequest/github"
+	"github.com/weaveworks/libgitops/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 )
 
 var (
