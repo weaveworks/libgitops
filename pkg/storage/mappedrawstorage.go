@@ -13,6 +13,11 @@ import (
 	"github.com/weaveworks/libgitops/pkg/util"
 )
 
+var (
+	// ErrNotTracked is returned when the requested resource wasn't found.
+	ErrNotTracked = fmt.Errorf("untracked object: %w", ErrNotFound)
+)
+
 // MappedRawStorage is an interface for RawStorages which store their
 // data in a flat/unordered directory format like manifest directories.
 type MappedRawStorage interface {
@@ -44,15 +49,15 @@ type GenericMappedRawStorage struct {
 	mux          *sync.Mutex
 }
 
-func (r *GenericMappedRawStorage) realPath(key ObjectKey) (path string, err error) {
+func (r *GenericMappedRawStorage) realPath(key ObjectKey) (string, error) {
 	r.mux.Lock()
 	path, ok := r.fileMappings[key]
 	r.mux.Unlock()
 	if !ok {
-		err = fmt.Errorf("GenericMappedRawStorage: %q not tracked", key)
+		return "", fmt.Errorf("GenericMappedRawStorage: cannot resolve %q: %w", key, ErrNotTracked)
 	}
 
-	return
+	return path, nil
 }
 
 func (r *GenericMappedRawStorage) Read(key ObjectKey) ([]byte, error) {
@@ -78,7 +83,7 @@ func (r *GenericMappedRawStorage) Write(key ObjectKey, content []byte) error {
 	// only write if the file is already known
 	file, err := r.realPath(key)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	return ioutil.WriteFile(file, content, 0644)
@@ -117,21 +122,19 @@ func (r *GenericMappedRawStorage) List(kind KindKey) ([]ObjectKey, error) {
 }
 
 // This returns the modification time as a UnixNano string
-// If the file doesn't exist, return blank
+// If the file doesn't exist, return ErrNotFound
 func (r *GenericMappedRawStorage) Checksum(key ObjectKey) (s string, err error) {
 	file, err := r.realPath(key)
 	if err != nil {
 		return
 	}
 
-	var fi os.FileInfo
-	if r.Exists(key) {
-		if fi, err = os.Stat(file); err == nil {
-			s = strconv.FormatInt(fi.ModTime().UnixNano(), 10)
-		}
+	fi, err := os.Stat(file)
+	if err != nil {
+		return "", err
 	}
 
-	return
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), nil
 }
 
 func (r *GenericMappedRawStorage) ContentType(key ObjectKey) (ct serializer.ContentType) {
