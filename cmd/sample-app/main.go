@@ -128,8 +128,7 @@ func run(identityFile, gitURL string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		objKey := storage.NewObjectKey(storage.NewKindKey(carGVK), runtime.NewIdentifier("default/"+name))
-		obj, err := plainStorage.Get(objKey)
+		obj, err := plainStorage.Get(carKeyForName(name))
 		if err != nil {
 			return err
 		}
@@ -146,13 +145,20 @@ func run(identityFile, gitURL string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		obj := &v1alpha1.Car{}
-		obj.Name = name
-		obj.Namespace = "default"
-		obj.Spec.Brand = fmt.Sprintf("Acura-%03d", rand.Intn(1000))
-
-		err := plainStorage.Set(obj)
+		err := plainStorage.Create(newCar(name))
 		if err != nil {
+			return err
+		}
+		return c.String(200, "OK!")
+	})
+
+	e.PUT("/plain/:name", func(c echo.Context) error {
+		name := c.Param("name")
+		if len(name) == 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
+		}
+
+		if err := setNewCarStatus(plainStorage, carKeyForName(name)); err != nil {
 			return err
 		}
 		return c.String(200, "OK!")
@@ -166,7 +172,7 @@ func run(identityFile, gitURL string) error {
 		return c.JSON(http.StatusOK, objs)
 	})
 
-	e.POST("/git/:name", func(c echo.Context) error {
+	e.PUT("/git/:name", func(c echo.Context) error {
 		name := c.Param("name")
 		if len(name) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
@@ -174,14 +180,7 @@ func run(identityFile, gitURL string) error {
 
 		objKey := storage.NewObjectKey(storage.NewKindKey(carGVK), runtime.NewIdentifier("default/"+name))
 		err := gitStorage.Transaction(context.Background(), "foo-branch-", func(ctx context.Context, s storage.Storage) (*transaction.CommitSpec, error) {
-			obj, err := s.Get(objKey)
-			if err != nil {
-				return nil, err
-			}
-			car := obj.(*v1alpha1.Car)
-			car.Status.Distance = rand.Uint64()
-			car.Status.Speed = rand.Float64() * 100
-			if err := s.Set(car); err != nil {
+			if err := setNewCarStatus(s, objKey); err != nil {
 				return nil, err
 			}
 
@@ -225,4 +224,30 @@ func parseVersionFlag() {
 		fmt.Printf("sample-app version: %#v\n", version.Get())
 		os.Exit(0)
 	}
+}
+
+func carKeyForName(name string) storage.ObjectKey {
+	return storage.NewObjectKey(storage.NewKindKey(carGVK), runtime.NewIdentifier("default/"+name))
+}
+
+func newCar(name string) *v1alpha1.Car {
+	obj := &v1alpha1.Car{}
+	obj.Name = name
+	obj.Namespace = "default"
+	obj.Spec.Brand = fmt.Sprintf("Acura-%03d", rand.Intn(1000))
+
+	return obj
+}
+
+func setNewCarStatus(s storage.Storage, key storage.ObjectKey) error {
+	obj, err := s.Get(key)
+	if err != nil {
+		return err
+	}
+
+	car := obj.(*v1alpha1.Car)
+	car.Status.Distance = rand.Uint64()
+	car.Status.Speed = rand.Float64() * 100
+
+	return s.Update(car)
 }

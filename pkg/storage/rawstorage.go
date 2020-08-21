@@ -19,25 +19,29 @@ import (
 // store byte-encoded Objects (resources) in non-volatile
 // memory.
 type RawStorage interface {
-	// Read returns a resource's content based on key
+	// Read returns a resource's content based on key.
+	// If the resource does not exist, it returns ErrNotFound.
 	Read(key ObjectKey) ([]byte, error)
-	// Exists checks if the resource indicated by key exists
+	// Exists checks if the resource indicated by key exists.
 	Exists(key ObjectKey) bool
-	// Write writes the given content to the resource indicated by key
+	// Write writes the given content to the resource indicated by key.
+	// Error returns are implementation-specific.
 	Write(key ObjectKey, content []byte) error
-	// Delete deletes the resource indicated by key
+	// Delete deletes the resource indicated by key.
+	// If the resource does not exist, it returns ErrNotFound.
 	Delete(key ObjectKey) error
-	// List returns all matching object keys based on the given KindKey
+	// List returns all matching object keys based on the given KindKey.
 	List(key KindKey) ([]ObjectKey, error)
-	// Checksum returns a string checksum for the resource indicated by key
+	// Checksum returns a string checksum for the resource indicated by key.
+	// If the resource does not exist, it returns ErrNotFound.
 	Checksum(key ObjectKey) (string, error)
-	// ContentType returns the content type of the contents of the resource indicated by key
+	// ContentType returns the content type of the contents of the resource indicated by key.
 	ContentType(key ObjectKey) serializer.ContentType
 
-	// WatchDir returns the path for Watchers to watch changes in
+	// WatchDir returns the path for Watchers to watch changes in.
 	WatchDir() string
 	// GetKey retrieves the Key containing the virtual path based
-	// on the given physical file path returned by a Watcher
+	// on the given physical file path returned by a Watcher.
 	GetKey(path string) (ObjectKey, error)
 }
 
@@ -87,6 +91,11 @@ func (r *GenericRawStorage) Read(key ObjectKey) ([]byte, error) {
 		return nil, err
 	}
 
+	// Check if the resource indicated by key exists
+	if !r.Exists(key) {
+		return nil, ErrNotFound
+	}
+
 	return ioutil.ReadFile(r.keyPath(key))
 }
 
@@ -123,6 +132,11 @@ func (r *GenericRawStorage) Delete(key ObjectKey) error {
 		return err
 	}
 
+	// Check if the resource indicated by key exists
+	if !r.Exists(key) {
+		return ErrNotFound
+	}
+
 	return os.RemoveAll(path.Dir(r.keyPath(key)))
 }
 
@@ -146,22 +160,19 @@ func (r *GenericRawStorage) List(kind KindKey) ([]ObjectKey, error) {
 }
 
 // This returns the modification time as a UnixNano string
-// If the file doesn't exist, return blank
-func (r *GenericRawStorage) Checksum(key ObjectKey) (s string, err error) {
+// If the file doesn't exist, return ErrNotFound
+func (r *GenericRawStorage) Checksum(key ObjectKey) (string, error) {
 	// Validate GroupVersion first
 	if err := r.validateGroupVersion(key); err != nil {
 		return "", err
 	}
 
-	var fi os.FileInfo
-
-	if r.Exists(key) {
-		if fi, err = os.Stat(r.keyPath(key)); err == nil {
-			s = strconv.FormatInt(fi.ModTime().UnixNano(), 10)
-		}
+	// Check if the resource indicated by key exists
+	if !r.Exists(key) {
+		return "", ErrNotFound
 	}
 
-	return
+	return checksumFromModTime(r.keyPath(key))
 }
 
 func (r *GenericRawStorage) ContentType(_ ObjectKey) serializer.ContentType {
@@ -194,4 +205,13 @@ func (r *GenericRawStorage) GetKey(p string) (ObjectKey, error) {
 	}
 
 	return NewObjectKey(NewKindKey(gvk), runtime.NewIdentifier(uid)), nil
+}
+
+func checksumFromModTime(path string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+
+	return strconv.FormatInt(fi.ModTime().UnixNano(), 10), nil
 }

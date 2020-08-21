@@ -21,10 +21,13 @@ var (
 	ErrAmbiguousFind = errors.New("two or more results were aquired when one was expected")
 	// ErrNotFound is returned when the requested resource wasn't found.
 	ErrNotFound = errors.New("resource not found")
+	// ErrAlreadyExists is returned when when WriteStorage.Create is called for an already stored object.
+	ErrAlreadyExists = errors.New("resource already exists")
 )
 
 type ReadStorage interface {
-	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content
+	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
+	// If the resource referred to by the given ObjectKey does not exist, Get returns ErrNotFound.
 	Get(key ObjectKey) (runtime.Object, error)
 
 	// List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
@@ -41,7 +44,8 @@ type ReadStorage interface {
 	// TODO: Figure out what we should do with these, do we need them and if so where?
 	//
 
-	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
+	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path.
+	// If the resource referred to by the given ObjectKey does not exist, GetMeta returns ErrNotFound.
 	GetMeta(key ObjectKey) (runtime.PartialObject, error)
 	// ListMeta lists all Objects' APIType representation. In other words,
 	// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
@@ -56,7 +60,7 @@ type ReadStorage interface {
 	// Checksum returns a string representing the state of an Object on disk
 	// The checksum should change if any modifications have been made to the
 	// Object on disk, it can be e.g. the Object's modification timestamp or
-	// calculated checksum
+	// calculated checksum. If the Object is not found, ErrNotFound is returned.
 	Checksum(key ObjectKey) (string, error)
 	// Count returns the amount of available Objects of a specific kind
 	// This is used by Caches to check if all Objects are cached to perform a List
@@ -82,9 +86,13 @@ type ReadStorage interface {
 }
 
 type WriteStorage interface {
-	// Set saves the Object to disk. If the Object does not exist, the
-	// ObjectMeta.Created field is set automatically
-	Set(obj runtime.Object) error
+	// Create creates an entry for and stores the given Object in the storage. The Object must be new to the storage.
+	// The ObjectMeta.CreationTimestamp field is set automatically to the current time if it is unset.
+	Create(obj runtime.Object) error
+	// Update updates the state of the given Object in the storage. The Object must exist in the storage.
+	// The ObjectMeta.CreationTimestamp field is set automatically to the current time if it is unset.
+	Update(obj runtime.Object) error
+
 	// Patch performs a strategic merge patch on the Object with the given UID, using the byte-encoded patch given
 	Patch(key ObjectKey, patch []byte) error
 	// Delete removes an Object from the storage
@@ -138,15 +146,8 @@ func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.PartialObject, error) {
 	return s.decodeMeta(key, content)
 }
 
-// Set saves the Object to disk
-func (s *GenericStorage) Set(obj runtime.Object) error {
-	// TODO: Make sure we don't save a partial object
-
-	key, err := s.ObjectKeyFor(obj)
-	if err != nil {
-		return err
-	}
-
+// TODO: Make sure we don't save a partial object
+func (s *GenericStorage) write(key ObjectKey, obj runtime.Object) error {
 	// Set the content type based on the format given by the RawStorage, but default to JSON
 	contentType := serializer.ContentTypeJSON
 	if ct := s.raw.ContentType(key); len(ct) != 0 {
@@ -160,12 +161,40 @@ func (s *GenericStorage) Set(obj runtime.Object) error {
 	}
 
 	var objBytes bytes.Buffer
-	err = s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
+	err := s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
 	if err != nil {
 		return err
 	}
 
 	return s.raw.Write(key, objBytes.Bytes())
+}
+
+func (s *GenericStorage) Create(obj runtime.Object) error {
+	key, err := s.ObjectKeyFor(obj)
+	if err != nil {
+		return err
+	}
+
+	if s.raw.Exists(key) {
+		return ErrAlreadyExists
+	}
+
+	// The object was not found so we can safely create it
+	return s.write(key, obj)
+}
+
+func (s *GenericStorage) Update(obj runtime.Object) error {
+	key, err := s.ObjectKeyFor(obj)
+	if err != nil {
+		return err
+	}
+
+	if !s.raw.Exists(key) {
+		return ErrNotFound
+	}
+
+	// The object was found so we can safely update it
+	return s.write(key, obj)
 }
 
 // Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given

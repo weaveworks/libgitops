@@ -5,12 +5,16 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/util"
+)
+
+var (
+	// ErrNotTracked is returned when the requested resource wasn't found.
+	ErrNotTracked = fmt.Errorf("untracked object: %w", ErrNotFound)
 )
 
 // MappedRawStorage is an interface for RawStorages which store their
@@ -44,17 +48,18 @@ type GenericMappedRawStorage struct {
 	mux          *sync.Mutex
 }
 
-func (r *GenericMappedRawStorage) realPath(key ObjectKey) (path string, err error) {
+func (r *GenericMappedRawStorage) realPath(key ObjectKey) (string, error) {
 	r.mux.Lock()
 	path, ok := r.fileMappings[key]
 	r.mux.Unlock()
 	if !ok {
-		err = fmt.Errorf("GenericMappedRawStorage: %q not tracked", key)
+		return "", fmt.Errorf("GenericMappedRawStorage: cannot resolve %q: %w", key, ErrNotTracked)
 	}
 
-	return
+	return path, nil
 }
 
+// If the file doesn't exist, returns ErrNotFound + ErrNotTracked.
 func (r *GenericMappedRawStorage) Read(key ObjectKey) ([]byte, error) {
 	file, err := r.realPath(key)
 	if err != nil {
@@ -78,12 +83,13 @@ func (r *GenericMappedRawStorage) Write(key ObjectKey, content []byte) error {
 	// only write if the file is already known
 	file, err := r.realPath(key)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	return ioutil.WriteFile(file, content, 0644)
 }
 
+// If the file doesn't exist, returns ErrNotFound + ErrNotTracked.
 func (r *GenericMappedRawStorage) Delete(key ObjectKey) (err error) {
 	file, err := r.realPath(key)
 	if err != nil {
@@ -116,22 +122,15 @@ func (r *GenericMappedRawStorage) List(kind KindKey) ([]ObjectKey, error) {
 	return result, nil
 }
 
-// This returns the modification time as a UnixNano string
-// If the file doesn't exist, return blank
-func (r *GenericMappedRawStorage) Checksum(key ObjectKey) (s string, err error) {
-	file, err := r.realPath(key)
+// This returns the modification time as a UnixNano string.
+// If the file doesn't exist, returns ErrNotFound + ErrNotTracked.
+func (r *GenericMappedRawStorage) Checksum(key ObjectKey) (string, error) {
+	path, err := r.realPath(key)
 	if err != nil {
-		return
+		return "", err
 	}
 
-	var fi os.FileInfo
-	if r.Exists(key) {
-		if fi, err = os.Stat(file); err == nil {
-			s = strconv.FormatInt(fi.ModTime().UnixNano(), 10)
-		}
-	}
-
-	return
+	return checksumFromModTime(path)
 }
 
 func (r *GenericMappedRawStorage) ContentType(key ObjectKey) (ct serializer.ContentType) {
