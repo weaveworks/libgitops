@@ -165,7 +165,13 @@ type Defaulter interface {
 	// If the given object is internal, it will be automatically defaulted using the preferred external
 	// version's defaults (i.e. converted to the preferred external version, defaulted there, and converted
 	// back to internal).
+	// Important to note here is that the TypeMeta information is NOT applied automatically.
 	Default(objs ...runtime.Object) error
+
+	// NewDefaultedObject returns a new, defaulted object. It is essentially scheme.New() and
+	// scheme.Default(obj), but with extra logic to cover also internal versions.
+	// Important to note here is that the TypeMeta information is NOT applied automatically.
+	NewDefaultedObject(gvk schema.GroupVersionKind) (runtime.Object, error)
 }
 
 // NewSerializer constructs a new serializer based on a scheme, and optionally a codecfactory

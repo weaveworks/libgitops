@@ -2,6 +2,7 @@ package serializer
 
 import (
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/errors"
 )
 
@@ -11,6 +12,23 @@ func newDefaulter(scheme *runtime.Scheme) *defaulter {
 
 type defaulter struct {
 	scheme *runtime.Scheme
+}
+
+// NewDefaultedObject returns a new, defaulted object. It is essentially scheme.New() and
+// scheme.Default(obj), but with extra logic to also cover internal versions.
+// Important to note here is that the TypeMeta information is NOT applied automatically.
+func (d *defaulter) NewDefaultedObject(gvk schema.GroupVersionKind) (runtime.Object, error) {
+	obj, err := d.scheme.New(gvk)
+	if err != nil {
+		return nil, err
+	}
+
+	// Default the new object, this will take care of internal defaulting automatically
+	if err := d.Default(obj); err != nil {
+		return nil, err
+	}
+
+	return obj, nil
 }
 
 func (d *defaulter) Default(objs ...runtime.Object) error {
