@@ -2,10 +2,12 @@ package storage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/sirupsen/logrus"
+	"github.com/weaveworks/libgitops/pkg/filter"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
@@ -14,35 +16,67 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+var (
+	// ErrAmbiguousFind is returned when the user requested one object from a List+Filter process.
+	ErrAmbiguousFind = errors.New("two or more results were aquired when one was expected")
+	// ErrNotFound is returned when the requested resource wasn't found.
+	ErrNotFound = errors.New("resource not found")
+)
+
 type ReadStorage interface {
 	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content
 	Get(key ObjectKey) (runtime.Object, error)
+
+	// List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
+	// for more information, e.g. filter.NameFilter{} and filter.UIDFilter{})
+	List(kind KindKey, opts ...filter.ListOption) ([]runtime.Object, error)
+
+	// Find does a List underneath, also using filters, but always returns one object. If the List
+	// underneath returned two or more results, ErrAmbiguousFind is returned. If no match was found,
+	// ErrNotFound is returned.
+	Find(kind KindKey, opts ...filter.ListOption) (runtime.Object, error)
+
+	//
+	// Partial object getters.
+	// TODO: Figure out what we should do with these, do we need them and if so where?
+	//
+
 	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
-	GetMeta(key ObjectKey) (runtime.Object, error)
+	GetMeta(key ObjectKey) (runtime.PartialObject, error)
+	// ListMeta lists all Objects' APIType representation. In other words,
+	// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
+	// This allows for faster runs (no need to unmarshal "the world"), and less
+	// resource usage, when only metadata is unmarshalled into memory
+	ListMeta(kind KindKey) ([]runtime.PartialObject, error)
+
+	//
+	// Cache-related methods.
+	//
 
 	// Checksum returns a string representing the state of an Object on disk
 	// The checksum should change if any modifications have been made to the
 	// Object on disk, it can be e.g. the Object's modification timestamp or
 	// calculated checksum
 	Checksum(key ObjectKey) (string, error)
-
-	// List lists Objects for the specific kind
-	List(kind KindKey) ([]runtime.Object, error)
-	// ListMeta lists all Objects' APIType representation. In other words,
-	// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
-	// This allows for faster runs (no need to unmarshal "the world"), and less
-	// resource usage, when only metadata is unmarshalled into memory
-	ListMeta(kind KindKey) ([]runtime.Object, error)
 	// Count returns the amount of available Objects of a specific kind
 	// This is used by Caches to check if all Objects are cached to perform a List
 	Count(kind KindKey) (uint64, error)
 
-	// ObjectKeyFor returns the ObjectKey for the given object
-	ObjectKeyFor(obj runtime.Object) (ObjectKey, error)
+	//
+	// Access to underlying Resources.
+	//
+
 	// RawStorage returns the RawStorage instance backing this Storage
 	RawStorage() RawStorage
 	// Serializer returns the serializer
 	Serializer() serializer.Serializer
+
+	//
+	// Misc methods.
+	//
+
+	// ObjectKeyFor returns the ObjectKey for the given object
+	ObjectKeyFor(obj runtime.Object) (ObjectKey, error)
 	// Close closes all underlying resources (e.g. goroutines) used; before the application exits
 	Close() error
 }
@@ -95,7 +129,7 @@ func (s *GenericStorage) Get(key ObjectKey) (runtime.Object, error) {
 
 // TODO: Verify this works
 // GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
-func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.Object, error) {
+func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.PartialObject, error) {
 	content, err := s.raw.Read(key)
 	if err != nil {
 		return nil, err
@@ -159,8 +193,7 @@ func (s *GenericStorage) Checksum(key ObjectKey) (string, error) {
 	return s.raw.Checksum(key)
 }
 
-// List lists Objects for the specific kind
-func (s *GenericStorage) List(kind KindKey) (result []runtime.Object, walkerr error) {
+func (s *GenericStorage) list(kind KindKey) (result []runtime.Object, walkerr error) {
 	walkerr = s.walkKind(kind, func(key ObjectKey, content []byte) error {
 		obj, err := s.decode(key, content)
 		if err != nil {
@@ -173,11 +206,56 @@ func (s *GenericStorage) List(kind KindKey) (result []runtime.Object, walkerr er
 	return
 }
 
+// List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
+// for more information, e.g. filter.NameFilter{} and filter.UIDFilter{})
+func (s *GenericStorage) List(kind KindKey, opts ...filter.ListOption) ([]runtime.Object, error) {
+	// First, complete the options struct
+	o, err := filter.MakeListOptions(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Do an internal list to get all objects
+	objs, err := s.list(kind)
+	if err != nil {
+		return nil, err
+	}
+
+	// For all list filters, pipe the output of the previous as the input to the next, in order.
+	for _, filter := range o.Filters {
+		objs, err = filter.Filter(objs...)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return objs, nil
+}
+
+// Find does a List underneath, also using filters, but always returns one object. If the List
+// underneath returned two or more results, ErrAmbiguousFind is returned. If no match was found,
+// ErrNotFound is returned.
+func (s *GenericStorage) Find(kind KindKey, opts ...filter.ListOption) (runtime.Object, error) {
+	// Do a normal list underneath
+	objs, err := s.List(kind, opts...)
+	if err != nil {
+		return nil, err
+	}
+	// Return based on the object count
+	switch l := len(objs); l {
+	case 0:
+		return nil, fmt.Errorf("no Find match found: %w", ErrNotFound)
+	case 1:
+		return objs[0], nil
+	default:
+		return nil, fmt.Errorf("too many (%d) matches: %v: %w", l, objs, ErrAmbiguousFind)
+	}
+}
+
 // ListMeta lists all Objects' APIType representation. In other words,
 // only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
 // This allows for faster runs (no need to unmarshal "the world"), and less
 // resource usage, when only metadata is unmarshalled into memory
-func (s *GenericStorage) ListMeta(kind KindKey) (result []runtime.Object, walkerr error) {
+func (s *GenericStorage) ListMeta(kind KindKey) (result []runtime.PartialObject, walkerr error) {
 	walkerr = s.walkKind(kind, func(key ObjectKey, content []byte) error {
 
 		obj, err := s.decodeMeta(key, content)
@@ -267,7 +345,7 @@ func (s *GenericStorage) decode(key ObjectKey, content []byte) (runtime.Object, 
 	return metaObj, nil
 }
 
-func (s *GenericStorage) decodeMeta(key ObjectKey, content []byte) (runtime.Object, error) {
+func (s *GenericStorage) decodeMeta(key ObjectKey, content []byte) (runtime.PartialObject, error) {
 	gvk := key.GetGVK()
 	partobjs, err := DecodePartialObjects(serializer.FromBytes(content), s.serializer.Scheme(), false, &gvk)
 	if err != nil {
