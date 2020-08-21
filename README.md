@@ -198,7 +198,7 @@ f) as a `transaction.PullRequestResult` was returned (and not `transaction.Commi
 g) the PR will be created for the given branch, with assignees, labels and a milestone as configured
 h) once the PR is merged, the `git pull` loop will eventually download the new commit, and the inotify watch will tell which files were changed.
 
-#### Usage
+#### sample-gitops Usage
 
 ```console
 $ make
@@ -209,10 +209,54 @@ Usage of bin/sample-gitops:
     --author-name string     Author name for Git commits (default "Weave libgitops")
     --git-url string         HTTPS Git URL; where the Git repository is, e.g. https://github.com/luxas/ignite-gitops
     --identity-file string   Path to where the SSH private key is
+    --pr-assignees strings   What user logins to assign for the created PR. The user must have pull access to the repo.
+    --pr-milestone string    What milestone to tag the PR with
     --version                Show version information and exit
 ```
 
 You also need to set `GITHUB_TOKEN` in order to be able to create the PR.
+
+### sample-watch
+
+sample-watch demonstrates use of the inotify `GenericWatchStorage` on a customizable directory.
+
+When running it, create a file (e.g. the example above) anywhere in the folder you're watching.
+You'll see it being noticed in the log. Once that's done, you can curl it like this: `curl -sSL localhost:8888/watch/<name>`, where name equals `.metadata.name` of the object you just put in the dir.
+
+You can also write a new status using `curl -sSL -X PUT localhost:8888/watch/foo`, so that the next time you get it as per above, you can see the status has changed.
+
+#### sample-watch Usage
+
+```console
+$ make
+...
+$ bin/sample-watch --help
+Usage of bin/sample-watch:
+    --version            Show version information and exit
+    --watch-dir string   Where to watch for YAML/JSON manifests (default "/tmp/libgitops/watch")
+```
+
+### sample-app
+
+sample-app is using the `GenericStorage` and `GenericRawStorage` on the directory of your choice. The path where the objects are stored are of the form `<top-level-dir>/<kind>/<identifier>/metadata.json`.
+
+Use it as follows:
+
+a) create a new `Car` using `curl -sSL -X POST localhost:8888/plain/foo`
+b) see the object in e.g. using `cat /tmp/libgitops/manifest/Car/default/foo/metadata.yaml`
+c) get it through the webserver using `curl -sSL localhost:8888/plain/foo`
+d) update status through `curl -sSL -X PUT localhost:8888/plain/foo`
+
+#### sample-app Usage
+
+```console
+$ make
+...
+$ bin/sample-app --help
+Usage of bin/sample-app:
+    --data-dir string   Where to store the YAML files (default "/tmp/libgitops/manifest")
+    --version           Show version information and exit
+```
 
 ## Getting Help
 
