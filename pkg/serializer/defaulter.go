@@ -15,8 +15,8 @@ type defaulter struct {
 }
 
 // NewDefaultedObject returns a new, defaulted object. It is essentially scheme.New() and
-// scheme.Default(obj), but with extra logic to cover also internal versions.
-// Important to note here is that the TypeMeta information is NOT applied automatically here.
+// scheme.Default(obj), but with extra logic to also cover internal versions.
+// Important to note here is that the TypeMeta information is NOT applied automatically.
 func (d *defaulter) NewDefaultedObject(gvk schema.GroupVersionKind) (runtime.Object, error) {
 	obj, err := d.scheme.New(gvk)
 	if err != nil {
