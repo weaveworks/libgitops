@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/weaveworks/libgitops/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -19,7 +21,6 @@ import (
 	"github.com/weaveworks/libgitops/pkg/gitdir"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/storage"
-	"github.com/weaveworks/libgitops/pkg/storage/manifest"
 	"github.com/weaveworks/libgitops/pkg/storage/transaction"
 	githubpr "github.com/weaveworks/libgitops/pkg/storage/transaction/pullrequest/github"
 )
@@ -129,14 +130,17 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
 	// Set the log level
 	logs.Logger.SetLevel(logrus.InfoLevel)
 
-	watchStorage, err := manifest.NewManifestStorage(gitDir.Dir(), scheme.Serializer)
+	watchStorage, err := watch.NewManifestStorage(gitDir.Dir(), scheme.Serializer)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = watchStorage.Close() }()
 
+	updates := make(chan update.Update, 4096)
+	watchStorage.SetUpdateStream(updates)
+
 	go func() {
-		for upd := range watchStorage.GetUpdateStream() {
+		for upd := range updates {
 			logrus.Infof("Got %s update for: %v %v", upd.Event, upd.PartialObject.GetObjectKind().GroupVersionKind(), upd.PartialObject.GetObjectMeta())
 		}
 	}()

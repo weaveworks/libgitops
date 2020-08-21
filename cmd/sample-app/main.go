@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/weaveworks/libgitops/pkg/storage/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"net/http"
 	"os"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
-	"github.com/weaveworks/libgitops/pkg/storage/manifest"
 )
 
 const (
@@ -53,14 +54,17 @@ func run() error {
 	)
 	defer func() { _ = plainStorage.Close() }()
 
-	watchStorage, err := manifest.NewManifestStorage(WatchDir, scheme.Serializer)
+	watchStorage, err := watch.NewManifestStorage(WatchDir, scheme.Serializer)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = watchStorage.Close() }()
 
+	updates := make(chan update.Update, 4096)
+	watchStorage.SetUpdateStream(updates)
+
 	go func() {
-		for upd := range watchStorage.GetUpdateStream() {
+		for upd := range updates {
 			logrus.Infof("Got %s update for: %v %v", upd.Event, upd.PartialObject.GetObjectKind().GroupVersionKind(), upd.PartialObject.GetObjectMeta())
 		}
 	}()

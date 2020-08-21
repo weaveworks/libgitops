@@ -70,33 +70,50 @@ This extended `pkg/runtime.Object` is used heavily in the storage subsystem desc
 ## The storage system - `pkg/storage`
 
 The storage system is a collection of interfaces and reference implementations for storing Kubernetes-like objects
-(that comply to the extended `pkg/runtime.Object` described above). It can be thought of as a database abstraction layer for objects based on how the interfaces are laid out.
+(that comply to the extended `pkg/runtime.Object` described above). It can be thought of as a database abstraction layer
+for objects based on how the interfaces are laid out.
 
 There are three "layers" of storages:
 
 ### RawStorage interface
 
-The `RawStorage` interfaces deal with _bytes_, this includes `RawStorage` and `MappedRawStorage`. It is essentially a filesystem abstraction.
+The `RawStorage` interfaces deal with _bytes_, this includes `RawStorage` and `MappedRawStorage`. It is essentially a
+filesystem abstraction.
 
-- `GenericRawStorage` is a generic implementation of `RawStorage`, storing all objects as files on disk using the following path pattern: `<top-level-dir>/<kind>/<identifier>/metadata.json`.
-- `GenericMappedRawStorage` is a generic implementation of `MappedRawStorage`, keeping track of mappings between `ObjectKey`s and the real file path on disk. This might be used for e.g. a Git repository where the file structure and contents don't follow a specific format, but mappings need to be registered separately.
+- `GenericRawStorage` is a generic implementation of `RawStorage`, storing all objects as files on disk using the
+  following path pattern: `<top-level-dir>/<kind>/<identifier>/metadata.json`.
+- `GenericMappedRawStorage` is a generic implementation of `MappedRawStorage`, keeping track of mappings between
+  `ObjectKey`s and the real file path on disk. This might be used for e.g. a Git repository where the file structure
+  and contents don't follow a specific format, but mappings need to be registered separately.
 
 ### Storage interfaces
 
-"Generic" `Storage` interfaces deal with _objects_, this includes `Storage`, `TransactionStorage`, `WatchStorage` and `EventStorage`.
+"Generic" `Storage` interfaces deal with _objects_, this includes `Storage`, `TransactionStorage` and `EventStorage`.
 
-- The `Storage` interface is a union of two smaller interfaces, `ReadStorage` and `WriteStorage`. It exposes CRUD operations like `Get`, `List`, `Create`, `Update`, `Delete`.
-- `TransactionStorage` extends `ReadStorage` with a `Transaction` method, which temporarily gives access to also the `WriteStorage` part when the transaction is active.
-- `EventStorage` allows the user to subscribe to object events arising from changes by other actors in the system, e.g. a new object was added, or that someone changed or deleted some other object.
+- The `Storage` interface is a union of two smaller interfaces, `ReadStorage` and `WriteStorage`. It exposes CRUD
+  operations like `Get`, `List`, `Create`, `Update`, `Delete`.
+- `TransactionStorage` extends `ReadStorage` with a `Transaction` method, which temporarily gives access to also the
+  `WriteStorage` part when the transaction is active.
+- `EventStorage` allows the user to subscribe to object events arising from changes by other actors in the system, e.g.
+  a new object was added, or that someone changed or deleted some other object.
 
 ### Storage implementations
 
-"High-level" `Storage` implementations bind together multiple `Storage`s, this includes `GenericWatchStorage`, `GitStorage` and `ManifestStorage`.
+"High-level" `Storage` implementations bind together multiple `Storage`s, this includes `GenericWatchStorage`,
+`GitStorage` and `ManifestStorage`.
 
-- `GenericStorage` is a generic implementation of `Storage`, using the given `RawStorage` and `Serializer` to provide object operations to the user.
-- `GenericWatchStorage` is an implementation of `EventStorage`, using inotify to watch a directory on disk. It sends update events to a registered channel. It is a superset of and extends a given `Storage`.
-- `GitStorage` takes in a `GitDirectory` a `PullRequestProvider` and a `Serializer`. It watches for new commits automatically pulled by the `GitDirectory`, and re-syncs the underlying `GenericMappedRawStorage`. It implements the `TransactionStorage` interface, and when the transaction is active, allows writing which then yields a new branch and commit, pushed to the origin. Lastly, it can, using the `PullRequestProvider` create a Pull Request for the branch. In the future, it should also implement `EventStorage`.
-- `ManifestStorage` watches a directory on disk using `GenericWatchStorage`, uses a `GenericStorage` for object operations, and a `MappedRawStorage` for files. Using it, implementing `EventStorage`, you can subscribe to file update/create/delete events in a given directory, e.g. a cloned Git repository or "manifest directory".
+- `GenericStorage` is a generic implementation of `Storage`, using the given `RawStorage` and `Serializer` to provide
+  object operations to the user.
+- `GenericWatchStorage` is an implementation of `EventStorage`, using inotify to watch a directory on disk. It sends
+  update events to a registered channel. It is a superset of and extends a given `Storage`.
+- `GitStorage` takes in a `GitDirectory` a `PullRequestProvider` and a `Serializer`. It watches for new commits
+  automatically pulled by the `GitDirectory`, and re-syncs the underlying `GenericMappedRawStorage`. It implements
+  the `TransactionStorage` interface, and when the transaction is active, allows writing which then yields a new branch
+  and commit, pushed to the origin. Lastly, it can, using the `PullRequestProvider` create a Pull Request for the
+  branch. In the future, it should also implement `EventStorage`.
+- `ManifestStorage` watches a directory on disk using `GenericWatchStorage`, uses a `GenericStorage` for object
+  operations, and a `GenericMappedRawStorage` for files. Using it, implementing `EventStorage`, you can subscribe to 
+  file update/create/delete events in a given directory, e.g. a cloned Git repository or "manifest directory".
 
 **Example on how the storages interact:**
 

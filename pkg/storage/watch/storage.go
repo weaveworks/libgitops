@@ -5,6 +5,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/runtime"
+	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
@@ -13,25 +14,26 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// EventDeleteObjectName represents the name of the sent object in the GenericWatchStorage's event stream
-// when the given object was deleted
-const EventDeleteObjectName = "<deleted>"
+// NewManifestStorage returns a pre-configured GenericWatchStorage backed by a storage.GenericStorage,
+// and a GenericMappedRawStorage for the given manifestDir and Serializer. This should be sufficient
+// for most users that want to watch changes in a directory with manifests.
+func NewManifestStorage(manifestDir string, ser serializer.Serializer) (update.EventStorage, error) {
+	return NewGenericWatchStorage(
+		storage.NewGenericStorage(
+			storage.NewGenericMappedRawStorage(manifestDir),
+			ser,
+			[]runtime.IdentifierFactory{runtime.Metav1NameIdentifier},
+		),
+	)
+}
 
-// WatchStorage is an extended Storage implementation, which provides a watcher
+// NewGenericWatchStorage is an extended Storage implementation, which provides a watcher
 // for watching changes in the directory managed by the embedded Storage's RawStorage.
 // If the RawStorage is a MappedRawStorage instance, it's mappings will automatically
 // be updated by the WatchStorage. Update events are sent to the given event stream.
-type WatchStorage interface {
-	// WatchStorage extends the Storage interface
-	storage.Storage
-	// GetTrigger returns a hook that can be used to detect a watch event
-	SetUpdateStream(update.UpdateStream)
-}
-
-// NewGenericWatchStorage constructs a new WatchStorage.
-// Note: This WatchStorage only works for one-frame files (i.e. only one YAML document per
-// file is supported).
-func NewGenericWatchStorage(s storage.Storage) (WatchStorage, error) {
+// Note: This WatchStorage only works for one-frame files (i.e. only one YAML document
+// per file is supported).
+func NewGenericWatchStorage(s storage.Storage) (update.EventStorage, error) {
 	ws := &GenericWatchStorage{
 		Storage: s,
 	}
@@ -49,6 +51,10 @@ func NewGenericWatchStorage(s storage.Storage) (WatchStorage, error) {
 	return ws, nil
 }
 
+// EventDeleteObjectName is used as the name of an object sent to the
+// GenericWatchStorage's event stream when the the object has been deleted
+const EventDeleteObjectName = "<deleted>"
+
 // GenericWatchStorage implements the WatchStorage interface
 type GenericWatchStorage struct {
 	storage.Storage
@@ -57,7 +63,7 @@ type GenericWatchStorage struct {
 	monitor *sync.Monitor
 }
 
-var _ WatchStorage = &GenericWatchStorage{}
+var _ update.EventStorage = &GenericWatchStorage{}
 
 // Suspend modify events during Create
 func (s *GenericWatchStorage) Create(obj runtime.Object) error {
