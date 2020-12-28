@@ -146,7 +146,16 @@ func (r *GenericRawStorage) List(kind KindKey) ([]ObjectKey, error) {
 		return nil, err
 	}
 
-	entries, err := ioutil.ReadDir(r.kindKeyPath(kind))
+	// If the expected directory does not exist, just return an empty (nil) slice
+	dir := r.kindKeyPath(kind)
+	if ok, fi := util.PathExists(dir); !ok {
+		return nil, nil
+	} else if !fi.IsDir() {
+		return nil, fmt.Errorf("expected that %s is a directory", dir)
+	}
+
+	// When we know that path is a directory, go ahead and read it
+	entries, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
