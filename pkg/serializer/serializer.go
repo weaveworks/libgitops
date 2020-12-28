@@ -244,6 +244,10 @@ func prioritizedVersionForGroup(scheme *runtime.Scheme, groupName string) (schem
 }
 
 func GVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
+	// Safety check: one should not do this
+	if obj == nil || obj.GetObjectKind() == nil {
+		return schema.GroupVersionKind{}, fmt.Errorf("GVKForObject: obj or obj.GetObjectKind() must not be nil")
+	}
 	// If we already have TypeMeta filled in here, just use it
 	// TODO: This is probably not needed
 	gvk := obj.GetObjectKind().GroupVersionKind()
