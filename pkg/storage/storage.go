@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -202,6 +203,16 @@ func (s *GenericStorage) Patch(key ObjectKey, patch []byte) error {
 	oldContent, err := s.raw.Read(key)
 	if err != nil {
 		return err
+	}
+
+	// TODO: This is a bit of a hack, but for now this works. The patcher expects only JSON, hence
+	// we need to handle the case when raw.Read doesn't return JSON bytes. In the future however, this
+	// logic should probably be rewritten completely.
+	if s.raw.ContentType(key) == serializer.ContentTypeYAML {
+		oldContent, err = yaml.YAMLToJSONStrict(oldContent)
+		if err != nil {
+			return err
+		}
 	}
 
 	newContent, err := s.patcher.Apply(oldContent, patch, key.GetGVK())
