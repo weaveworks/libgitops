@@ -3,10 +3,12 @@ package serializer
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
+	"sigs.k8s.io/yaml"
 )
 
 // ContentType specifies a content type for Encoders, Decoders, FrameWriters and FrameReaders
@@ -22,13 +24,45 @@ const (
 	ContentTypeYAML = ContentType(runtime.ContentTypeYAML)
 )
 
-// ErrUnsupportedContentType is returned if the specified content type isn't supported
-var ErrUnsupportedContentType = errors.New("unsupported content type")
+var (
+	// ErrUnsupportedContentType is returned if the specified content type isn't supported
+	ErrUnsupportedContentType = errors.New("unsupported content type")
+	// ErrObjectIsNotList is returned when a runtime.Object was not a List type
+	ErrObjectIsNotList = errors.New("given runtime.Object is not a *List type, or does not implement metav1.ListInterface")
+)
 
 // ContentTyped is an interface for objects that are specific to a set ContentType.
 type ContentTyped interface {
 	// ContentType returns the ContentType (usually ContentTypeYAML or ContentTypeJSON) for the given object.
 	ContentType() ContentType
+}
+
+// JSONTransformer is an interface for transforming bytes to JSON from
+// a content-type specific implementation.
+type JSONTransformer interface {
+	ContentTyped
+	// TransformToJSON takes bytes of the supported ContentType, and
+	// returns JSON bytes.
+	TransformToJSON([]byte) ([]byte, error)
+}
+
+// ContentType implements JSONTransformer
+var _ JSONTransformer = ContentType("")
+
+func (ct ContentType) ContentType() ContentType { return ct }
+
+// TransformToJSON takes bytes of the supported ContentType, and
+// returns JSON bytes.
+func (ct ContentType) TransformToJSON(in []byte) ([]byte, error) {
+	// If the given content type already is JSON, then we're all good
+	switch ct {
+	case ContentTypeJSON:
+		return in, nil
+	case ContentTypeYAML:
+		return yaml.YAMLToJSONStrict(in)
+	default:
+		return nil, fmt.Errorf("%w: cannot transform %s to JSON", ErrUnsupportedContentType, ct)
+	}
 }
 
 // Serializer is an interface providing high-level decoding/encoding functionality
@@ -63,8 +97,10 @@ type Serializer interface {
 }
 
 type schemeAndCodec struct {
-	scheme *runtime.Scheme
-	codecs *k8sserializer.CodecFactory
+	// scheme is not thread-safe, hence it is guarded by a mutex
+	scheme   *runtime.Scheme
+	schemeMu *sync.Mutex
+	codecs   *k8sserializer.CodecFactory
 }
 
 // Encoder is a high-level interface for encoding Kubernetes API Machinery objects and writing them
@@ -188,8 +224,9 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 
 	return &serializer{
 		schemeAndCodec: &schemeAndCodec{
-			scheme: scheme,
-			codecs: codecs,
+			scheme:   scheme,
+			schemeMu: &sync.Mutex{},
+			codecs:   codecs,
 		},
 		converter: newConverter(scheme),
 		defaulter: newDefaulter(scheme),
@@ -241,28 +278,4 @@ func prioritizedVersionForGroup(scheme *runtime.Scheme, groupName string) (schem
 	}
 	// Use the first, preferred, (external) version
 	return gvs[0], nil
-}
-
-func GVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
-	// Safety check: one should not do this
-	if obj == nil || obj.GetObjectKind() == nil {
-		return schema.GroupVersionKind{}, fmt.Errorf("GVKForObject: obj or obj.GetObjectKind() must not be nil")
-	}
-	// If we already have TypeMeta filled in here, just use it
-	// TODO: This is probably not needed
-	gvk := obj.GetObjectKind().GroupVersionKind()
-	if !gvk.Empty() {
-		return gvk, nil
-	}
-
-	// TODO: If there are two GVKs returned, it's probably a misconfiguration in the scheme
-	// It might be expected though, and we can tolerate setting the GVK manually IFF there are more than
-	// one ObjectKind AND the given GVK is one of them.
-
-	// Get the possible kinds for the object
-	gvks, unversioned, err := scheme.ObjectKinds(obj)
-	if unversioned || err != nil || len(gvks) != 1 {
-		return schema.GroupVersionKind{}, fmt.Errorf("unversioned %t or err %v or invalid gvks %v", unversioned, err, gvks)
-	}
-	return gvks[0], nil
 }
