@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
-	"sigs.k8s.io/yaml"
+	serializeryaml "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 )
 
 // This is the groupversionkind for the v1.List object
@@ -274,7 +274,7 @@ func (d *decoder) decodeUnknown(doc []byte, ct ContentType) (runtime.Object, err
 
 func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
 	// Parse the document's TypeMeta information
-	gvk, err := extractYAMLTypeMeta(doc)
+	gvk, err := serializeryaml.DefaultMetaFactory.Interpret(doc)
 	if err != nil {
 		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. Decode error was: %w", err, origErr)
 	}
@@ -370,21 +370,6 @@ func newConversionCodecForScheme(
 	// a typer that recognizes metav1.PartialObjectMetadata{,List}
 	typer := &customTyper{scheme}
 	return versioning.NewCodec(encoder, decoder, convertor, scheme, typer, defaulter, encodeVersion, decodeVersion, scheme.Name())
-}
-
-// TODO: Use https://github.com/kubernetes/apimachinery/blob/master/pkg/runtime/serializer/yaml/meta.go
-// when we can assume everyone is vendoring k8s v1.19
-func extractYAMLTypeMeta(data []byte) (*schema.GroupVersionKind, error) {
-	typeMeta := runtime.TypeMeta{}
-	if err := yaml.Unmarshal(data, &typeMeta); err != nil {
-		return nil, fmt.Errorf("could not interpret GroupVersionKind: %w", err)
-	}
-	gv, err := schema.ParseGroupVersion(typeMeta.APIVersion)
-	if err != nil {
-		return nil, err
-	}
-	gvk := gv.WithKind(typeMeta.Kind)
-	return &gvk, nil
 }
 
 var _ runtime.ObjectTyper = &customTyper{}
