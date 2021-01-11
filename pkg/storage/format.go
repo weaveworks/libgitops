@@ -10,11 +10,11 @@ var ContentTypes = map[string]serializer.ContentType{
 	".yml":  serializer.ContentTypeYAML,
 }
 
+var extToContentType = map[serializer.ContentType]string{
+	serializer.ContentTypeJSON: ".json",
+	serializer.ContentTypeYAML: ".yaml",
+}
+
 func extForContentType(wanted serializer.ContentType) string {
-	for ext, ct := range ContentTypes {
-		if ct == wanted {
-			return ext
-		}
-	}
-	return ""
+	return extToContentType[wanted]
 }
