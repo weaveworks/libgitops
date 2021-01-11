@@ -1,16 +1,20 @@
 package serializer
 
 import (
-	"github.com/sirupsen/logrus"
+	"bytes"
+	"encoding/json"
+	"strings"
+
 	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type EncodingOptions struct {
-	// Use pretty printing when writing to the output. (Default: true)
-	// TODO: Fix that sometimes omitempty fields aren't respected
-	Pretty *bool
+	// Indent JSON encoding output with this many spaces. (Default: nil, means no indentation)
+	// Only applicable to ContentTypeJSON framers.
+	// TODO: Make this a property of the FrameWriter instead?
+	JSONIndent *int
 	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
 	// Only applicable to ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
@@ -24,8 +28,18 @@ type EncodingOptions struct {
 type EncodingOptionsFunc func(*EncodingOptions)
 
 func WithPrettyEncode(pretty bool) EncodingOptionsFunc {
+	if pretty {
+		return WithJSONIndent(2)
+	}
 	return func(opts *EncodingOptions) {
-		opts.Pretty = &pretty
+		// disable the indenting
+		opts.JSONIndent = nil
+	}
+}
+
+func WithJSONIndent(spaces int) EncodingOptionsFunc {
+	return func(opts *EncodingOptions) {
+		opts.JSONIndent = &spaces
 	}
 }
 
@@ -44,7 +58,7 @@ func WithEncodingOptions(newOpts EncodingOptions) EncodingOptionsFunc {
 
 func defaultEncodeOpts() *EncodingOptions {
 	return &EncodingOptions{
-		Pretty:           util.BoolPtr(true),
+		JSONIndent:       util.IntPtr(2), // Default to "pretty encoding"
 		PreserveComments: util.BoolPtr(false),
 	}
 }
@@ -75,6 +89,7 @@ func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodingOptions) Encoder {
 // internal object given to the preferred external groupversion. No conversion will happen
 // if the given object is of an external version.
 // TODO: This should automatically convert to the preferred version
+// TODO: Fix that sometimes omitempty fields aren't respected
 func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	for _, obj := range objs {
 		// Get the kind for the given object
@@ -110,22 +125,22 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 		return ErrUnsupportedContentType
 	}
 
-	// Choose the pretty or non-pretty one
+	// Choose the default, non-pretty serializer, as we prettify if needed later
+	// We technically could use the JSON PrettySerializer here, but it does not catch the
+	// cases where the JSON iterator invokes MarshalJSON() on an object, and that object
+	// returns non-pretty bytes (e.g. *unstructured.Unstructured). Hence, it is more robust
+	// and extensible to always use the non-pretty serializer, and only on request indent
+	// a given number of spaces after JSON encoding.
 	encoder := serializerInfo.Serializer
-
-	// Use the pretty serializer if it was asked for and is defined for the content type
-	if *e.opts.Pretty {
-		// Apparently not all SerializerInfos have this field defined (e.g. YAML)
-		// TODO: This could be considered a bug in upstream, create an issue
-		if serializerInfo.PrettySerializer != nil {
-			encoder = serializerInfo.PrettySerializer
-		} else {
-			logrus.Debugf("PrettySerializer for ContentType %s is nil, falling back to Serializer.", fw.ContentType())
-		}
-	}
 
 	// Get a version-specific encoder for the specified groupversion
 	versionEncoder := encoderForVersion(e.scheme, encoder, gv)
+
+	// Check if the user requested prettified JSON output.
+	// If the ContentType is JSON this is ok, we will intent the encode output on the fly.
+	if e.opts.JSONIndent != nil && fw.ContentType() == ContentTypeJSON {
+		fw = &jsonPrettyFrameWriter{indent: *e.opts.JSONIndent, fw: fw}
+	}
 
 	// Cast the object to a metav1.Object to get access to annotations
 	metaobj, ok := toMetaObject(obj)
@@ -149,4 +164,25 @@ func encoderForVersion(scheme *runtime.Scheme, encoder runtime.Encoder, gv schem
 		false,   // no defaulting
 		true,    // convert if needed before encode
 	)
+}
+
+type jsonPrettyFrameWriter struct {
+	indent int
+	fw     FrameWriter
+}
+
+func (w *jsonPrettyFrameWriter) Write(p []byte) (n int, err error) {
+	// Indent the source bytes
+	var indented bytes.Buffer
+	err = json.Indent(&indented, p, "", strings.Repeat(" ", w.indent))
+	if err != nil {
+		return
+	}
+	// Write the pretty bytes to the underlying writer
+	n, err = w.fw.Write(indented.Bytes())
+	return
+}
+
+func (w *jsonPrettyFrameWriter) ContentType() ContentType {
+	return w.fw.ContentType()
 }
