@@ -169,7 +169,8 @@ func (c *objectConvertor) ConvertToVersion(in runtime.Object, groupVersioner run
 	// as before, using the scheme's ConvertToVersion function. But if we don't want to convert the newly-decoded
 	// external object, we can just do nothing and the object will stay unconverted.
 	// doConversion is always true in the Encode codepath.
-	if !c.doConversion {
+	// Also, never convert unknown, partial metadata or unstructured objects (defined as "non-convertible").
+	if !c.doConversion || IsNonConvertible(in) {
 		// DeepCopy the object to make sure that although in would be somehow modified, it doesn't affect out
 		return in.DeepCopyObject(), nil
 	}

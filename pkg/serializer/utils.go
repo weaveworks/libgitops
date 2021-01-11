@@ -92,15 +92,13 @@ func IsPartialObjectList(obj runtime.Object) bool {
 	return isPartialList
 }
 
-func IsPartialObjectMetadataOrList(obj runtime.Object) bool {
-	return IsPartialObject(obj) || IsPartialObjectList(obj)
-}
-
 func IsUnstructured(obj runtime.Object) bool {
 	_, isUnstructured := obj.(runtime.Unstructured)
 	return isUnstructured
 }
 
+// IsNonConvertible returns true for unstructured, partial and unknown objects
+// that should not be converted.
 func IsNonConvertible(obj runtime.Object) bool {
-	return IsUnstructured(obj) || IsPartialObjectMetadataOrList(obj)
+	return IsUnstructured(obj) || IsPartialObject(obj) || IsPartialObjectList(obj) || IsUnknown(obj)
 }
