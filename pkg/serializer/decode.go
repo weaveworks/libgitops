@@ -367,7 +367,9 @@ func newConversionCodecForScheme(
 		defaulter = scheme
 	}
 	convertor := newObjectConvertor(scheme, performConversion)
-	return versioning.NewCodec(encoder, decoder, convertor, scheme, scheme, defaulter, encodeVersion, decodeVersion, scheme.Name())
+	// a typer that recognizes metav1.PartialObjectMetadata{,List}
+	typer := &customTyper{scheme}
+	return versioning.NewCodec(encoder, decoder, convertor, scheme, typer, defaulter, encodeVersion, decodeVersion, scheme.Name())
 }
 
 // TODO: Use https://github.com/kubernetes/apimachinery/blob/master/pkg/runtime/serializer/yaml/meta.go
@@ -383,4 +385,35 @@ func extractYAMLTypeMeta(data []byte) (*schema.GroupVersionKind, error) {
 	}
 	gvk := gv.WithKind(typeMeta.Kind)
 	return &gvk, nil
+}
+
+var _ runtime.ObjectTyper = &customTyper{}
+
+type customTyper struct {
+	scheme *runtime.Scheme
+}
+
+// ObjectKinds is an extension to the native Scheme.ObjectKinds function, that also
+// recognizes partial matadata objects and lists. The logic here follows closely the
+// scheme's own logic.
+func (t *customTyper) ObjectKinds(obj runtime.Object) ([]schema.GroupVersionKind, bool, error) {
+	// partial objects are always fine to encode/decode as-is when GVK is set.
+	// this similar code exists in runtime.Scheme.ObjectKinds for reference.
+	if IsPartialObject(obj) || IsPartialObjectList(obj) {
+		// we require that the GVK be populated in order to recognize the object
+		gvk := obj.GetObjectKind().GroupVersionKind()
+		if len(gvk.Kind) == 0 {
+			return nil, false, runtime.NewMissingKindErr("unstructured object has no kind")
+		}
+		if len(gvk.Version) == 0 {
+			return nil, false, runtime.NewMissingVersionErr("unstructured object has no version")
+		}
+		return []schema.GroupVersionKind{gvk}, false, nil
+	}
+	return t.scheme.ObjectKinds(obj)
+}
+
+// Recognizes just calls the underlying Scheme.Recognizes
+func (t *customTyper) Recognizes(gvk schema.GroupVersionKind) bool {
+	return t.scheme.Recognizes(gvk)
 }
