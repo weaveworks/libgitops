@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
@@ -71,6 +72,7 @@ func NewJSONFrameReader(rc ReadCloser) FrameReader {
 func newFrameReader(rc io.ReadCloser, contentType ContentType) *frameReader {
 	return &frameReader{
 		rc:           rc,
+		rcMu:         &sync.Mutex{},
 		bufSize:      defaultBufSize,
 		maxFrameSize: defaultMaxFrameSize,
 		contentType:  contentType,
@@ -79,12 +81,13 @@ func newFrameReader(rc io.ReadCloser, contentType ContentType) *frameReader {
 
 // frameReader is a FrameReader implementation
 type frameReader struct {
-	rc           io.ReadCloser
+	// the underlying readcloser and the mutex that guards it
+	rc   io.ReadCloser
+	rcMu *sync.Mutex
+
 	bufSize      int
 	maxFrameSize int
 	contentType  ContentType
-
-	// TODO: Maybe add mutexes for thread-safety (so no two goroutines read at the same time)
 }
 
 // ReadFrame reads one frame from the underlying io.Reader. ReadFrame
@@ -93,6 +96,10 @@ type frameReader struct {
 // ReadFrame keeps on reading using new calls. ReadFrame might return both data and
 // io.EOF. io.EOF will be returned in the final call.
 func (rf *frameReader) ReadFrame() (frame []byte, err error) {
+	// Only one actor can read at a time
+	rf.rcMu.Lock()
+	defer rf.rcMu.Unlock()
+
 	// Temporary buffer to parts of a frame into
 	var buf []byte
 	// How many bytes were read by the read call
@@ -149,6 +156,10 @@ func (rf *frameReader) ContentType() ContentType {
 
 // Close implements io.Closer and closes the underlying ReadCloser
 func (rf *frameReader) Close() error {
+	// Only one actor can access rf.rc at a time
+	rf.rcMu.Lock()
+	defer rf.rcMu.Unlock()
+
 	return rf.rc.Close()
 }
 
@@ -166,3 +177,41 @@ func FromFile(filePath string) ReadCloser {
 func FromBytes(content []byte) ReadCloser {
 	return ioutil.NopCloser(bytes.NewReader(content))
 }
+
+// NewSingleFrameReader returns a FrameReader for only a single frame of
+// the specified content type. This avoids overhead if it is known that the
+// byte array only contains one frame. The given frame is returned in
+// whole in the first ReadFrame() call, and io.EOF is returned in all future
+// invocations.
+func NewSingleFrameReader(b []byte, ct ContentType) FrameReader {
+	return &singleFrameReader{
+		ct:            ct,
+		b:             b,
+		hasBeenRead:   false,
+		hasBeenReadMu: &sync.Mutex{},
+	}
+}
+
+var _ FrameReader = &singleFrameReader{}
+
+type singleFrameReader struct {
+	ct            ContentType
+	b             []byte
+	hasBeenRead   bool
+	hasBeenReadMu *sync.Mutex
+}
+
+func (r *singleFrameReader) ReadFrame() ([]byte, error) {
+	r.hasBeenReadMu.Lock()
+	defer r.hasBeenReadMu.Unlock()
+	// If ReadFrame() has been called once, just return io.EOF.
+	if r.hasBeenRead {
+		return nil, io.EOF
+	}
+	// The first time, mark that we've read, and return the single frame
+	r.hasBeenRead = true
+	return r.b, nil
+}
+
+func (r *singleFrameReader) ContentType() ContentType { return r.ct }
+func (r *singleFrameReader) Close() error             { return nil }
