@@ -149,8 +149,14 @@ func (d *decoder) Decode(fr FrameReader) (runtime.Object, error) {
 func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runtime.Object, error) {
 	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
 	// make the scheme able to decode the v1.List automatically
-	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
-		d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
+	if *d.opts.DecodeListElements {
+		// As .AddKnownTypes is writing to the scheme, make sure we guard the check and the write with a
+		// mutex.
+		d.schemeMu.Lock()
+		if !d.scheme.Recognizes(listGVK) {
+			d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
+		}
+		d.schemeMu.Unlock()
 	}
 
 	// Record if this decode call should have runtime.DecodeInto-functionality
