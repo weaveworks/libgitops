@@ -43,6 +43,10 @@ func BoolPtr(b bool) *bool {
 	return &b
 }
 
+func IntPtr(i int) *int {
+	return &i
+}
+
 // RandomSHA returns a hex-encoded string from {byteLen} random bytes.
 func RandomSHA(byteLen int) (string, error) {
 	b := make([]byte, byteLen)
