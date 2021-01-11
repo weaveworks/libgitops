@@ -72,13 +72,13 @@ type Serializer interface {
 	// a FrameWriter. The decoder can be customized by passing some options (e.g. WithDecodingOptions)
 	// to this call.
 	// The decoder supports both "classic" API Machinery objects and controller-runtime CRDs
-	Decoder(optsFn ...DecodingOptionsFunc) Decoder
+	Decoder(optsFn ...DecodeOption) Decoder
 
 	// Encoder is a high-level interface for encoding Kubernetes API Machinery objects and writing them
 	// to a FrameWriter. The encoder can be customized by passing some options (e.g. WithEncodingOptions)
 	// to this call.
 	// The encoder supports both "classic" API Machinery objects and controller-runtime CRDs
-	Encoder(optsFn ...EncodingOptionsFunc) Encoder
+	Encoder(optsFn ...EncodeOption) Encoder
 
 	// Converter is a high-level interface for converting objects between different versions
 	// The converter supports both "classic" API Machinery objects and controller-runtime CRDs
@@ -252,14 +252,12 @@ func (s *serializer) Codecs() *k8sserializer.CodecFactory {
 	return s.codecs
 }
 
-func (s *serializer) Decoder(optFns ...DecodingOptionsFunc) Decoder {
-	opts := newDecodeOpts(optFns...)
-	return newDecoder(s.schemeAndCodec, *opts)
+func (s *serializer) Decoder(opts ...DecodeOption) Decoder {
+	return newDecoder(s.schemeAndCodec, *defaultDecodeOpts().ApplyOptions(opts))
 }
 
-func (s *serializer) Encoder(optFns ...EncodingOptionsFunc) Encoder {
-	opts := newEncodeOpts(optFns...)
-	return newEncoder(s.schemeAndCodec, *opts)
+func (s *serializer) Encoder(opts ...EncodeOption) Encoder {
+	return newEncoder(s.schemeAndCodec, *defaultEncodeOpts().ApplyOptions(opts))
 }
 
 func (s *serializer) Converter() Converter {

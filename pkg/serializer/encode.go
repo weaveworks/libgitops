@@ -5,83 +5,21 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/weaveworks/libgitops/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-type EncodingOptions struct {
-	// Indent JSON encoding output with this many spaces. (Default: nil, means no indentation)
-	// Only applicable to ContentTypeJSON framers.
-	// TODO: Make this a property of the FrameWriter instead?
-	JSONIndent *int
-	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
-	// Only applicable to ContentTypeYAML framers.
-	// Using any other framer will be silently ignored. Usage of this option also requires setting
-	// the PreserveComments in DecodingOptions, too. (Default: false)
-	// TODO: Make this a BestEffort & Strict mode
-	PreserveComments *bool
-
-	// TODO: Maybe consider an option to always convert to the preferred version (not just internal)
-}
-
-type EncodingOptionsFunc func(*EncodingOptions)
-
-func WithPrettyEncode(pretty bool) EncodingOptionsFunc {
-	if pretty {
-		return WithJSONIndent(2)
+func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodeOptions) Encoder {
+	return &encoder{
+		schemeAndCodec,
+		opts,
 	}
-	return func(opts *EncodingOptions) {
-		// disable the indenting
-		opts.JSONIndent = nil
-	}
-}
-
-func WithJSONIndent(spaces int) EncodingOptionsFunc {
-	return func(opts *EncodingOptions) {
-		opts.JSONIndent = &spaces
-	}
-}
-
-func WithCommentsEncode(comments bool) EncodingOptionsFunc {
-	return func(opts *EncodingOptions) {
-		opts.PreserveComments = &comments
-	}
-}
-
-func WithEncodingOptions(newOpts EncodingOptions) EncodingOptionsFunc {
-	return func(opts *EncodingOptions) {
-		// TODO: Null-check all of these before using them
-		*opts = newOpts
-	}
-}
-
-func defaultEncodeOpts() *EncodingOptions {
-	return &EncodingOptions{
-		JSONIndent:       util.IntPtr(2), // Default to "pretty encoding"
-		PreserveComments: util.BoolPtr(false),
-	}
-}
-
-func newEncodeOpts(fns ...EncodingOptionsFunc) *EncodingOptions {
-	opts := defaultEncodeOpts()
-	for _, fn := range fns {
-		fn(opts)
-	}
-	return opts
 }
 
 type encoder struct {
 	*schemeAndCodec
 
-	opts EncodingOptions
-}
-
-func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodingOptions) Encoder {
-	return &encoder{
-		schemeAndCodec,
-		opts,
-	}
+	opts EncodeOptions
 }
 
 // Encode encodes the given objects and writes them to the specified FrameWriter.
@@ -138,7 +76,7 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 
 	// Check if the user requested prettified JSON output.
 	// If the ContentType is JSON this is ok, we will intent the encode output on the fly.
-	if e.opts.JSONIndent != nil && fw.ContentType() == ContentTypeJSON {
+	if *e.opts.JSONIndent > 0 && fw.ContentType() == ContentTypeJSON {
 		fw = &jsonPrettyFrameWriter{indent: *e.opts.JSONIndent, fw: fw}
 	}
 

@@ -5,7 +5,6 @@ import (
 	"io"
 	"reflect"
 
-	"github.com/weaveworks/libgitops/pkg/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -17,107 +16,23 @@ import (
 // This is the groupversionkind for the v1.List object
 var listGVK = metav1.Unversioned.WithKind("List")
 
-type DecodingOptions struct {
-	// Not applicable for Decoder.DecodeInto(). If true, the decoded external object
-	// will be converted into its hub (or internal, where applicable) representation. Otherwise, the decoded
-	// object will be left in its external representation. (Default: false)
-	ConvertToHub *bool
+func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodeOptions) Decoder {
+	// Allow both YAML and JSON inputs (JSON is a subset of YAML), and deserialize in strict mode
+	s := json.NewSerializerWithOptions(json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme, json.SerializerOptions{
+		Yaml:   true,
+		Strict: *opts.Strict,
+	})
 
-	// Parse the YAML/JSON in strict mode, returning a specific error if the input
-	// contains duplicate or unknown fields or formatting errors. (Default: true)
-	Strict *bool
+	decodeCodec := decoderForVersion(schemeAndCodec.scheme, s, *opts.Default, *opts.ConvertToHub)
 
-	// Automatically default the decoded object. (Default: false)
-	Default *bool
-
-	// Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
-	// the items of the list will be traversed, decoded into their respective types, and
-	// appended to the returned slice. The v1.List will in this case not be returned.
-	// This conversion does NOT support preserving comments. If the given scheme doesn't
-	// recognize the v1.List, before using it will be registered automatically. (Default: true)
-	DecodeListElements *bool
-
-	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
-	// Only applicable to ContentTypeYAML framers.
-	// Using any other framer will be silently ignored. Usage of this option also requires setting
-	// the PreserveComments in EncodingOptions, too. (Default: false)
-	PreserveComments *bool
-
-	// DecodeUnknown specifies whether decode objects with an unknown GroupVersionKind into a
-	// *runtime.Unknown object when running Decode(All) (true value) or to return an error when
-	// any unrecognized type is found (false value). (Default: false)
-	DecodeUnknown *bool
-}
-
-type DecodingOptionsFunc func(*DecodingOptions)
-
-func WithConvertToHubDecode(convert bool) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		opts.ConvertToHub = &convert
-	}
-}
-
-func WithStrictDecode(strict bool) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		opts.Strict = &strict
-	}
-}
-
-func WithDefaultsDecode(defaults bool) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		opts.Default = &defaults
-	}
-}
-
-func WithListElementsDecoding(listElements bool) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		opts.DecodeListElements = &listElements
-	}
-}
-
-func WithCommentsDecode(comments bool) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		opts.PreserveComments = &comments
-	}
-}
-
-func WithUnknownDecode(unknown bool) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		opts.DecodeUnknown = &unknown
-	}
-}
-
-func WithDecodingOptions(newOpts DecodingOptions) DecodingOptionsFunc {
-	return func(opts *DecodingOptions) {
-		// TODO: Null-check all of these before using them
-		*opts = newOpts
-	}
-}
-
-func defaultDecodeOpts() *DecodingOptions {
-	return &DecodingOptions{
-		ConvertToHub:       util.BoolPtr(false),
-		Strict:             util.BoolPtr(true),
-		Default:            util.BoolPtr(false),
-		DecodeListElements: util.BoolPtr(true),
-		PreserveComments:   util.BoolPtr(false),
-		DecodeUnknown:      util.BoolPtr(false),
-	}
-}
-
-func newDecodeOpts(fns ...DecodingOptionsFunc) *DecodingOptions {
-	opts := defaultDecodeOpts()
-	for _, fn := range fns {
-		fn(opts)
-	}
-	return opts
+	return &decoder{schemeAndCodec, decodeCodec, opts}
 }
 
 type decoder struct {
 	*schemeAndCodec
 
 	decoder runtime.Decoder
-	opts    DecodingOptions
+	opts    DecodeOptions
 }
 
 // Decode returns the decoded object from the next document in the FrameReader stream.
@@ -324,18 +239,6 @@ func (d *decoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]ru
 		objs = append(objs, listobj)
 	}
 	return objs, nil
-}
-
-func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodingOptions) Decoder {
-	// Allow both YAML and JSON inputs (JSON is a subset of YAML), and deserialize in strict mode
-	s := json.NewSerializerWithOptions(json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme, json.SerializerOptions{
-		Yaml:   true,
-		Strict: *opts.Strict,
-	})
-
-	decodeCodec := decoderForVersion(schemeAndCodec.scheme, s, *opts.Default, *opts.ConvertToHub)
-
-	return &decoder{schemeAndCodec, decodeCodec, opts}
 }
 
 // decoderForVersion is used instead of CodecFactory.DecoderForVersion, as we want to use our own converter
