@@ -2,76 +2,69 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
-	"github.com/sirupsen/logrus"
+	"github.com/fluxcd/go-git-providers/validation"
 	"github.com/weaveworks/libgitops/pkg/filter"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/yaml"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type NewObjectFunc func() (Object, error)
+
 var (
+	// TODO: Return the same errors as k8s does
 	// ErrAmbiguousFind is returned when the user requested one object from a List+Filter process.
 	ErrAmbiguousFind = errors.New("two or more results were aquired when one was expected")
 	// ErrNotFound is returned when the requested resource wasn't found.
 	ErrNotFound = errors.New("resource not found")
 	// ErrAlreadyExists is returned when when WriteStorage.Create is called for an already stored object.
 	ErrAlreadyExists = errors.New("resource already exists")
+	// ErrCannotSaveMetadata is returned if the user tries to save metadata-only objects
+	ErrCannotSaveMetadata = errors.New("cannot save (Create|Update|Patch) *metav1.PartialObjectMetadata")
+	// ErrNameRequired is returned when .metadata.name is unset
+	// TODO: Support generateName?
+	ErrNameRequired = errors.New(".metadata.name is required")
+	// ErrUnsupportedPatchType is returned when an unsupported patch type is used
+	ErrUnsupportedPatchType = errors.New("unsupported patch type")
 )
 
-type ReadStorage interface {
-	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
-	// If the resource referred to by the given ObjectKey does not exist, Get returns ErrNotFound.
-	Get(key ObjectKey) (runtime.Object, error)
+const (
+	namespaceListKind = "NamespaceList"
+)
 
-	// List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
-	// for more information, e.g. filter.NameFilter{} and filter.UIDFilter{})
-	List(kind KindKey, opts ...filter.ListOption) ([]runtime.Object, error)
+var v1GroupKind = schema.GroupVersion{Group: "", Version: "v1"}
 
-	// Find does a List underneath, also using filters, but always returns one object. If the List
-	// underneath returned two or more results, ErrAmbiguousFind is returned. If no match was found,
-	// ErrNotFound is returned.
-	Find(kind KindKey, opts ...filter.ListOption) (runtime.Object, error)
+type ObjectID interface {
+	GroupVersionKind() schema.GroupVersionKind
+	GetName() string
+	GetNamespace() string
+	GetLabels() map[string]string
+}
 
-	//
-	// Partial object getters.
-	// TODO: Figure out what we should do with these, do we need them and if so where?
-	//
+func foo() {
+	var _ ObjectID = &metav1.PartialObjectMetadata{}
+}
 
-	// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path.
-	// If the resource referred to by the given ObjectKey does not exist, GetMeta returns ErrNotFound.
-	GetMeta(key ObjectKey) (runtime.PartialObject, error)
-	// ListMeta lists all Objects' APIType representation. In other words,
-	// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
-	// This allows for faster runs (no need to unmarshal "the world"), and less
-	// resource usage, when only metadata is unmarshalled into memory
-	ListMeta(kind KindKey) ([]runtime.PartialObject, error)
-
-	//
-	// Cache-related methods.
-	//
-
-	// Checksum returns a string representing the state of an Object on disk
-	// The checksum should change if any modifications have been made to the
-	// Object on disk, it can be e.g. the Object's modification timestamp or
-	// calculated checksum. If the Object is not found, ErrNotFound is returned.
-	Checksum(key ObjectKey) (string, error)
-	// Count returns the amount of available Objects of a specific kind
-	// This is used by Caches to check if all Objects are cached to perform a List
-	Count(kind KindKey) (uint64, error)
-
+type CommonStorage interface {
 	//
 	// Access to underlying Resources.
 	//
 
 	// RawStorage returns the RawStorage instance backing this Storage
+	// It is expected that RawStorage only operates on one "frame" at a time in its Read/Write operations.
 	RawStorage() RawStorage
 	// Serializer returns the serializer
 	Serializer() serializer.Serializer
@@ -80,24 +73,26 @@ type ReadStorage interface {
 	// Misc methods.
 	//
 
-	// ObjectKeyFor returns the ObjectKey for the given object
-	ObjectKeyFor(obj runtime.Object) (ObjectKey, error)
 	// Close closes all underlying resources (e.g. goroutines) used; before the application exits
 	Close() error
 }
 
-type WriteStorage interface {
-	// Create creates an entry for and stores the given Object in the storage. The Object must be new to the storage.
-	// The ObjectMeta.CreationTimestamp field is set automatically to the current time if it is unset.
-	Create(obj runtime.Object) error
-	// Update updates the state of the given Object in the storage. The Object must exist in the storage.
-	// The ObjectMeta.CreationTimestamp field is set automatically to the current time if it is unset.
-	Update(obj runtime.Object) error
+// ReadStorage TODO
+type ReadStorage interface {
+	CommonStorage
 
-	// Patch performs a strategic merge patch on the Object with the given UID, using the byte-encoded patch given
-	Patch(key ObjectKey, patch []byte) error
-	// Delete removes an Object from the storage
-	Delete(key ObjectKey) error
+	client.Reader
+	// TODO: In the future to support indexing "custom" fields.
+	// Normal fields (not counting arrays) could be supported using
+	// kruntime.DefaultUnstructuredConverter.ToUnstructured() in
+	// filter.FieldFilter
+	// client.FieldIndexer
+}
+
+type WriteStorage interface {
+	CommonStorage
+	client.Writer
+	//client.StatusClient
 }
 
 // Storage is an interface for persisting and retrieving API objects to/from a backend
@@ -105,19 +100,19 @@ type WriteStorage interface {
 type Storage interface {
 	ReadStorage
 	WriteStorage
+	//client.Client
 }
 
 // NewGenericStorage constructs a new Storage
-func NewGenericStorage(rawStorage RawStorage, serializer serializer.Serializer, identifiers []runtime.IdentifierFactory) Storage {
-	return &GenericStorage{rawStorage, serializer, patchutil.NewPatcher(serializer), identifiers}
+func NewGenericStorage(rawStorage RawStorage, serializer serializer.Serializer, enforcer NamespaceEnforcer) Storage {
+	return &GenericStorage{rawStorage, serializer, enforcer}
 }
 
 // GenericStorage implements the Storage interface
 type GenericStorage struct {
-	raw         RawStorage
-	serializer  serializer.Serializer
-	patcher     patchutil.Patcher
-	identifiers []runtime.IdentifierFactory
+	raw        RawStorage
+	serializer serializer.Serializer
+	enforcer   NamespaceEnforcer
 }
 
 var _ Storage = &GenericStorage{}
@@ -126,32 +121,266 @@ func (s *GenericStorage) Serializer() serializer.Serializer {
 	return s.serializer
 }
 
-// Get returns a new Object for the resource at the specified kind/uid path, based on the file content
-func (s *GenericStorage) Get(key ObjectKey) (runtime.Object, error) {
-	content, err := s.raw.Read(key)
+// Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
+// In order to only extract the metadata of this object, pass in a *metav1.PartialObjectMetadata
+func (s *GenericStorage) Get(ctx context.Context, name NamespacedName, obj Object) error {
+	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
+	if err != nil {
+		return err
+	}
+
+	key := NewObjectKey(gvk, name)
+	content, err := s.raw.Read(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	ct := s.raw.ContentType(ctx, key)
+	// TODO: Support various decoding options, e.g. defaulting?
+	return s.serializer.Decoder().DecodeInto(serializer.NewSingleFrameReader(content, ct), obj)
+}
+
+// List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
+// for more information, e.g. filter.NameFilter{} and filter.UIDFilter{})
+// You can also pass in an *unstructured.UnstructuredList to get an unknown type's data or
+// *metav1.PartialObjectMetadataList to just get the metadata of all objects of the specified gvk.
+// If you do specify either an *unstructured.UnstructuredList or *metav1.PartialObjectMetadataList,
+// you need to populate TypeMeta with the GVK you want back.
+// TODO: Check if this works with metav1.List{}
+func (s *GenericStorage) List(ctx context.Context, list ObjectList, opts ...client.ListOption) error {
+	// This call will verify that list actually is a List type.
+	gvk, err := serializer.GVKForList(list, s.serializer.Scheme())
+	if err != nil {
+		return err
+	}
+	// This applies both upstream and custom options
+	listOpts := (&ListOptions{}).ApplyOptions(opts)
+
+	// Do an internal list to get all objects
+	keys, err := s.raw.List(ctx, gvk)
+	if err != nil {
+		return err
+	}
+
+	ch := make(chan Object, len(keys)) // TODO: This could be less
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	var processErr error
+	go func() {
+		createFunc := createObject(gvk, s.serializer.Scheme())
+		if serializer.IsPartialObjectList(list) {
+			createFunc = createPartialObject(gvk)
+		} else if serializer.IsUnstructuredList(list) {
+			createFunc = createUnstructuredObject(gvk)
+		}
+		processErr = s.processKeys(ctx, keys, &listOpts.FilterOptions, createFunc, ch)
+		wg.Done()
+	}()
+
+	objs := make([]kruntime.Object, 0, len(keys))
+	for o := range ch {
+		objs = append(objs, o)
+	}
+	// Wait for processErr to be set, and the above goroutine to finish
+	wg.Wait()
+	if processErr != nil {
+		return processErr
+	}
+
+	// Populate the List's Items field with the objects returned
+	meta.SetList(list, objs)
+	return nil
+}
+
+func (s *GenericStorage) Create(ctx context.Context, obj Object, _ ...client.CreateOption) error {
+	// We must never save metadata-only structs
+	if serializer.IsPartialObject(obj) {
+		return ErrCannotSaveMetadata
+	}
+
+	key, err := s.objectKeyForObj(ctx, obj)
+	if err != nil {
+		return nil
+	}
+
+	if s.raw.Exists(ctx, key) {
+		return ErrAlreadyExists
+	}
+
+	// The object was not found so we can safely create it
+	return s.write(ctx, key, obj)
+}
+
+// Note: This should also work for unstructured and partial metadata objects
+func (s *GenericStorage) objectKeyForObj(ctx context.Context, obj Object) (ObjectKey, error) {
+	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.decode(key, content)
-}
+	// Object must always have .metadata.name set
+	if len(obj.GetName()) == 0 {
+		return nil, ErrNameRequired
+	}
 
-// TODO: Verify this works
-// GetMeta returns a new Object's APIType representation for the resource at the specified kind/uid path
-func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.PartialObject, error) {
-	content, err := s.raw.Read(key)
+	// Check if the GroupKind is namespaced
+	namespaced, err := s.raw.Namespacer().IsNamespaced(gvk.GroupKind())
 	if err != nil {
 		return nil, err
 	}
 
-	return s.decodeMeta(key, content)
+	var namespaces sets.String
+	// If the namespace enforcer requires listing all the other namespaces,
+	// look them up
+	if s.enforcer.RequireNamespaceExists() {
+		nsList := &metav1.PartialObjectMetadataList{}
+		nsList.SetGroupVersionKind(v1GroupKind.WithKind(namespaceListKind))
+		if err := s.List(ctx, nsList); err != nil {
+			return nil, err
+		}
+		namespaces = sets.NewString()
+		for _, ns := range nsList.Items {
+			namespaces.Insert(ns.GetName())
+		}
+	}
+	// Enforce the given namespace policy. This might mutate obj
+	if err := s.enforcer.EnforceNamespace(obj, namespaced, namespaces); err != nil {
+		return nil, err
+	}
+
+	// At this point we know name is non-empty, and the namespace field is correct,
+	// according to policy
+	return NewObjectKey(gvk, NamespacedName{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+	}), nil
 }
 
-// TODO: Make sure we don't save a partial object
-func (s *GenericStorage) write(key ObjectKey, obj runtime.Object) error {
+func (s *GenericStorage) Update(ctx context.Context, obj Object, _ ...client.UpdateOption) error {
+	// We must never save metadata-only structs
+	if serializer.IsPartialObject(obj) {
+		return ErrCannotSaveMetadata
+	}
+
+	key, err := s.objectKeyForObj(ctx, obj)
+	if err != nil {
+		return nil
+	}
+
+	return s.update(ctx, obj, key)
+}
+
+func (s *GenericStorage) update(ctx context.Context, obj Object, key ObjectKey) error {
+	if !s.raw.Exists(ctx, key) {
+		return ErrNotFound
+	}
+
+	// TODO: Validation?
+
+	// The object was found so we can safely update it
+	return s.write(ctx, key, obj)
+}
+
+// Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
+func (s *GenericStorage) Patch(ctx context.Context, obj Object, patch Patch, _ ...client.PatchOption) error {
+	// We must never save metadata-only structs
+	if serializer.IsPartialObject(obj) {
+		return ErrCannotSaveMetadata
+	}
+
+	// Acquire the patch data from the "desired state" object given now, i.e. in MergeFrom{}
+	// TODO: Shall we require GVK to be present here using a meta interpreter?
+	patchJSON, err := patch.Data(obj)
+	if err != nil {
+		return err
+	}
+
+	// Get the object key for obj, this validates GVK, name and namespace
+	// We need to do this before Get to be consistent with Update & Delete
+	key, err := s.objectKeyForObj(ctx, obj)
+	if err != nil {
+		return err
+	}
+
+	// Load the current latest state into obj temporarily, before patching it
+	if err := s.Get(ctx, key.NamespacedName(), obj); err != nil {
+		return err
+	}
+
+	// Get the right BytePatcher for this patch type
+	bytePatcher := patchutil.BytePatcherForType(patch.Type())
+	if bytePatcher == nil {
+		return fmt.Errorf("patch type not supported: %s", patch.Type())
+	}
+
+	// Apply the patch into the object using the given byte patcher
+	if unstruct, ok := obj.(kruntime.Unstructured); ok {
+		// TODO: Provide an option for the schema
+		err = s.serializer.Patcher().ApplyOnUnstructured(bytePatcher, patchJSON, unstruct, nil)
+	} else {
+		err = s.serializer.Patcher().ApplyOnStruct(bytePatcher, patchJSON, obj)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Perform an update internally, similar to what .Update would yield
+	// TODO: Maybe write to storage conditionally?
+	return s.update(ctx, obj, key)
+}
+
+// Delete removes an Object from the storage
+// PartialObjectMetadata should work here.
+func (s *GenericStorage) Delete(ctx context.Context, obj Object, _ ...client.DeleteOption) error {
+	// Get the key for the object
+	key, err := s.objectKeyForObj(ctx, obj)
+	if err != nil {
+		return err
+	}
+
+	// Verify it did exist
+	if !s.raw.Exists(ctx, key) {
+		return ErrNotFound
+	}
+
+	// Delete it from the underlying storage
+	return s.raw.Delete(ctx, key)
+}
+
+// DeleteAllOf deletes all matched resources by first doing a List() operation on the given GVK of
+// obj (obj is not used for anything else) and the given filters in opts. Only the Partial Meta
+func (s *GenericStorage) DeleteAllOf(ctx context.Context, obj Object, opts ...client.DeleteAllOfOption) error {
+	// This applies both upstream and custom options, and propagates the options correctly to both
+	// List() and Delete()
+	customDeleteAllOpts := (&DeleteAllOfOptions{}).ApplyOptions(opts)
+
+	// Get the GVK of the object
+	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
+	if err != nil {
+		return err
+	}
+
+	// List all matched objects for the given ListOptions, and GVK.
+	// UnstructuredList is used here so that we can use filters that operate on fields
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(gvk)
+	if err := s.List(ctx, list, customDeleteAllOpts); err != nil {
+		return err
+	}
+
+	// Loop through all of the matched items, and Delete them one-by-one
+	for i := range list.Items {
+		if err := s.Delete(ctx, &list.Items[i], customDeleteAllOpts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *GenericStorage) write(ctx context.Context, key ObjectKey, obj Object) error {
 	// Set the content type based on the format given by the RawStorage, but default to JSON
 	contentType := serializer.ContentTypeJSON
-	if ct := s.raw.ContentType(key); len(ct) != 0 {
+	if ct := s.raw.ContentType(ctx, key); len(ct) != 0 {
 		contentType = ct
 	}
 
@@ -167,174 +396,7 @@ func (s *GenericStorage) write(key ObjectKey, obj runtime.Object) error {
 		return err
 	}
 
-	return s.raw.Write(key, objBytes.Bytes())
-}
-
-func (s *GenericStorage) Create(obj runtime.Object) error {
-	key, err := s.ObjectKeyFor(obj)
-	if err != nil {
-		return err
-	}
-
-	if s.raw.Exists(key) {
-		return ErrAlreadyExists
-	}
-
-	// The object was not found so we can safely create it
-	return s.write(key, obj)
-}
-
-func (s *GenericStorage) Update(obj runtime.Object) error {
-	key, err := s.ObjectKeyFor(obj)
-	if err != nil {
-		return err
-	}
-
-	if !s.raw.Exists(key) {
-		return ErrNotFound
-	}
-
-	// The object was found so we can safely update it
-	return s.write(key, obj)
-}
-
-// Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
-func (s *GenericStorage) Patch(key ObjectKey, patch []byte) error {
-	oldContent, err := s.raw.Read(key)
-	if err != nil {
-		return err
-	}
-
-	// TODO: This is a bit of a hack, but for now this works. The patcher expects only JSON, hence
-	// we need to handle the case when raw.Read doesn't return JSON bytes. In the future however, this
-	// logic should probably be rewritten completely.
-	if s.raw.ContentType(key) == serializer.ContentTypeYAML {
-		oldContent, err = yaml.YAMLToJSONStrict(oldContent)
-		if err != nil {
-			return err
-		}
-	}
-
-	newContent, err := s.patcher.Apply(oldContent, patch, key.GetGVK())
-	if err != nil {
-		return err
-	}
-
-	return s.raw.Write(key, newContent)
-}
-
-// Delete removes an Object from the storage
-func (s *GenericStorage) Delete(key ObjectKey) error {
-	return s.raw.Delete(key)
-}
-
-// Checksum returns a string representing the state of an Object on disk
-func (s *GenericStorage) Checksum(key ObjectKey) (string, error) {
-	return s.raw.Checksum(key)
-}
-
-func (s *GenericStorage) list(kind KindKey) (result []runtime.Object, walkerr error) {
-	walkerr = s.walkKind(kind, func(key ObjectKey, content []byte) error {
-		obj, err := s.decode(key, content)
-		if err != nil {
-			return err
-		}
-
-		result = append(result, obj)
-		return nil
-	})
-	return
-}
-
-// List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
-// for more information, e.g. filter.NameFilter{} and filter.UIDFilter{})
-func (s *GenericStorage) List(kind KindKey, opts ...filter.ListOption) ([]runtime.Object, error) {
-	// First, complete the options struct
-	o, err := filter.MakeListOptions(opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	// Do an internal list to get all objects
-	objs, err := s.list(kind)
-	if err != nil {
-		return nil, err
-	}
-
-	// For all list filters, pipe the output of the previous as the input to the next, in order.
-	for _, filter := range o.Filters {
-		objs, err = filter.Filter(objs...)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return objs, nil
-}
-
-// Find does a List underneath, also using filters, but always returns one object. If the List
-// underneath returned two or more results, ErrAmbiguousFind is returned. If no match was found,
-// ErrNotFound is returned.
-func (s *GenericStorage) Find(kind KindKey, opts ...filter.ListOption) (runtime.Object, error) {
-	// Do a normal list underneath
-	objs, err := s.List(kind, opts...)
-	if err != nil {
-		return nil, err
-	}
-	// Return based on the object count
-	switch l := len(objs); l {
-	case 0:
-		return nil, fmt.Errorf("no Find match found: %w", ErrNotFound)
-	case 1:
-		return objs[0], nil
-	default:
-		return nil, fmt.Errorf("too many (%d) matches: %v: %w", l, objs, ErrAmbiguousFind)
-	}
-}
-
-// ListMeta lists all Objects' APIType representation. In other words,
-// only metadata about each Object is unmarshalled (uid/name/kind/apiVersion).
-// This allows for faster runs (no need to unmarshal "the world"), and less
-// resource usage, when only metadata is unmarshalled into memory
-func (s *GenericStorage) ListMeta(kind KindKey) (result []runtime.PartialObject, walkerr error) {
-	walkerr = s.walkKind(kind, func(key ObjectKey, content []byte) error {
-
-		obj, err := s.decodeMeta(key, content)
-		if err != nil {
-			return err
-		}
-
-		result = append(result, obj)
-		return nil
-	})
-	return
-}
-
-// Count counts the Objects for the specific kind
-func (s *GenericStorage) Count(kind KindKey) (uint64, error) {
-	entries, err := s.raw.List(kind)
-	return uint64(len(entries)), err
-}
-
-func (s *GenericStorage) ObjectKeyFor(obj runtime.Object) (ObjectKey, error) {
-	var gvk schema.GroupVersionKind
-	var err error
-
-	_, isPartialObject := obj.(runtime.PartialObject)
-	if isPartialObject {
-		gvk = obj.GetObjectKind().GroupVersionKind()
-		// TODO: Error if empty
-	} else {
-		gvk, err = serializer.GVKForObject(s.serializer.Scheme(), obj)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	id := s.identify(obj)
-	if id == nil {
-		return nil, fmt.Errorf("couldn't identify object")
-	}
-	return NewObjectKey(NewKindKey(gvk), id), nil
+	return s.raw.Write(ctx, key, objBytes.Bytes())
 }
 
 // RawStorage returns the RawStorage instance backing this Storage
@@ -347,82 +409,86 @@ func (s *GenericStorage) Close() error {
 	return nil // nothing to do here for GenericStorage
 }
 
-// identify loops through the identifiers, in priority order, to identify the object correctly
-func (s *GenericStorage) identify(obj runtime.Object) runtime.Identifyable {
-	for _, identifier := range s.identifiers {
+// Scheme returns the scheme this client is using.
+func (s *GenericStorage) Scheme() *kruntime.Scheme {
+	return s.serializer.Scheme()
+}
 
-		id, ok := identifier.Identify(obj)
-		if ok {
-			return id
-		}
-	}
+// RESTMapper returns the rest this client is using. For now, this returns nil, so don't use.
+func (s *GenericStorage) RESTMapper() meta.RESTMapper {
 	return nil
 }
 
-func (s *GenericStorage) decode(key ObjectKey, content []byte) (runtime.Object, error) {
-	gvk := key.GetGVK()
-	// Decode the bytes to the internal version of the Object, if desired
-	isInternal := gvk.Version == kruntime.APIVersionInternal
-
-	// Decode the bytes into an Object
-	ct := s.raw.ContentType(key)
-	logrus.Infof("Decoding with content type %s", ct)
-	obj, err := s.serializer.Decoder(
-		serializer.WithConvertToHubDecode(isInternal),
-	).Decode(serializer.NewFrameReader(ct, serializer.FromBytes(content)))
-	if err != nil {
-		return nil, err
+func createObject(gvk KindKey, scheme *kruntime.Scheme) NewObjectFunc {
+	return func() (Object, error) {
+		return NewObjectForGVK(gvk, scheme)
 	}
-
-	// Cast to runtime.Object, and make sure it works
-	metaObj, ok := obj.(runtime.Object)
-	if !ok {
-		return nil, fmt.Errorf("can't convert to libgitops.runtime.Object")
-	}
-
-	// Set the desired gvk of this Object from the caller
-	metaObj.GetObjectKind().SetGroupVersionKind(gvk)
-	return metaObj, nil
 }
 
-func (s *GenericStorage) decodeMeta(key ObjectKey, content []byte) (runtime.PartialObject, error) {
-	gvk := key.GetGVK()
-	partobjs, err := DecodePartialObjects(serializer.FromBytes(content), s.serializer.Scheme(), false, &gvk)
-	if err != nil {
-		return nil, err
+func createPartialObject(gvk KindKey) NewObjectFunc {
+	return func() (Object, error) {
+		obj := &metav1.PartialObjectMetadata{}
+		obj.SetGroupVersionKind(gvk)
+		return obj, nil
 	}
-
-	return partobjs[0], nil
 }
 
-func (s *GenericStorage) walkKind(kind KindKey, fn func(key ObjectKey, content []byte) error) error {
-	keys, err := s.raw.List(kind)
-	if err != nil {
-		return err
+func createUnstructuredObject(gvk KindKey) NewObjectFunc {
+	return func() (Object, error) {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(gvk)
+		return obj, nil
 	}
+}
 
-	for _, key := range keys {
-		// Allow metadata.json to not exist, although the directory does exist
-		if !s.raw.Exists(key) {
-			continue
-		}
+func (s *GenericStorage) processKeys(ctx context.Context, keys []ObjectKey, filterOpts *filter.FilterOptions, fn NewObjectFunc, output chan Object) error {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(keys))
+	multiErr := &validation.MultiError{} // TODO: Thread-safe append
+	for _, k := range keys {
+		go func(key ObjectKey) {
+			defer wg.Done()
 
-		content, err := s.raw.Read(key)
-		if err != nil {
-			return err
-		}
+			// Create a new object, and decode into it using Get
+			obj, err := fn()
+			if err != nil {
+				multiErr.Errors = append(multiErr.Errors, err)
+				return
+			}
 
-		if err := fn(key, content); err != nil {
-			return err
-		}
+			if err := s.Get(ctx, key.NamespacedName(), obj); err != nil {
+				multiErr.Errors = append(multiErr.Errors, err)
+				return
+			}
+
+			// Match the object against the filters
+			matched, err := filterOpts.Match(obj)
+			if err != nil {
+				multiErr.Errors = append(multiErr.Errors, err)
+				return
+			}
+			if !matched {
+				return
+			}
+
+			output <- obj
+		}(k)
 	}
+	wg.Wait()
+	// Close the output channel so that the for-range loop stops
+	close(output)
 
+	// TODO: upstream this
+	if len(multiErr.Errors) != 0 {
+		return multiErr
+	}
 	return nil
 }
 
 // DecodePartialObjects reads any set of frames from the given ReadCloser, decodes the frames into
 // PartialObjects, validates that the decoded objects are known to the scheme, and optionally sets a default
-// group
+// group.
+// TODO: Is this call relevant in the future?
 func DecodePartialObjects(rc io.ReadCloser, scheme *kruntime.Scheme, allowMultiple bool, defaultGVK *schema.GroupVersionKind) ([]runtime.PartialObject, error) {
 	fr := serializer.NewYAMLFrameReader(rc)
 
