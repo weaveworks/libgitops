@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/fluxcd/go-git-providers/gitprovider"
-	"github.com/fluxcd/toolkit/pkg/ssh/knownhosts"
+	"github.com/fluxcd/pkg/ssh/knownhosts"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
