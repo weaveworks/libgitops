@@ -87,6 +87,8 @@ type Serializer interface {
 	// Defaulter is a high-level interface for accessing defaulting functions in a scheme
 	Defaulter() Defaulter
 
+	Patcher() Patcher
+
 	// Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
 	// the "type universe" and advanced conversion/defaulting features
 	Scheme() *runtime.Scheme
@@ -222,14 +224,16 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 		*codecs = k8sserializer.NewCodecFactory(scheme)
 	}
 
+	schemeCodec := &schemeAndCodec{
+		scheme:   scheme,
+		schemeMu: &sync.Mutex{},
+		codecs:   codecs,
+	}
 	return &serializer{
-		schemeAndCodec: &schemeAndCodec{
-			scheme:   scheme,
-			schemeMu: &sync.Mutex{},
-			codecs:   codecs,
-		},
-		converter: newConverter(scheme),
-		defaulter: newDefaulter(scheme),
+		schemeAndCodec: schemeCodec,
+		converter:      newConverter(scheme),
+		defaulter:      newDefaulter(scheme),
+		patcher:        &patcher{schemeCodec},
 	}
 }
 
@@ -238,6 +242,7 @@ type serializer struct {
 	*schemeAndCodec
 	converter *converter
 	defaulter *defaulter
+	patcher   *patcher
 }
 
 // Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
@@ -266,6 +271,10 @@ func (s *serializer) Converter() Converter {
 
 func (s *serializer) Defaulter() Defaulter {
 	return s.defaulter
+}
+
+func (s *serializer) Patcher() Patcher {
+	return s.patcher
 }
 
 func prioritizedVersionForGroup(scheme *runtime.Scheme, groupName string) (schema.GroupVersion, error) {

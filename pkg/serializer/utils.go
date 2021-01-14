@@ -6,6 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -92,13 +93,29 @@ func IsPartialObjectList(obj runtime.Object) bool {
 	return isPartialList
 }
 
+// IsUnstructured checks if obj is runtime.Unstructured
 func IsUnstructured(obj runtime.Object) bool {
 	_, isUnstructured := obj.(runtime.Unstructured)
 	return isUnstructured
 }
 
+// IsUnstructuredList checks if obj is *unstructured.UnstructuredList
+func IsUnstructuredList(obj runtime.Object) bool {
+	_, isUnstructuredList := obj.(*unstructured.UnstructuredList)
+	return isUnstructuredList
+}
+
 // IsNonConvertible returns true for unstructured, partial and unknown objects
 // that should not be converted.
 func IsNonConvertible(obj runtime.Object) bool {
+	// TODO: Should Lists also be marked non-convertible?
+	// IsUnstructured also covers IsUnstructuredList -- *UnstructuredList implements runtime.Unstructured
 	return IsUnstructured(obj) || IsPartialObject(obj) || IsPartialObjectList(obj) || IsUnknown(obj)
+}
+
+// IsTyped returns true if the object is typed, i.e. registered with the given
+// scheme and not unversioned.
+func IsTyped(obj runtime.Object, scheme *runtime.Scheme) bool {
+	_, isUnversioned, err := scheme.ObjectKinds(obj)
+	return !isUnversioned && err == nil
 }
