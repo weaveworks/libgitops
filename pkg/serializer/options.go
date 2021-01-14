@@ -19,7 +19,7 @@ type EncodeOptions struct {
 	// Set this to 0, use PrettyEncode(false) or JSONIndent(0) to disable pretty output.
 	// Only applicable to ContentTypeJSON framers.
 	//
-	// Default: nil or 0, means no indentation
+	// Default: 2, i.e. pretty output
 	// TODO: Make this a property of the FrameWriter instead?
 	JSONIndent *int
 
