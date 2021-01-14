@@ -1,64 +1,52 @@
 package storage
 
 import (
-	"github.com/weaveworks/libgitops/pkg/runtime"
+	"errors"
+	"fmt"
+
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type kindKey schema.GroupVersionKind
+// Aliases
+type Object = client.Object
+type ObjectList = client.ObjectList
+type KindKey = schema.GroupVersionKind
+type NamespacedName = types.NamespacedName
+type Patch = client.Patch
 
-func (gvk kindKey) GetGroup() string                { return gvk.Group }
-func (gvk kindKey) GetVersion() string              { return gvk.Version }
-func (gvk kindKey) GetKind() string                 { return gvk.Kind }
-func (gvk kindKey) GetGVK() schema.GroupVersionKind { return schema.GroupVersionKind(gvk) }
-func (gvk kindKey) EqualsGVK(kind KindKey, respectVersion bool) bool {
-	// Make sure kind and group match, otherwise return false
-	if gvk.GetKind() != kind.GetKind() || gvk.GetGroup() != kind.GetGroup() {
-		return false
-	}
-	// If we allow version mismatches (i.e. don't need to respect the version), return true
-	if !respectVersion {
-		return true
-	}
-	// Otherwise, return true if the version also is the same
-	return gvk.GetVersion() == kind.GetVersion()
-}
-func (gvk kindKey) String() string { return gvk.GetGVK().String() }
-
-// kindKey implements KindKey.
-var _ KindKey = kindKey{}
-
-type KindKey interface {
-	// String implements fmt.Stringer
-	String() string
-
-	GetGroup() string
-	GetVersion() string
-	GetKind() string
-	GetGVK() schema.GroupVersionKind
-
-	EqualsGVK(kind KindKey, respectVersion bool) bool
-}
+var ErrNoMetadata = errors.New("it is required to embed ObjectMeta into the serialized API type")
 
 type ObjectKey interface {
-	KindKey
-	runtime.Identifyable
+	Kind() KindKey
+	NamespacedName() NamespacedName
 }
 
 // objectKey implements ObjectKey.
 var _ ObjectKey = &objectKey{}
 
 type objectKey struct {
-	KindKey
-	runtime.Identifyable
+	kind KindKey
+	name NamespacedName
 }
 
-func (key objectKey) String() string { return key.KindKey.String() + " " + key.GetIdentifier() }
+func (key objectKey) Kind() KindKey                  { return key.kind }
+func (key objectKey) NamespacedName() NamespacedName { return key.name }
 
-func NewKindKey(gvk schema.GroupVersionKind) KindKey {
-	return kindKey(gvk)
+func NewObjectKey(kind KindKey, name NamespacedName) ObjectKey {
+	return objectKey{kind, name}
 }
 
-func NewObjectKey(kind KindKey, id runtime.Identifyable) ObjectKey {
-	return objectKey{kind, id}
+func NewObjectForGVK(kind KindKey, scheme *runtime.Scheme) (Object, error) {
+	kobj, err := scheme.New(kind)
+	if err != nil {
+		return nil, err
+	}
+	obj, ok := kobj.(Object)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrNoMetadata, kind)
+	}
+	return obj, nil
 }
