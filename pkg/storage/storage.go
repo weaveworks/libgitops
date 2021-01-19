@@ -12,6 +12,8 @@ import (
 	"github.com/weaveworks/libgitops/pkg/filter"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/raw"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,16 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type NewObjectFunc func() (Object, error)
-
 var (
-	// TODO: Return the same errors as k8s does
-	// ErrAmbiguousFind is returned when the user requested one object from a List+Filter process.
-	ErrAmbiguousFind = errors.New("two or more results were aquired when one was expected")
-	// ErrNotFound is returned when the requested resource wasn't found.
-	ErrNotFound = errors.New("resource not found")
-	// ErrAlreadyExists is returned when when WriteStorage.Create is called for an already stored object.
-	ErrAlreadyExists = errors.New("resource already exists")
 	// ErrCannotSaveMetadata is returned if the user tries to save metadata-only objects
 	ErrCannotSaveMetadata = errors.New("cannot save (Create|Update|Patch) *metav1.PartialObjectMetadata")
 	// ErrNameRequired is returned when .metadata.name is unset
@@ -47,17 +40,6 @@ const (
 
 var v1GroupKind = schema.GroupVersion{Group: "", Version: "v1"}
 
-type ObjectID interface {
-	GroupVersionKind() schema.GroupVersionKind
-	GetName() string
-	GetNamespace() string
-	GetLabels() map[string]string
-}
-
-func foo() {
-	var _ ObjectID = &metav1.PartialObjectMetadata{}
-}
-
 type CommonStorage interface {
 	//
 	// Access to underlying Resources.
@@ -65,7 +47,7 @@ type CommonStorage interface {
 
 	// RawStorage returns the RawStorage instance backing this Storage
 	// It is expected that RawStorage only operates on one "frame" at a time in its Read/Write operations.
-	RawStorage() RawStorage
+	RawStorage() raw.Storage
 	// Serializer returns the serializer
 	Serializer() serializer.Serializer
 
@@ -74,6 +56,7 @@ type CommonStorage interface {
 	//
 
 	// Close closes all underlying resources (e.g. goroutines) used; before the application exits
+	// TODO: Maybe this instead should apply to raw.Storage's now?
 	Close() error
 }
 
@@ -104,40 +87,45 @@ type Storage interface {
 }
 
 // NewGenericStorage constructs a new Storage
-func NewGenericStorage(rawStorage RawStorage, serializer serializer.Serializer, enforcer NamespaceEnforcer) Storage {
-	return &GenericStorage{rawStorage, serializer, enforcer}
+func NewGenericStorage(rawStorage raw.Storage, serializer serializer.Serializer, enforcer core.NamespaceEnforcer) Storage {
+	return &storage{rawStorage, serializer, enforcer}
 }
 
-// GenericStorage implements the Storage interface
-type GenericStorage struct {
-	raw        RawStorage
+// storage implements the Storage interface
+type storage struct {
+	raw        raw.Storage
 	serializer serializer.Serializer
-	enforcer   NamespaceEnforcer
+	enforcer   core.NamespaceEnforcer
 }
 
-var _ Storage = &GenericStorage{}
+var _ Storage = &storage{}
 
-func (s *GenericStorage) Serializer() serializer.Serializer {
+func (s *storage) Serializer() serializer.Serializer {
 	return s.serializer
 }
 
 // Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
 // In order to only extract the metadata of this object, pass in a *metav1.PartialObjectMetadata
-func (s *GenericStorage) Get(ctx context.Context, name NamespacedName, obj Object) error {
+func (s *storage) Get(ctx context.Context, key core.ObjectKey, obj core.Object) error {
 	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
 	if err != nil {
 		return err
 	}
 
-	key := NewObjectKey(gvk, name)
-	content, err := s.raw.Read(ctx, key)
+	id := core.NewObjectID(gvk, key)
+	// TODO: Sanitize id here: make it conform with the enforced rules
+	content, err := s.raw.Read(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	ct := s.raw.ContentType(ctx, key)
+	info, err := s.raw.Stat(ctx, id)
+	if err != nil {
+		return err
+	}
+
 	// TODO: Support various decoding options, e.g. defaulting?
-	return s.serializer.Decoder().DecodeInto(serializer.NewSingleFrameReader(content, ct), obj)
+	return s.serializer.Decoder().DecodeInto(serializer.NewSingleFrameReader(content, info.ContentType()), obj)
 }
 
 // List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
@@ -147,7 +135,7 @@ func (s *GenericStorage) Get(ctx context.Context, name NamespacedName, obj Objec
 // If you do specify either an *unstructured.UnstructuredList or *metav1.PartialObjectMetadataList,
 // you need to populate TypeMeta with the GVK you want back.
 // TODO: Check if this works with metav1.List{}
-func (s *GenericStorage) List(ctx context.Context, list ObjectList, opts ...client.ListOption) error {
+func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client.ListOption) error {
 	// This call will verify that list actually is a List type.
 	gvk, err := serializer.GVKForList(list, s.serializer.Scheme())
 	if err != nil {
@@ -157,12 +145,12 @@ func (s *GenericStorage) List(ctx context.Context, list ObjectList, opts ...clie
 	listOpts := (&ListOptions{}).ApplyOptions(opts)
 
 	// Do an internal list to get all objects
-	keys, err := s.raw.List(ctx, gvk)
+	keys, err := s.raw.List(ctx, gvk.GroupKind(), listOpts.Namespace)
 	if err != nil {
 		return err
 	}
 
-	ch := make(chan Object, len(keys)) // TODO: This could be less
+	ch := make(chan core.Object, len(keys)) // TODO: This could be less
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	var processErr error
@@ -192,27 +180,29 @@ func (s *GenericStorage) List(ctx context.Context, list ObjectList, opts ...clie
 	return nil
 }
 
-func (s *GenericStorage) Create(ctx context.Context, obj Object, _ ...client.CreateOption) error {
+func (s *storage) Create(ctx context.Context, obj core.Object, _ ...client.CreateOption) error {
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
 	}
 
-	key, err := s.objectKeyForObj(ctx, obj)
+	// Get the id of the object
+	id, err := s.idForObj(ctx, obj)
 	if err != nil {
 		return nil
 	}
 
-	if s.raw.Exists(ctx, key) {
-		return ErrAlreadyExists
+	// Do not create it if it already exists
+	if s.raw.Exists(ctx, id) {
+		return core.NewErrAlreadyExists(id)
 	}
 
 	// The object was not found so we can safely create it
-	return s.write(ctx, key, obj)
+	return s.write(ctx, id, obj)
 }
 
 // Note: This should also work for unstructured and partial metadata objects
-func (s *GenericStorage) objectKeyForObj(ctx context.Context, obj Object) (ObjectKey, error) {
+func (s *storage) idForObj(ctx context.Context, obj core.Object) (core.ObjectID, error) {
 	gvk, err := serializer.GVKForObject(s.serializer.Scheme(), obj)
 	if err != nil {
 		return nil, err
@@ -232,7 +222,7 @@ func (s *GenericStorage) objectKeyForObj(ctx context.Context, obj Object) (Objec
 	var namespaces sets.String
 	// If the namespace enforcer requires listing all the other namespaces,
 	// look them up
-	if s.enforcer.RequireNamespaceExists() {
+	if s.enforcer.RequireSetNamespaceExists() {
 		nsList := &metav1.PartialObjectMetadataList{}
 		nsList.SetGroupVersionKind(v1GroupKind.WithKind(namespaceListKind))
 		if err := s.List(ctx, nsList); err != nil {
@@ -250,39 +240,36 @@ func (s *GenericStorage) objectKeyForObj(ctx context.Context, obj Object) (Objec
 
 	// At this point we know name is non-empty, and the namespace field is correct,
 	// according to policy
-	return NewObjectKey(gvk, NamespacedName{
-		Name:      obj.GetName(),
-		Namespace: obj.GetNamespace(),
-	}), nil
+	return core.NewObjectID(gvk, core.ObjectKeyFromObject(obj)), nil
 }
 
-func (s *GenericStorage) Update(ctx context.Context, obj Object, _ ...client.UpdateOption) error {
+func (s *storage) Update(ctx context.Context, obj core.Object, _ ...client.UpdateOption) error {
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
 	}
 
-	key, err := s.objectKeyForObj(ctx, obj)
+	id, err := s.idForObj(ctx, obj)
 	if err != nil {
 		return nil
 	}
 
-	return s.update(ctx, obj, key)
+	return s.update(ctx, obj, id)
 }
 
-func (s *GenericStorage) update(ctx context.Context, obj Object, key ObjectKey) error {
-	if !s.raw.Exists(ctx, key) {
-		return ErrNotFound
+func (s *storage) update(ctx context.Context, obj core.Object, id core.ObjectID) error {
+	if !s.raw.Exists(ctx, id) {
+		return core.NewErrNotFound(id)
 	}
 
 	// TODO: Validation?
 
 	// The object was found so we can safely update it
-	return s.write(ctx, key, obj)
+	return s.write(ctx, id, obj)
 }
 
 // Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
-func (s *GenericStorage) Patch(ctx context.Context, obj Object, patch Patch, _ ...client.PatchOption) error {
+func (s *storage) Patch(ctx context.Context, obj core.Object, patch core.Patch, _ ...client.PatchOption) error {
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
@@ -297,13 +284,13 @@ func (s *GenericStorage) Patch(ctx context.Context, obj Object, patch Patch, _ .
 
 	// Get the object key for obj, this validates GVK, name and namespace
 	// We need to do this before Get to be consistent with Update & Delete
-	key, err := s.objectKeyForObj(ctx, obj)
+	id, err := s.idForObj(ctx, obj)
 	if err != nil {
 		return err
 	}
 
 	// Load the current latest state into obj temporarily, before patching it
-	if err := s.Get(ctx, key.NamespacedName(), obj); err != nil {
+	if err := s.Get(ctx, id.ObjectKey(), obj); err != nil {
 		return err
 	}
 
@@ -326,30 +313,30 @@ func (s *GenericStorage) Patch(ctx context.Context, obj Object, patch Patch, _ .
 
 	// Perform an update internally, similar to what .Update would yield
 	// TODO: Maybe write to storage conditionally?
-	return s.update(ctx, obj, key)
+	return s.update(ctx, obj, id)
 }
 
 // Delete removes an Object from the storage
 // PartialObjectMetadata should work here.
-func (s *GenericStorage) Delete(ctx context.Context, obj Object, _ ...client.DeleteOption) error {
-	// Get the key for the object
-	key, err := s.objectKeyForObj(ctx, obj)
+func (s *storage) Delete(ctx context.Context, obj core.Object, _ ...client.DeleteOption) error {
+	// Get the id for the object
+	id, err := s.idForObj(ctx, obj)
 	if err != nil {
 		return err
 	}
 
 	// Verify it did exist
-	if !s.raw.Exists(ctx, key) {
-		return ErrNotFound
+	if !s.raw.Exists(ctx, id) {
+		return core.NewErrNotFound(id)
 	}
 
 	// Delete it from the underlying storage
-	return s.raw.Delete(ctx, key)
+	return s.raw.Delete(ctx, id)
 }
 
 // DeleteAllOf deletes all matched resources by first doing a List() operation on the given GVK of
 // obj (obj is not used for anything else) and the given filters in opts. Only the Partial Meta
-func (s *GenericStorage) DeleteAllOf(ctx context.Context, obj Object, opts ...client.DeleteAllOfOption) error {
+func (s *storage) DeleteAllOf(ctx context.Context, obj core.Object, opts ...client.DeleteAllOfOption) error {
 	// This applies both upstream and custom options, and propagates the options correctly to both
 	// List() and Delete()
 	customDeleteAllOpts := (&DeleteAllOfOptions{}).ApplyOptions(opts)
@@ -377,11 +364,11 @@ func (s *GenericStorage) DeleteAllOf(ctx context.Context, obj Object, opts ...cl
 	return nil
 }
 
-func (s *GenericStorage) write(ctx context.Context, key ObjectKey, obj Object) error {
-	// Set the content type based on the format given by the RawStorage, but default to JSON
-	contentType := serializer.ContentTypeJSON
-	if ct := s.raw.ContentType(ctx, key); len(ct) != 0 {
-		contentType = ct
+func (s *storage) write(ctx context.Context, id core.ObjectID, obj core.Object) error {
+	// TODO: Figure out how to get ContentType before the object actually exists!
+	ct, err := s.raw.ContentType(ctx, id)
+	if err != nil {
+		return err
 	}
 
 	// Set creationTimestamp if not already populated
@@ -391,62 +378,65 @@ func (s *GenericStorage) write(ctx context.Context, key ObjectKey, obj Object) e
 	}
 
 	var objBytes bytes.Buffer
-	err := s.serializer.Encoder().Encode(serializer.NewFrameWriter(contentType, &objBytes), obj)
+	// TODO: Work with any ContentType, not just JSON/YAML.
+	err = s.serializer.Encoder().Encode(serializer.NewFrameWriter(ct, &objBytes), obj)
 	if err != nil {
 		return err
 	}
 
-	return s.raw.Write(ctx, key, objBytes.Bytes())
+	return s.raw.Write(ctx, id, objBytes.Bytes())
 }
 
 // RawStorage returns the RawStorage instance backing this Storage
-func (s *GenericStorage) RawStorage() RawStorage {
+func (s *storage) RawStorage() raw.Storage {
 	return s.raw
 }
 
 // Close closes all underlying resources (e.g. goroutines) used; before the application exits
-func (s *GenericStorage) Close() error {
-	return nil // nothing to do here for GenericStorage
+func (s *storage) Close() error {
+	return nil // nothing to do here for storage
 }
 
 // Scheme returns the scheme this client is using.
-func (s *GenericStorage) Scheme() *kruntime.Scheme {
+func (s *storage) Scheme() *kruntime.Scheme {
 	return s.serializer.Scheme()
 }
 
 // RESTMapper returns the rest this client is using. For now, this returns nil, so don't use.
-func (s *GenericStorage) RESTMapper() meta.RESTMapper {
+func (s *storage) RESTMapper() meta.RESTMapper {
 	return nil
 }
 
-func createObject(gvk KindKey, scheme *kruntime.Scheme) NewObjectFunc {
-	return func() (Object, error) {
+type newObjectFunc func() (core.Object, error)
+
+func createObject(gvk core.GroupVersionKind, scheme *kruntime.Scheme) newObjectFunc {
+	return func() (core.Object, error) {
 		return NewObjectForGVK(gvk, scheme)
 	}
 }
 
-func createPartialObject(gvk KindKey) NewObjectFunc {
-	return func() (Object, error) {
+func createPartialObject(gvk core.GroupVersionKind) newObjectFunc {
+	return func() (core.Object, error) {
 		obj := &metav1.PartialObjectMetadata{}
 		obj.SetGroupVersionKind(gvk)
 		return obj, nil
 	}
 }
 
-func createUnstructuredObject(gvk KindKey) NewObjectFunc {
-	return func() (Object, error) {
+func createUnstructuredObject(gvk core.GroupVersionKind) newObjectFunc {
+	return func() (core.Object, error) {
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(gvk)
 		return obj, nil
 	}
 }
 
-func (s *GenericStorage) processKeys(ctx context.Context, keys []ObjectKey, filterOpts *filter.FilterOptions, fn NewObjectFunc, output chan Object) error {
+func (s *storage) processKeys(ctx context.Context, keys []core.ObjectKey, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
 	wg := &sync.WaitGroup{}
 	wg.Add(len(keys))
 	multiErr := &validation.MultiError{} // TODO: Thread-safe append
 	for _, k := range keys {
-		go func(key ObjectKey) {
+		go func(key core.ObjectKey) {
 			defer wg.Done()
 
 			// Create a new object, and decode into it using Get
@@ -456,7 +446,7 @@ func (s *GenericStorage) processKeys(ctx context.Context, keys []ObjectKey, filt
 				return
 			}
 
-			if err := s.Get(ctx, key.NamespacedName(), obj); err != nil {
+			if err := s.Get(ctx, key, obj); err != nil {
 				multiErr.Errors = append(multiErr.Errors, err)
 				return
 			}
