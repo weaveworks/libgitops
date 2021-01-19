@@ -155,6 +155,9 @@ type FileFinder interface {
 // cache with mappings between UnversionedObjectID and a ChecksumPath. This allows
 // higher-order interfaces to manage Objects in files in an unorganized directory
 // (e.g. a Git repo).
+//
+// Multiple Objects in the same file, or multiple Objects with the
+// same ID in multiple files are not supported.
 type MappedFileFinder interface {
 	FileFinder
 
@@ -167,6 +170,26 @@ type MappedFileFinder interface {
 	SetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath)
 	// DeleteMapping removes the mapping for the given id.
 	DeleteMapping(ctx context.Context, id core.UnversionedObjectID)
+}
+
+// UnstructuredStorage is a raw Storage interface that builds on top
+// of FilesystemStorage. It uses an ObjectRecognizer to recognize
+// otherwise unknown objects in unstructured files.
+// The FilesystemStorage must use a MappedFileFinder underneath.
+//
+// Multiple Objects in the same file, or multiple Objects with the
+// same ID in multiple files are not supported.
+type UnstructuredStorage interface {
+	FilesystemStorage
+
+	// Sync synchronizes the current state of the filesystem with the
+	// cached mappings in the MappedFileFinder.
+	Sync(ctx context.Context) error
+
+	// ObjectRecognizer returns the underlying ObjectRecognizer used.
+	ObjectRecognizer() core.ObjectRecognizer
+	// MappedFileFinder returns the underlying MappedFileFinder used.
+	MappedFileFinder() MappedFileFinder
 }
 
 // ChecksumPath is a tuple of a given Checksum and relative file Path,
