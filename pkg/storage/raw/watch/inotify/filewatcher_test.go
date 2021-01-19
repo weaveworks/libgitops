@@ -1,9 +1,12 @@
-package watcher
+package inotify
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/rjeczalik/notify"
+	"github.com/weaveworks/libgitops/pkg/storage/raw/watch"
 	"golang.org/x/sys/unix"
 )
 
@@ -51,33 +54,33 @@ var testEvents = []notifyEvents{
 	},
 }
 
-var targets = []FileEvents{
+var targets = []FileEventTypes{
 	{
-		FileEventModify,
+		watch.FileEventModify,
 	},
 	{
-		FileEventDelete,
+		watch.FileEventDelete,
 	},
 	{
-		FileEventModify,
-		FileEventMove,
-		FileEventDelete,
+		watch.FileEventModify,
+		watch.FileEventMove,
+		watch.FileEventDelete,
 	},
 	{
-		FileEventModify,
+		watch.FileEventModify,
 	},
 	{},
 }
 
-func extractEvents(updates FileUpdates) (events FileEvents) {
-	for _, update := range updates {
-		events = append(events, update.Event)
+func extractEventTypes(events FileEvents) (eventTypes FileEventTypes) {
+	for _, event := range events {
+		eventTypes = append(eventTypes, event.Type)
 	}
 
 	return
 }
 
-func eventsEqual(a, b FileEvents) bool {
+func eventsEqual(a, b FileEventTypes) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -91,9 +94,23 @@ func eventsEqual(a, b FileEvents) bool {
 	return true
 }
 
+// FileEventTypes is a slice of FileEventType
+type FileEventTypes []watch.FileEventType
+
+var _ fmt.Stringer = FileEventTypes{}
+
+func (e FileEventTypes) String() string {
+	strs := make([]string, 0, len(e))
+	for _, ev := range e {
+		strs = append(strs, ev.String())
+	}
+
+	return strings.Join(strs, ",")
+}
+
 func TestEventConcatenation(t *testing.T) {
 	for i, e := range testEvents {
-		result := extractEvents((&FileWatcher{}).concatenateEvents(e))
+		result := extractEventTypes((&FileWatcher{}).concatenateEvents(e))
 		if !eventsEqual(result, targets[i]) {
 			t.Errorf("wrong concatenation result: %v != %v", result, targets[i])
 		}
