@@ -37,7 +37,7 @@ type FileEventsEmitter interface {
 	// ContentTyper returns the ContentTyper used internally
 	ContentTyper() filesystem.ContentTyper
 	// Filesystem returns the filesystem abstraction used internally
-	Filesystem() filesystem.AferoContext
+	Filesystem() filesystem.Filesystem
 
 	// Close closes the emitter gracefully.
 	io.Closer
@@ -66,6 +66,6 @@ type FilesystemEventStorage interface {
 // When the Sync() function is run; the ObjectEvents that are emitted to the
 // listening channels with have ObjectEvent.Type == ObjectEventSync.
 type UnstructuredEventStorage interface {
-	unstructured.UnstructuredStorage
+	unstructured.Storage
 	FileEventStorageCommon
 }

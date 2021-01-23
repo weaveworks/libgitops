@@ -19,9 +19,9 @@ var (
 // for making the judgement. See DefaultContentTyper for a sample implementation.
 type ContentTyper interface {
 	// ContentTypeForPath should return the content type for the file that exists in
-	// the given AferoContext (path is relative). If the content type cannot be determined
+	// the given Filesystem (path is relative). If the content type cannot be determined
 	// please return a wrapped ErrCannotDetermineContentType error.
-	ContentTypeForPath(ctx context.Context, fs AferoContext, path string) (serializer.ContentType, error)
+	ContentTypeForPath(ctx context.Context, fs Filesystem, path string) (serializer.ContentType, error)
 }
 
 // DefaultContentTypes describes the default connection between
@@ -41,7 +41,7 @@ var DefaultContentTyper ContentTyper = ContentTypeForExtension{
 // and ".yml" -> ContentTypeYAML.
 type ContentTypeForExtension map[string]serializer.ContentType
 
-func (m ContentTypeForExtension) ContentTypeForPath(ctx context.Context, _ AferoContext, path string) (serializer.ContentType, error) {
+func (m ContentTypeForExtension) ContentTypeForPath(ctx context.Context, _ Filesystem, path string) (serializer.ContentType, error) {
 	ct, ok := m[filepath.Ext(path)]
 	if !ok {
 		return serializer.ContentType(""), fmt.Errorf("%w for file %q", ErrCannotDetermineContentType, path)

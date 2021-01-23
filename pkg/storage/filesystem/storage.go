@@ -3,9 +3,7 @@ package filesystem
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
@@ -30,12 +28,8 @@ func NewGeneric(fileFinder FileFinder, namespacer core.Namespacer) (Storage, err
 }
 
 // Generic is a Storage-compliant implementation, that
-// combines the given lower-level FileFinder, Namespacer and AferoContext interfaces
+// combines the given lower-level FileFinder, Namespacer and Filesystem interfaces
 // in a generic manner.
-//
-// Checksum is calculated based on the modification timestamp of the file, or
-// alternatively, from info.Sys() returned from AferoContext.Stat(), if it can
-// be cast to a ChecksumContainer.
 type Generic struct {
 	fileFinder FileFinder
 	namespacer core.Namespacer
@@ -84,19 +78,15 @@ func (r *Generic) Stat(ctx context.Context, id core.UnversionedObjectID) (storag
 		return nil, err
 	}
 
-	// Stat the file
-	info, err := r.FileFinder().Filesystem().Stat(ctx, p)
-	if os.IsNotExist(err) {
+	// Make sure the file exists
+	if !r.exists(ctx, p) {
 		return nil, core.NewErrNotFound(id)
-	} else if err != nil {
-		return nil, err
 	}
 
-	// Get checksum
-	checksum := checksumFromFileInfo(info)
-	// Allow a custom implementation of afero return ObjectInfo directly
-	if chk, ok := info.Sys().(storage.ChecksumContainer); ok {
-		checksum = chk.Checksum()
+	// Get the checksum
+	checksum, err := r.FileFinder().Filesystem().Checksum(ctx, p)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get content type
@@ -173,7 +163,7 @@ func (r *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.S
 // must only return object IDs for that given namespace.
 func (r *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
 	// Validate the namespace parameter
-	if err := VerifyNamespaced(r.Namespacer(), gk, namespace); err != nil {
+	if err := storage.VerifyNamespaced(r.Namespacer(), gk, namespace); err != nil {
 		return nil, err
 	}
 	// Just use the underlying filefinder
@@ -190,26 +180,5 @@ func (r *Generic) getPath(ctx context.Context, id core.UnversionedObjectID) (str
 }
 
 func (r *Generic) verifyID(id core.UnversionedObjectID) error {
-	return VerifyNamespaced(r.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace)
-}
-
-// TODO: Move to the Filesystem abstraction
-func checksumFromFileInfo(fi os.FileInfo) string {
-	return strconv.FormatInt(fi.ModTime().UnixNano(), 10)
-}
-
-// VerifyNamespaced verifies that the given GroupKind and namespace parameter follows
-// the rule of the Namespacer.
-func VerifyNamespaced(namespacer core.Namespacer, gk core.GroupKind, ns string) error {
-	// Get namespacing info
-	namespaced, err := namespacer.IsNamespaced(gk)
-	if err != nil {
-		return err
-	}
-	if namespaced && ns == "" {
-		return fmt.Errorf("%w: namespaced kind %v requires non-empty namespace", storage.ErrNamespacedMismatch, gk)
-	} else if !namespaced && ns != "" {
-		return fmt.Errorf("%w: non-namespaced kind %v must not have namespace parameter set", storage.ErrNamespacedMismatch, gk)
-	}
-	return nil
+	return storage.VerifyNamespaced(r.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace)
 }

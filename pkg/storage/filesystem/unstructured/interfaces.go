@@ -57,6 +57,6 @@ type ChecksumPath struct {
 	// TODO: Implement ChecksumContainer, or make ChecksumPath a
 	// sub-interface of ObjectID?
 	Checksum string
-	// Note: path is relative to the AferoContext.
+	// Note: path is relative to filesystem.Filesystem.RootDirectory().
 	Path string
 }

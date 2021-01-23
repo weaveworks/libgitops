@@ -10,8 +10,7 @@ import (
 	"github.com/rjeczalik/notify"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/afero"
-	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 	"golang.org/x/sys/unix"
@@ -61,7 +60,7 @@ func NewFileWatcher(dir string, opts ...FileWatcherOption) (watch.FileEventsEmit
 		opts: *o,
 		// afero operates on the local disk, but is by convention scoped to the local
 		// directory that is being watched
-		afero: core.AferoContextWrapperForDir(afero.NewOsFs(), dir),
+		fs: filesystem.NewOSFilesystem(dir),
 
 		batcher: sync.NewBatchWriter(o.BatchTimeout),
 	}
@@ -97,23 +96,23 @@ type FileWatcher struct {
 	// afero is always the OsFs type, which means it is passing the calls through
 	// directly to the local disk. It is used when talking to the given ContentTyper
 	// in order to identify various content types.
-	afero core.AferoContext
+	fs filesystem.Filesystem
 	// the batcher is used for properly sending many concurrent inotify events
 	// as a group, after a specified timeout. This fixes the issue of one single
 	// file operation being registered as many different inotify events
 	batcher *sync.BatchWriter
 }
 
-func (w *FileWatcher) ContentTyper() core.ContentTyper {
+func (w *FileWatcher) ContentTyper() filesystem.ContentTyper {
 	return w.opts.ContentTyper
 }
 
-func (w *FileWatcher) PathExcluder() core.PathExcluder {
+func (w *FileWatcher) PathExcluder() filesystem.PathExcluder {
 	return w.opts.PathExcluder
 }
 
-func (w *FileWatcher) Filesystem() core.AferoContext {
-	return w.afero
+func (w *FileWatcher) Filesystem() filesystem.Filesystem {
+	return w.fs
 }
 
 func (w *FileWatcher) WatchForFileEvents(ctx context.Context, into watch.FileEventStream) error {
@@ -133,7 +132,7 @@ func (w *FileWatcher) WatchForFileEvents(ctx context.Context, into watch.FileEve
 
 func (w *FileWatcher) validFile(path string) bool {
 	ctx := context.Background()
-	return core.IsValidFileInFilesystem(ctx, w.afero, w.opts.ContentTyper, w.opts.PathExcluder, path)
+	return filesystem.IsValidFileInFilesystem(ctx, w.fs, w.opts.ContentTyper, w.opts.PathExcluder, path)
 }
 
 func (w *FileWatcher) monitorFunc() {

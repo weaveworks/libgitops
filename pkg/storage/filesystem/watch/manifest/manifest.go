@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch/inotify"
 )
@@ -11,14 +13,14 @@ import (
 // inotify FileWatcher; all combined into an UnstructuredEventStorage.
 func NewManifestStorage(
 	dir string,
-	contentTyper core.ContentTyper,
+	contentTyper filesystem.ContentTyper,
 	namespacer core.Namespacer,
 	recognizer core.ObjectRecognizer,
-	pathExcluder core.PathExcluder,
+	pathExcluder filesystem.PathExcluder,
 ) (watch.UnstructuredEventStorage, error) {
-	fs := core.AferoContextForLocalDir(dir)
-	fileFinder := raw.NewGenericMappedFileFinder(contentTyper, fs)
-	fsRaw, err := raw.NewGenericFilesystemStorage(fileFinder, namespacer)
+	fs := filesystem.NewOSFilesystem(dir)
+	fileFinder := unstructured.NewGenericMappedFileFinder(contentTyper, fs)
+	fsRaw, err := filesystem.NewGeneric(fileFinder, namespacer)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,7 @@ type PathExcluder interface {
 	// ShouldExcludePath takes in a context, the fs filesystem abstraction,
 	// and a relative path to the file which should be determined if it should
 	// be excluded or not.
-	ShouldExcludePath(ctx context.Context, fs AferoContext, path string) bool
+	ShouldExcludePath(ctx context.Context, fs Filesystem, path string) bool
 }
 
 // ExcludeGitDirectory implements PathExcluder.
@@ -23,7 +23,7 @@ var _ PathExcluder = ExcludeGitDirectory{}
 // all files under a ".git" directory, anywhere in the tree under the root directory.
 type ExcludeGitDirectory struct{}
 
-func (ExcludeGitDirectory) ShouldExcludePath(_ context.Context, _ AferoContext, path string) bool {
+func (ExcludeGitDirectory) ShouldExcludePath(_ context.Context, _ Filesystem, path string) bool {
 	// Always start from a clean path
 	path = filepath.Clean(path)
 	for {

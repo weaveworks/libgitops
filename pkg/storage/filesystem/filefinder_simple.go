@@ -18,7 +18,7 @@ import (
 // If you need more advanced customizablility than provided here, you can compose
 // the call to NewGenericStorage yourself.
 func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFinderOptions) (Storage, error) {
-	fs := AferoContextForLocalDir(dir)
+	fs := NewOSFilesystem(dir)
 	fileFinder, err := NewSimpleFileFinder(fs, opts)
 	if err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFin
 	return NewGeneric(fileFinder, namespacer)
 }
 
-func NewSimpleFileFinder(fs AferoContext, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
+func NewSimpleFileFinder(fs Filesystem, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
 	if fs == nil {
 		return nil, fmt.Errorf("NewSimpleFileFinder: fs is mandatory")
 	}
@@ -68,7 +68,7 @@ var _ FileFinder = &SimpleFileFinder{}
 //
 // This FileFinder does not support the ObjectAt method.
 type SimpleFileFinder struct {
-	fs   AferoContext
+	fs   Filesystem
 	opts SimpleFileFinderOptions
 }
 
@@ -85,7 +85,7 @@ type SimpleFileFinderOptions struct {
 
 // TODO: Use group name "core" if group is "" to support core k8s objects.
 
-func (f *SimpleFileFinder) Filesystem() AferoContext {
+func (f *SimpleFileFinder) Filesystem() Filesystem {
 	return f.fs
 }
 
@@ -214,7 +214,7 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 	return ids, nil
 }
 
-func readDir(ctx context.Context, fs AferoContext, dir string) ([]string, error) {
+func readDir(ctx context.Context, fs Filesystem, dir string) ([]string, error) {
 	fi, err := fs.Stat(ctx, dir)
 	if os.IsNotExist(err) {
 		// It's ok if the directory doesn't exist (yet), we just don't have any items then :)

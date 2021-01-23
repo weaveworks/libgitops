@@ -22,7 +22,7 @@ var _ MappedFileFinder = &GenericMappedFileFinder{}
 // NewGenericMappedFileFinder creates a new instance of GenericMappedFileFinder,
 // that implements the MappedFileFinder interface. The contentTyper is optional,
 // by default core.DefaultContentTyper will be used.
-func NewGenericMappedFileFinder(contentTyper filesystem.ContentTyper, fs filesystem.AferoContext) MappedFileFinder {
+func NewGenericMappedFileFinder(contentTyper filesystem.ContentTyper, fs filesystem.Filesystem) MappedFileFinder {
 	if contentTyper == nil {
 		contentTyper = filesystem.DefaultContentTyper
 	}
@@ -49,12 +49,12 @@ func NewGenericMappedFileFinder(contentTyper filesystem.ContentTyper, fs filesys
 type GenericMappedFileFinder struct {
 	// Default: DefaultContentTyper
 	contentTyper filesystem.ContentTyper
-	fs           filesystem.AferoContext
+	fs           filesystem.Filesystem
 
 	branch branch
 }
 
-func (f *GenericMappedFileFinder) Filesystem() filesystem.AferoContext {
+func (f *GenericMappedFileFinder) Filesystem() filesystem.Filesystem {
 	return f.fs
 }
 

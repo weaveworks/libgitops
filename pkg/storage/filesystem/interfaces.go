@@ -31,7 +31,7 @@ type Storage interface {
 type FileFinder interface {
 	// Filesystem gets the underlying filesystem abstraction, if
 	// applicable.
-	Filesystem() AferoContext
+	Filesystem() Filesystem
 
 	// ObjectPath gets the file path relative to the root directory.
 	// In order to support a create operation, this function must also return a valid path for

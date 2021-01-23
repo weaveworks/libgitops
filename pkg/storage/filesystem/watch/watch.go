@@ -7,7 +7,10 @@ import (
 	gosync "sync"
 
 	"github.com/sirupsen/logrus"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 )
 
@@ -22,22 +25,22 @@ const defaultEventsBufferSize = 4096
 // Note: This WatchStorage only works for one-frame files (i.e. only one YAML document
 // per file is supported).
 func NewGenericUnstructuredEventStorage(
-	s raw.FilesystemStorage,
+	s filesystem.Storage,
 	recognizer core.ObjectRecognizer,
 	emitter FileEventsEmitter,
 	syncInBeginning bool,
 ) (UnstructuredEventStorage, error) {
 	// TODO: Possibly relax this requirement later, maybe it can also work for the SimpleFileFinder?
-	fileFinder, ok := s.FileFinder().(raw.MappedFileFinder)
+	fileFinder, ok := s.FileFinder().(unstructured.MappedFileFinder)
 	if !ok {
 		return nil, errors.New("the given filesystem.Storage must use a MappedFileFinder")
 	}
 
 	return &GenericUnstructuredEventStorage{
-		FilesystemStorage: s,
-		recognizer:        recognizer,
-		fileFinder:        fileFinder,
-		emitter:           emitter,
+		Storage:    s,
+		recognizer: recognizer,
+		fileFinder: fileFinder,
+		emitter:    emitter,
 
 		inbound: make(FileEventStream, defaultEventsBufferSize),
 		// outbound set by WatchForObjectEvents
@@ -56,17 +59,17 @@ func NewGenericUnstructuredEventStorage(
 // Note: This WatchStorage only works for one-frame files (i.e. only one YAML document
 // per file is supported).
 type GenericUnstructuredEventStorage struct {
-	raw.FilesystemStorage
+	filesystem.Storage
 	// the recognizer recognizes files
 	recognizer core.ObjectRecognizer
 	// mapped file finder
-	fileFinder raw.MappedFileFinder
+	fileFinder unstructured.MappedFileFinder
 	// the filesystem events emitter
 	emitter FileEventsEmitter
 
 	// channels
 	inbound    FileEventStream
-	outbound   ObjectEventStream
+	outbound   storage.ObjectEventStream
 	outboundMu *gosync.Mutex
 
 	// goroutine
@@ -84,11 +87,11 @@ func (s *GenericUnstructuredEventStorage) FileEventsEmitter() FileEventsEmitter 
 	return s.emitter
 }
 
-func (s *GenericUnstructuredEventStorage) MappedFileFinder() raw.MappedFileFinder {
+func (s *GenericUnstructuredEventStorage) MappedFileFinder() unstructured.MappedFileFinder {
 	return s.fileFinder
 }
 
-func (s *GenericUnstructuredEventStorage) WatchForObjectEvents(ctx context.Context, into ObjectEventStream) error {
+func (s *GenericUnstructuredEventStorage) WatchForObjectEvents(ctx context.Context, into storage.ObjectEventStream) error {
 	s.outboundMu.Lock()
 	defer s.outboundMu.Unlock()
 	// We don't support more than one listener
@@ -117,7 +120,7 @@ func (s *GenericUnstructuredEventStorage) WatchForObjectEvents(ctx context.Conte
 
 func (s *GenericUnstructuredEventStorage) Sync(ctx context.Context) error {
 	// List all valid files in the fs
-	files, err := core.ListValidFilesInFilesystem(
+	files, err := filesystem.ListValidFilesInFilesystem(
 		ctx,
 		s.emitter.Filesystem(),
 		s.emitter.ContentTyper(),
@@ -150,7 +153,7 @@ func (s *GenericUnstructuredEventStorage) Sync(ctx context.Context) error {
 		// Add a mapping between this object and path
 		s.setMapping(ctx, id, file)
 		// Send a special "sync" event for this ObjectID to the events channel
-		s.sendEvent(ObjectEventSync, id)
+		s.sendEvent(storage.ObjectEventSync, id)
 	}
 
 	return nil
@@ -166,8 +169,8 @@ func (s *GenericUnstructuredEventStorage) Write(ctx context.Context, id core.Unv
 	}
 	// Suspend the write event
 	s.emitter.Suspend(ctx, p)
-	// Call the underlying raw.Storage
-	return s.FilesystemStorage.Write(ctx, id, content)
+	// Call the underlying filesystem.Storage
+	return s.Storage.Write(ctx, id, content)
 }
 
 // Delete deletes the resource indicated by the ID.
@@ -180,13 +183,13 @@ func (s *GenericUnstructuredEventStorage) Delete(ctx context.Context, id core.Un
 	}
 	// Suspend the write event
 	s.emitter.Suspend(ctx, p)
-	// Call the underlying raw.Storage
-	return s.FilesystemStorage.Delete(ctx, id)
+	// Call the underlying filesystem.Storage
+	return s.Storage.Delete(ctx, id)
 }
 
 func (s *GenericUnstructuredEventStorage) getPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
 	// Verify namespacing info
-	if err := raw.VerifyNamespaced(s.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace); err != nil {
+	if err := storage.VerifyNamespaced(s.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace); err != nil {
 		return "", err
 	}
 	// Get the path
@@ -245,7 +248,7 @@ func (s *GenericUnstructuredEventStorage) handleDelete(ctx context.Context, even
 	// Remove the mapping from the FileFinder cache for this ID as it's now deleted
 	s.deleteMapping(ctx, objectID)
 	// Send the delete event to the channel
-	s.sendEvent(ObjectEventDelete, objectID)
+	s.sendEvent(storage.ObjectEventDelete, objectID)
 	return nil
 }
 
@@ -275,7 +278,7 @@ func (s *GenericUnstructuredEventStorage) handleModifyMove(ctx context.Context, 
 	// TODO: In the future, maybe support multiple files pointing to the same
 	// ObjectID? Case in point here is e.g. a Modify event for a known path that
 	// changes the underlying ObjectID.
-	objectEvent := ObjectEventUpdate
+	objectEvent := storage.ObjectEventUpdate
 	// Set the mapping if it didn't exist before; assume this is a Create event
 	if _, ok := s.fileFinder.GetMapping(ctx, versionedID); !ok {
 		// Add a mapping between this object and path.
@@ -283,16 +286,16 @@ func (s *GenericUnstructuredEventStorage) handleModifyMove(ctx context.Context, 
 
 		// This is what actually determines if an Object is created,
 		// so update the event to update.ObjectEventCreate here
-		objectEvent = ObjectEventCreate
+		objectEvent = storage.ObjectEventCreate
 	}
 	// Send the event to the channel
 	s.sendEvent(objectEvent, versionedID)
 	return nil
 }
 
-func (s *GenericUnstructuredEventStorage) sendEvent(event ObjectEventType, id core.UnversionedObjectID) {
+func (s *GenericUnstructuredEventStorage) sendEvent(event storage.ObjectEventType, id core.UnversionedObjectID) {
 	logrus.Tracef("GenericUnstructuredEventStorage: Sending event: %v", event)
-	s.outbound <- &ObjectEvent{
+	s.outbound <- &storage.ObjectEvent{
 		ID:   id,
 		Type: event,
 	}
@@ -312,7 +315,7 @@ func (s *GenericUnstructuredEventStorage) setMapping(ctx context.Context, id cor
 	// the checksum accordingly, by using Stat like above, but taking into account that there might
 	// not be a previous mapping, in which case one needs to create that first.
 
-	s.fileFinder.SetMapping(ctx, id, raw.ChecksumPath{
+	s.fileFinder.SetMapping(ctx, id, unstructured.ChecksumPath{
 		Path: path,
 		//Checksum: oi.Checksum(),
 	})

@@ -46,8 +46,8 @@ type Filesystem interface {
 	RootDirectory() string
 }
 
-// NewOSFilesystem creates a new afero.OsFs for the local directory, wrapped
-// in FilesystemWrapperForDir.
+// NewOSFilesystem creates a new afero.OsFs for the local directory, using
+// NewFilesystem underneath.
 func NewOSFilesystem(rootDir string) Filesystem {
 	return NewFilesystem(afero.NewOsFs(), rootDir)
 }
@@ -55,6 +55,10 @@ func NewOSFilesystem(rootDir string) Filesystem {
 // NewFilesystem wraps an underlying afero.Fs without context knowledge,
 // in a Filesystem-compliant implementation; scoped at the given directory
 // (i.e. wrapped in afero.NewBasePathFs(fs, rootDir)).
+//
+// Checksum is calculated based on the modification timestamp of the file, or
+// alternatively, from info.Sys() returned from Filesystem.Stat(), if it can
+// be cast to a ChecksumContainer.
 func NewFilesystem(fs afero.Fs, rootDir string) Filesystem {
 	// TODO: rootDir validation? It must be absolute, exist, and be a directory.
 	return &filesystem{afero.NewBasePathFs(fs, rootDir), rootDir}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,7 +33,7 @@ var (
 // TODO: Need to make sure we never write this internal struct to disk (MarshalJSON error?)
 
 type Accessors interface {
-	Storage() raw.Storage
+	Storage() storage.Storage
 	NamespaceEnforcer() core.NamespaceEnforcer
 	Scheme() *runtime.Scheme
 }
@@ -46,7 +47,7 @@ type Reader interface {
 	Accessors
 
 	Get(ctx context.Context, obj core.Object) error
-	raw.Lister
+	storage.Lister
 }
 
 type Writer interface {
@@ -89,7 +90,7 @@ type StorageVersioner interface {
 }
 
 func NewGeneric(
-	storage raw.Storage,
+	storage storage.Storage,
 	serializer serializer.Serializer, // TODO: only scheme required, encode/decode optional?
 	enforcer core.NamespaceEnforcer,
 	validator Validator, // TODO: optional?
@@ -124,7 +125,7 @@ type Generic struct {
 	decoder serializer.Decoder
 	encoder serializer.Encoder
 
-	storage   raw.Storage
+	storage   storage.Storage
 	enforcer  core.NamespaceEnforcer
 	validator Validator
 	versioner StorageVersioner
@@ -134,7 +135,7 @@ func (b *Generic) Scheme() *runtime.Scheme {
 	return b.scheme
 }
 
-func (b *Generic) Storage() raw.Storage {
+func (b *Generic) Storage() storage.Storage {
 	return b.storage
 }
 
