@@ -10,8 +10,7 @@ import (
 	"github.com/rjeczalik/notify"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
-	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/fileevents"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -19,9 +18,9 @@ import (
 
 var listenEvents = []notify.Event{notify.InDelete, notify.InCloseWrite, notify.InMovedFrom, notify.InMovedTo}
 
-var eventMap = map[notify.Event]watch.FileEventType{
-	notify.InDelete:     watch.FileEventDelete,
-	notify.InCloseWrite: watch.FileEventModify,
+var eventMap = map[notify.Event]fileevents.FileEventType{
+	notify.InDelete:     fileevents.FileEventDelete,
+	notify.InCloseWrite: fileevents.FileEventModify,
 }
 
 // combinedEvents describes the event combinations to concatenate,
@@ -37,12 +36,12 @@ type notifyEvents []notify.EventInfo
 type eventStream chan notify.EventInfo
 
 // FileEvents is a slice of FileEvent pointers
-type FileEvents []*watch.FileEvent
+type FileEvents []*fileevents.FileEvent
 
 // NewFileWatcher returns a list of files in the watched directory in
 // addition to the generated FileWatcher, it can be used to populate
 // MappedRawStorage fileMappings
-func NewFileWatcher(dir string, opts ...FileWatcherOption) (watch.FileEventsEmitter, error) {
+func NewFileWatcher(dir string, opts ...FileWatcherOption) (fileevents.Emitter, error) {
 	o := defaultOptions().ApplyOptions(opts)
 
 	w := &FileWatcher{
@@ -58,9 +57,6 @@ func NewFileWatcher(dir string, opts ...FileWatcherOption) (watch.FileEventsEmit
 		// monitor and dispatcher set by WatchForFileEvents, guarded by outboundMu
 
 		opts: *o,
-		// afero operates on the local disk, but is by convention scoped to the local
-		// directory that is being watched
-		fs: filesystem.NewOSFilesystem(dir),
 
 		batcher: sync.NewBatchWriter(o.BatchTimeout),
 	}
@@ -74,7 +70,7 @@ func NewFileWatcher(dir string, opts ...FileWatcherOption) (watch.FileEventsEmit
 	return w, nil
 }
 
-var _ watch.FileEventsEmitter = &FileWatcher{}
+var _ fileevents.Emitter = &FileWatcher{}
 
 // FileWatcher recursively monitors changes in files in the given directory
 // and sends out events based on their state changes. Only files conforming
@@ -84,7 +80,7 @@ type FileWatcher struct {
 	dir string
 	// channels
 	inbound    eventStream
-	outbound   watch.FileEventStream
+	outbound   fileevents.FileEventStream
 	outboundMu *gosync.Mutex
 	// new suspend logic
 	suspendFiles   sets.String
@@ -92,47 +88,28 @@ type FileWatcher struct {
 	// goroutines
 	monitor    *sync.Monitor
 	dispatcher *sync.Monitor
-	opts       FileWatcherOptions
-	// afero is always the OsFs type, which means it is passing the calls through
-	// directly to the local disk. It is used when talking to the given ContentTyper
-	// in order to identify various content types.
-	fs filesystem.Filesystem
+
+	// opts
+	opts FileWatcherOptions
 	// the batcher is used for properly sending many concurrent inotify events
 	// as a group, after a specified timeout. This fixes the issue of one single
 	// file operation being registered as many different inotify events
 	batcher *sync.BatchWriter
 }
 
-func (w *FileWatcher) ContentTyper() filesystem.ContentTyper {
-	return w.opts.ContentTyper
-}
-
-func (w *FileWatcher) PathExcluder() filesystem.PathExcluder {
-	return w.opts.PathExcluder
-}
-
-func (w *FileWatcher) Filesystem() filesystem.Filesystem {
-	return w.fs
-}
-
-func (w *FileWatcher) WatchForFileEvents(ctx context.Context, into watch.FileEventStream) error {
+func (w *FileWatcher) WatchForFileEvents(ctx context.Context, into fileevents.FileEventStream) error {
 	w.outboundMu.Lock()
 	defer w.outboundMu.Unlock()
 	// We don't support more than one listener
 	// TODO: maybe support many listeners in the future?
 	if w.outbound != nil {
-		return fmt.Errorf("FileWatcher: not more than one watch supported: %w", watch.ErrTooManyWatches)
+		return fmt.Errorf("FileWatcher: not more than one watch supported: %w", fileevents.ErrTooManyWatches)
 	}
 	w.outbound = into
 	// Start the backing goroutines
 	w.monitor = sync.RunMonitor(w.monitorFunc)
 	w.dispatcher = sync.RunMonitor(w.dispatchFunc)
 	return nil // all ok
-}
-
-func (w *FileWatcher) validFile(path string) bool {
-	ctx := context.Background()
-	return filesystem.IsValidFileInFilesystem(ctx, w.fs, w.opts.ContentTyper, w.opts.PathExcluder, path)
 }
 
 func (w *FileWatcher) monitorFunc() {
@@ -187,7 +164,7 @@ func (w *FileWatcher) dispatchFunc() {
 	}
 }
 
-func (w *FileWatcher) sendUpdate(event *watch.FileEvent) {
+func (w *FileWatcher) sendUpdate(event *fileevents.FileEvent) {
 	// Get the relative path between the root directory and the changed file
 	relativePath, err := filepath.Rel(w.dir, event.Path)
 	if err != nil {
@@ -196,10 +173,6 @@ func (w *FileWatcher) sendUpdate(event *watch.FileEvent) {
 	}
 	// Replace the full path with the relative path for the signaling upstream
 	event.Path = relativePath
-
-	if !w.validFile(event.Path) {
-		return // Skip invalid files
-	}
 
 	if w.shouldSuspendEvent(event.Path) {
 		log.Debugf("FileWatcher: Skipping suspended event %s for path: %q", event.Type, event.Path)
@@ -223,7 +196,6 @@ func (w *FileWatcher) Close() error {
 // Suspend enables a one-time suspend of the given path
 // TODO: clarify how the path should be formatted
 func (w *FileWatcher) Suspend(_ context.Context, path string) {
-	//w.suspendEvent = updateEvent
 	w.suspendFilesMu.Lock()
 	defer w.suspendFilesMu.Unlock()
 	w.suspendFiles.Insert(path)
@@ -244,22 +216,22 @@ func (w *FileWatcher) shouldSuspendEvent(path string) bool {
 	return true
 }
 
-func convertEvent(event notify.Event) watch.FileEventType {
+func convertEvent(event notify.Event) fileevents.FileEventType {
 	if updateEvent, ok := eventMap[event]; ok {
 		return updateEvent
 	}
 
-	return watch.FileEventNone
+	return fileevents.FileEventNone
 }
 
-func convertUpdate(event notify.EventInfo) *watch.FileEvent {
+func convertUpdate(event notify.EventInfo) *fileevents.FileEvent {
 	fileEvent := convertEvent(event.Event())
-	if fileEvent == watch.FileEventNone {
+	if fileEvent == fileevents.FileEventNone {
 		// This should never happen
 		panic(fmt.Sprintf("invalid event for update conversion: %q", event.Event().String()))
 	}
 
-	return &watch.FileEvent{
+	return &fileevents.FileEvent{
 		Path: event.Path(),
 		Type: fileEvent,
 	}
@@ -293,20 +265,20 @@ func (m *moveCache) cookie() uint32 {
 // if only one is received, the file is moved in/out of a watched directory, which
 // is treated as a normal creation/deletion by this method.
 func (m *moveCache) incomplete() {
-	var evType watch.FileEventType
+	var evType fileevents.FileEventType
 
 	switch m.event.Event() {
 	case notify.InMovedFrom:
-		evType = watch.FileEventDelete
+		evType = fileevents.FileEventDelete
 	case notify.InMovedTo:
-		evType = watch.FileEventModify
+		evType = fileevents.FileEventModify
 	default:
 		// This should never happen
 		panic(fmt.Sprintf("moveCache: unrecognized event: %v", m.event.Event()))
 	}
 
 	log.Tracef("moveCache: Timer expired for %d, dispatching...", m.cookie())
-	m.watcher.sendUpdate(&watch.FileEvent{Path: m.event.Path(), Type: evType})
+	m.watcher.sendUpdate(&fileevents.FileEvent{Path: m.event.Path(), Type: evType})
 
 	// Delete the cache after the timer has fired
 	moveCachesMu.Lock()
@@ -330,7 +302,7 @@ var (
 
 // move processes InMovedFrom and InMovedTo events in any order
 // and dispatches FileUpdates when a move is detected
-func (w *FileWatcher) move(event notify.EventInfo) (moveUpdate *watch.FileEvent) {
+func (w *FileWatcher) move(event notify.EventInfo) (moveUpdate *fileevents.FileEvent) {
 	cookie := ievent(event).Cookie
 	moveCachesMu.RLock()
 	cache, ok := moveCaches[cookie]
@@ -349,8 +321,8 @@ func (w *FileWatcher) move(event notify.EventInfo) (moveUpdate *watch.FileEvent)
 		sourcePath, destPath = destPath, sourcePath
 		fallthrough
 	case notify.InMovedTo:
-		cache.cancel()                                                           // Cancel dispatching the cache's incomplete move
-		moveUpdate = &watch.FileEvent{Path: destPath, Type: watch.FileEventMove} // Register an internal, complete move instead
+		cache.cancel()                                                                     // Cancel dispatching the cache's incomplete move
+		moveUpdate = &fileevents.FileEvent{Path: destPath, Type: fileevents.FileEventMove} // Register an internal, complete move instead
 		log.Tracef("FileWatcher: Detected move: %q -> %q", sourcePath, destPath)
 	}
 

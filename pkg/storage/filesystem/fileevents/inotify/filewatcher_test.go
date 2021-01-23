@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/rjeczalik/notify"
-	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/fileevents"
 	"golang.org/x/sys/unix"
 )
 
@@ -56,18 +56,18 @@ var testEvents = []notifyEvents{
 
 var targets = []FileEventTypes{
 	{
-		watch.FileEventModify,
+		fileevents.FileEventModify,
 	},
 	{
-		watch.FileEventDelete,
+		fileevents.FileEventDelete,
 	},
 	{
-		watch.FileEventModify,
-		watch.FileEventMove,
-		watch.FileEventDelete,
+		fileevents.FileEventModify,
+		fileevents.FileEventMove,
+		fileevents.FileEventDelete,
 	},
 	{
-		watch.FileEventModify,
+		fileevents.FileEventModify,
 	},
 	{},
 }
@@ -95,7 +95,7 @@ func eventsEqual(a, b FileEventTypes) bool {
 }
 
 // FileEventTypes is a slice of FileEventType
-type FileEventTypes []watch.FileEventType
+type FileEventTypes []fileevents.FileEventType
 
 var _ fmt.Stringer = FileEventTypes{}
 

@@ -2,8 +2,6 @@ package inotify
 
 import (
 	"time"
-
-	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
 
 // How many inotify events we can buffer before watching is interrupted
@@ -15,20 +13,12 @@ type FileWatcherOption interface {
 
 var _ FileWatcherOption = &FileWatcherOptions{}
 
-// Options specifies options for the FileWatcher
+// FileWatcherOptions specifies options for the FileWatcher
 type FileWatcherOptions struct {
-	// PathExcluder specifies what files and directories to ignore
-	// Default: filesystem.ExcludeGitDirectory{}
-	PathExcluder filesystem.PathExcluder
 	// BatchTimeout specifies the duration to wait after last event
 	// before dispatching grouped inotify events
 	// Default: 1s
 	BatchTimeout time.Duration
-	// ContentTyper specifies what content types to recognize.
-	// All files for which ContentTyper returns a nil error will
-	// be watched.
-	// Default: filesystem.DefaultContentTyper
-	ContentTyper filesystem.ContentTyper
 	// EventBufferSize describes how many inotify events can be buffered
 	// before watching is interrupted/delayed.
 	// Default: DefaultEventBufferSize
@@ -36,14 +26,8 @@ type FileWatcherOptions struct {
 }
 
 func (o *FileWatcherOptions) ApplyToFileWatcher(target *FileWatcherOptions) {
-	if o.PathExcluder != nil {
-		target.PathExcluder = o.PathExcluder
-	}
 	if o.BatchTimeout != 0 {
 		target.BatchTimeout = o.BatchTimeout
-	}
-	if o.ContentTyper != nil {
-		target.ContentTyper = o.ContentTyper
 	}
 	if o.EventBufferSize != 0 {
 		target.EventBufferSize = o.EventBufferSize
@@ -60,9 +44,7 @@ func (o *FileWatcherOptions) ApplyOptions(opts []FileWatcherOption) *FileWatcher
 // defaultOptions returns the default options
 func defaultOptions() *FileWatcherOptions {
 	return &FileWatcherOptions{
-		PathExcluder:    filesystem.ExcludeGitDirectory{},
 		BatchTimeout:    1 * time.Second,
-		ContentTyper:    filesystem.DefaultContentTyper,
 		EventBufferSize: DefaultEventBufferSize,
 	}
 }
