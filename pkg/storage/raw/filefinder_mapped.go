@@ -3,10 +3,11 @@ package raw
 import (
 	"context"
 	"errors"
-	"fmt"
 
+	"github.com/fluxcd/go-git-providers/validation"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 var (
@@ -20,13 +21,18 @@ var _ MappedFileFinder = &GenericMappedFileFinder{}
 // NewGenericMappedFileFinder creates a new instance of GenericMappedFileFinder,
 // that implements the MappedFileFinder interface. The contentTyper is optional,
 // by default core.DefaultContentTyper will be used.
-func NewGenericMappedFileFinder(contentTyper core.ContentTyper) MappedFileFinder {
+func NewGenericMappedFileFinder(contentTyper core.ContentTyper, fs core.AferoContext) MappedFileFinder {
 	if contentTyper == nil {
 		contentTyper = core.DefaultContentTyper
 	}
+	if fs == nil {
+		panic("NewGenericMappedFileFinder: fs is mandatory")
+	}
 	return &GenericMappedFileFinder{
 		contentTyper: contentTyper,
-		branch:       &branchImpl{},
+		// TODO: Support multiple branches
+		branch: &branchImpl{},
+		fs:     fs,
 	}
 }
 
@@ -42,29 +48,28 @@ func NewGenericMappedFileFinder(contentTyper core.ContentTyper) MappedFileFinder
 type GenericMappedFileFinder struct {
 	// Default: DefaultContentTyper
 	contentTyper core.ContentTyper
+	fs           core.AferoContext
 
 	branch branch
 }
 
+func (f *GenericMappedFileFinder) Filesystem() core.AferoContext {
+	return f.fs
+}
+
 // ObjectPath gets the file path relative to the root directory
-func (f *GenericMappedFileFinder) ObjectPath(ctx context.Context, _ core.AferoContext, id core.UnversionedObjectID, namespaced bool) (string, error) {
-	ns := id.ObjectKey().Namespace
-	// TODO: can we do this better?
-	if namespaced && ns == "" {
-		return "", fmt.Errorf("invalid empty namespace for namespaced object")
-	} else if !namespaced && ns != "" {
-		return "", fmt.Errorf("invalid non-empty namespace for non-namespaced object")
-	}
+func (f *GenericMappedFileFinder) ObjectPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
 	cp, ok := f.GetMapping(ctx, id)
 	if !ok {
-		return "", ErrNotTracked
+		// TODO: separate interface for "new creates"?
+		return "", &validation.MultiError{Errors: []error{ErrNotTracked, core.NewErrNotFound(id)}}
 	}
 	return cp.Path, nil
 }
 
 // ObjectAt retrieves the ID containing the virtual path based
 // on the given physical file path.
-func (f *GenericMappedFileFinder) ObjectAt(ctx context.Context, _ core.AferoContext, path string) (core.UnversionedObjectID, error) {
+func (f *GenericMappedFileFinder) ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error) {
 	// TODO: Add reverse tracking too?
 	for gk, gkIter := range f.branch.raw() {
 		for ns, nsIter := range gkIter.raw() {
@@ -80,35 +85,47 @@ func (f *GenericMappedFileFinder) ObjectAt(ctx context.Context, _ core.AferoCont
 	return nil, ErrNotTracked
 }
 
-// ListNamespaces lists the available namespaces for the given GroupKind
+// ListNamespaces lists the available namespaces for the given GroupKind.
 // This function shall only be called for namespaced objects, it is up to
 // the caller to make sure they do not call this method for root-spaced
-// objects; for that the behavior is undefined (but returning an error
-// is recommended).
-func (f *GenericMappedFileFinder) ListNamespaces(ctx context.Context, _ core.AferoContext, gk core.GroupKind) ([]string, error) {
+// objects. If any of the given rules are violated, ErrNamespacedMismatch
+// should be returned as a wrapped error.
+//
+// The implementer can choose between basing the answer strictly on e.g.
+// v1.Namespace objects that exist in the system, or just the set of
+// different namespaces that have been set on any object belonging to
+// the given GroupKind.
+func (f *GenericMappedFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
 	m := f.branch.groupKind(gk).raw()
-	nsList := make([]string, 0, len(m))
+	nsSet := sets.NewString()
 	for ns := range m {
-		nsList = append(nsList, ns)
+		nsSet.Insert(ns)
 	}
-	return nsList, nil
+	return nsSet, nil
 }
 
-// ListObjectKeys returns a list of names (with optionally, the namespace).
+// ListObjectIDs returns a list of unversioned ObjectIDs.
 // For namespaced GroupKinds, the caller must provide a namespace, and for
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
-// must only return object keys for that given namespace.
-func (f *GenericMappedFileFinder) ListObjectKeys(ctx context.Context, _ core.AferoContext, gk core.GroupKind, namespace string) ([]core.ObjectKey, error) {
+// must only return object IDs for that given namespace. If any of the given
+// rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
+func (f *GenericMappedFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
 	m := f.branch.groupKind(gk).namespace(namespace).raw()
-	names := make([]core.ObjectKey, 0, len(m))
+	ids := make([]core.UnversionedObjectID, 0, len(m))
 	for name := range m {
-		names = append(names, core.ObjectKey{Name: name, Namespace: namespace})
+		ids = append(ids, core.NewUnversionedObjectID(gk, core.ObjectKey{Name: name, Namespace: namespace}))
 	}
-	return names, nil
+	return ids, nil
 }
 
-func (f *GenericMappedFileFinder) ContentTypeForPath(ctx context.Context, fs core.AferoContext, path string) (serializer.ContentType, error) {
-	return f.contentTyper.ContentTypeForPath(ctx, fs, path)
+func (f *GenericMappedFileFinder) ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error) {
+	// First, get the path
+	p, err := f.ObjectPath(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	// Then, ask the ContentTyper
+	return f.contentTyper.ContentTypeForPath(ctx, f.fs, p)
 }
 
 // GetMapping retrieves a mapping in the system
@@ -128,8 +145,8 @@ func (f *GenericMappedFileFinder) SetMapping(ctx context.Context, id core.Unvers
 		setName(id.ObjectKey().Name, checksumPath)
 }
 
-// SetMappings replaces all mappings at once
-func (f *GenericMappedFileFinder) SetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath) {
+// ResetMappings replaces all mappings at once
+func (f *GenericMappedFileFinder) ResetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath) {
 	f.branch = &branchImpl{}
 	for id, cp := range m {
 		f.SetMapping(ctx, id, cp)

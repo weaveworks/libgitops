@@ -10,6 +10,7 @@ import (
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // NewSimpleStorage is a default opinionated constructor for a FilesystemStorage
@@ -17,16 +18,33 @@ import (
 // If you need more advanced customizablility than provided here, you can compose
 // the call to NewGenericFilesystemStorage yourself.
 func NewSimpleStorage(dir string, ct serializer.ContentType, namespacer core.Namespacer) (FilesystemStorage, error) {
-	fileFinder := &SimpleFileFinder{
+	fs := core.AferoContextForLocalDir(dir)
+	fileFinder, err := NewSimpleFileFinder(fs, SimpleFileFinderOptions{
 		// ContentType is optional; JSON is used by default
 		ContentType: ct,
+	})
+	if err != nil {
+		return nil, err
 	}
-	// dir and namespacer are validated by NewGenericFilesystemStorage.
-	return NewGenericFilesystemStorage(dir, fileFinder, namespacer)
+	// fileFinder and namespacer are validated by NewGenericFilesystemStorage.
+	return NewGenericFilesystemStorage(fileFinder, namespacer)
+}
+
+func NewSimpleFileFinder(fs core.AferoContext, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
+	if fs == nil {
+		return nil, fmt.Errorf("NewSimpleFileFinder: fs is mandatory")
+	}
+	return &SimpleFileFinder{fs: fs, opts: opts}, nil
+}
+
+// isObjectIDNamespaced returns true if the ID is of a namespaced GroupKind, and
+// false if the GroupKind is non-namespaced. NOTE: This ONLY works for FileFinders
+// where the Storage has made sure that the namespacing conventions are followed.
+func isObjectIDNamespaced(id core.UnversionedObjectID) bool {
+	return id.ObjectKey().Namespace != ""
 }
 
 var _ FileFinder = &SimpleFileFinder{}
-var _ core.ContentTyper = &SimpleFileFinder{}
 
 // SimpleFileFinder is a FileFinder-compliant implementation that
 // stores Objects on disk using a straightforward directory layout.
@@ -53,6 +71,11 @@ var _ core.ContentTyper = &SimpleFileFinder{}
 //
 // This FileFinder does not support the ObjectAt method.
 type SimpleFileFinder struct {
+	fs   core.AferoContext
+	opts SimpleFileFinderOptions
+}
+
+type SimpleFileFinderOptions struct {
 	// Default: false; means enable group directory
 	DisableGroupDirectory bool
 	// Default: ""; means use file names as the means of storage
@@ -63,11 +86,18 @@ type SimpleFileFinder struct {
 	FileExtensionResolver core.FileExtensionResolver
 }
 
+// TODO: Use group name "core" if group is "" to support core k8s objects.
+
+func (f *SimpleFileFinder) Filesystem() core.AferoContext {
+	return f.fs
+}
+
 // ObjectPath gets the file path relative to the root directory
-func (f *SimpleFileFinder) ObjectPath(ctx context.Context, fs core.AferoContext, id core.UnversionedObjectID, namespaced bool) (string, error) {
+func (f *SimpleFileFinder) ObjectPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
 	// /<kindpath>/
 	paths := []string{f.kindKeyPath(id.GroupKind())}
-	if namespaced {
+
+	if isObjectIDNamespaced(id) {
 		// ./<namespace>/
 		paths = append(paths, id.ObjectKey().Namespace)
 	}
@@ -76,18 +106,18 @@ func (f *SimpleFileFinder) ObjectPath(ctx context.Context, fs core.AferoContext,
 	if err != nil {
 		return "", err
 	}
-	if f.SubDirectoryFileName == "" {
+	if f.opts.SubDirectoryFileName == "" {
 		// ./<name>.<ext>
 		paths = append(paths, id.ObjectKey().Name+ext)
 	} else {
 		// ./<name>/<SubDirectoryFileName>.<ext>
-		paths = append(paths, id.ObjectKey().Name, f.SubDirectoryFileName+ext)
+		paths = append(paths, id.ObjectKey().Name, f.opts.SubDirectoryFileName+ext)
 	}
 	return filepath.Join(paths...), nil
 }
 
 func (f *SimpleFileFinder) kindKeyPath(gk core.GroupKind) string {
-	if f.DisableGroupDirectory {
+	if f.opts.DisableGroupDirectory {
 		// ./<kind>/
 		return filepath.Join(gk.Kind)
 	}
@@ -97,27 +127,62 @@ func (f *SimpleFileFinder) kindKeyPath(gk core.GroupKind) string {
 
 // ObjectAt retrieves the ID containing the virtual path based
 // on the given physical file path.
-func (f *SimpleFileFinder) ObjectAt(ctx context.Context, fs core.AferoContext, path string) (core.UnversionedObjectID, error) {
+func (f *SimpleFileFinder) ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error) {
 	return nil, errors.New("not implemented")
 }
 
-// ListNamespaces lists the available namespaces for the given GroupKind
-// This function shall only be called for namespaced objects, it is up to
-// the caller to make sure they do not call this method for root-spaced
-// objects; for that the behavior is undefined (but returning an error
-// is recommended).
-func (f *SimpleFileFinder) ListNamespaces(ctx context.Context, fs core.AferoContext, gk core.GroupKind) ([]string, error) {
-	return readDir(ctx, fs, f.kindKeyPath(gk))
+// ContentType always returns f.ContentType, or ContentTypeJSON as a fallback if
+// f.ContentType was not set.
+func (f *SimpleFileFinder) ContentType(ctx context.Context, _ core.UnversionedObjectID) (serializer.ContentType, error) {
+	return f.contentType(), nil
 }
 
-// ListObjectKeys returns a list of names (with optionally, the namespace).
+func (f *SimpleFileFinder) ext() (string, error) {
+	resolver := f.opts.FileExtensionResolver
+	if resolver == nil {
+		resolver = core.DefaultFileExtensionResolver
+	}
+	ext, err := resolver.ExtensionForContentType(f.contentType())
+	if err != nil {
+		return "", err
+	}
+	return ext, nil
+}
+
+func (f *SimpleFileFinder) contentType() serializer.ContentType {
+	if len(f.opts.ContentType) != 0 {
+		return f.opts.ContentType
+	}
+	return serializer.ContentTypeJSON
+}
+
+// ListNamespaces lists the available namespaces for the given GroupKind.
+// This function shall only be called for namespaced objects, it is up to
+// the caller to make sure they do not call this method for root-spaced
+// objects. If any of the given rules are violated, ErrNamespacedMismatch
+// should be returned as a wrapped error.
+//
+// The implementer can choose between basing the answer strictly on e.g.
+// v1.Namespace objects that exist in the system, or just the set of
+// different namespaces that have been set on any object belonging to
+// the given GroupKind.
+func (f *SimpleFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
+	entries, err := readDir(ctx, f.fs, f.kindKeyPath(gk))
+	if err != nil {
+		return nil, err
+	}
+	return sets.NewString(entries...), nil
+}
+
+// ListObjectIDs returns a list of unversioned ObjectIDs.
 // For namespaced GroupKinds, the caller must provide a namespace, and for
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
-// must only return object keys for that given namespace.
-func (f *SimpleFileFinder) ListObjectKeys(ctx context.Context, fs core.AferoContext, gk core.GroupKind, namespace string) ([]core.ObjectKey, error) {
+// must only return object IDs for that given namespace. If any of the given
+// rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
+func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
 	// If namespace is empty, the names will be in ./<kindkey>, otherwise ./<kindkey>/<ns>
 	namesDir := filepath.Join(f.kindKeyPath(gk), namespace)
-	entries, err := readDir(ctx, fs, namesDir)
+	entries, err := readDir(ctx, f.fs, namesDir)
 	if err != nil {
 		return nil, err
 	}
@@ -126,15 +191,15 @@ func (f *SimpleFileFinder) ListObjectKeys(ctx context.Context, fs core.AferoCont
 	if err != nil {
 		return nil, err
 	}
-	// Map the names to ObjectKeys
-	keys := make([]core.ObjectKey, 0, len(entries))
+	// Map the names to UnversionedObjectIDs
+	ids := make([]core.UnversionedObjectID, 0, len(entries))
 	for _, entry := range entries {
 		// Loop through all entries, and make sure they are sanitized .metadata.name's
-		if f.SubDirectoryFileName != "" {
+		if f.opts.SubDirectoryFileName != "" {
 			// If f.SubDirectoryFileName != "", the file names already match .metadata.name
 			// Make sure the metadata file ./<.metadata.name>/<SubDirectoryFileName>.<ext> actually exists
-			expectedPath := filepath.Join(namesDir, entry, f.SubDirectoryFileName+ext)
-			if exists, _ := fs.Exists(ctx, expectedPath); !exists {
+			expectedPath := filepath.Join(namesDir, entry, f.opts.SubDirectoryFileName+ext)
+			if exists, _ := f.fs.Exists(ctx, expectedPath); !exists {
 				continue
 			}
 		} else {
@@ -147,34 +212,9 @@ func (f *SimpleFileFinder) ListObjectKeys(ctx context.Context, fs core.AferoCont
 			entry = strings.TrimSuffix(entry, ext)
 		}
 		// If we got this far, add the key to the list
-		keys = append(keys, core.ObjectKey{Name: entry, Namespace: namespace})
+		ids = append(ids, core.NewUnversionedObjectID(gk, core.ObjectKey{Name: entry, Namespace: namespace}))
 	}
-	return keys, nil
-}
-
-// ContentTypeForPath always returns f.ContentType, or ContentTypeJSON as a fallback if
-// f.ContentType was not set.
-func (f *SimpleFileFinder) ContentTypeForPath(ctx context.Context, _ core.AferoContext, path string) (serializer.ContentType, error) {
-	return f.contentType(), nil
-}
-
-func (f *SimpleFileFinder) ext() (string, error) {
-	resolver := f.FileExtensionResolver
-	if resolver == nil {
-		resolver = core.DefaultFileExtensionResolver
-	}
-	ext, err := resolver.ExtensionForContentType(f.contentType())
-	if err != nil {
-		return "", err
-	}
-	return ext, nil
-}
-
-func (f *SimpleFileFinder) contentType() serializer.ContentType {
-	if len(f.ContentType) != 0 {
-		return f.ContentType
-	}
-	return serializer.ContentTypeJSON
+	return ids, nil
 }
 
 func readDir(ctx context.Context, fs core.AferoContext, dir string) ([]string, error) {

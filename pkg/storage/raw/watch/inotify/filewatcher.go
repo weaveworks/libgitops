@@ -61,7 +61,7 @@ func NewFileWatcher(dir string, opts ...FileWatcherOption) (watch.FileEventsEmit
 		opts: *o,
 		// afero operates on the local disk, but is by convention scoped to the local
 		// directory that is being watched
-		afero: core.AferoWithoutContext(afero.NewBasePathFs(afero.NewOsFs(), dir)),
+		afero: core.AferoContextWrapperForDir(afero.NewOsFs(), dir),
 
 		batcher: sync.NewBatchWriter(o.BatchTimeout),
 	}

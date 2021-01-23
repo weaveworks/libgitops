@@ -136,7 +136,7 @@ func (s *GenericUnstructuredEventStorage) Sync(ctx context.Context) error {
 		// TODO: Alternatively/also, we should support feeding an
 		// UnstructuredStorage, so that we can run its Sync() function instead
 
-		content, err := s.Filesystem().ReadFile(ctx, file)
+		content, err := s.FileFinder().Filesystem().ReadFile(ctx, file)
 		if err != nil {
 			logrus.Warnf("Ignoring %q: %v", file, err)
 			continue
@@ -160,7 +160,7 @@ func (s *GenericUnstructuredEventStorage) Sync(ctx context.Context) error {
 // Write writes the given content to the resource indicated by the ID.
 // Error returns are implementation-specific.
 func (s *GenericUnstructuredEventStorage) Write(ctx context.Context, id core.UnversionedObjectID, content []byte) error {
-	// Get the path
+	// Get the path and verify namespacing info
 	p, err := s.getPath(ctx, id)
 	if err != nil {
 		return err
@@ -174,7 +174,7 @@ func (s *GenericUnstructuredEventStorage) Write(ctx context.Context, id core.Unv
 // Delete deletes the resource indicated by the ID.
 // If the resource does not exist, it returns ErrNotFound.
 func (s *GenericUnstructuredEventStorage) Delete(ctx context.Context, id core.UnversionedObjectID) error {
-	// Get the path
+	// Get the path and verify namespacing info
 	p, err := s.getPath(ctx, id)
 	if err != nil {
 		return err
@@ -186,13 +186,12 @@ func (s *GenericUnstructuredEventStorage) Delete(ctx context.Context, id core.Un
 }
 
 func (s *GenericUnstructuredEventStorage) getPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
-	// Get namespacing info
-	namespaced, err := s.Namespacer().IsNamespaced(id.GroupKind())
-	if err != nil {
+	// Verify namespacing info
+	if err := raw.VerifyNamespaced(s.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace); err != nil {
 		return "", err
 	}
 	// Get the path
-	return s.FileFinder().ObjectPath(ctx, s.Filesystem(), id, namespaced)
+	return s.FileFinder().ObjectPath(ctx, id)
 }
 
 func (s *GenericUnstructuredEventStorage) Close() error {
@@ -239,7 +238,7 @@ func (s *GenericUnstructuredEventStorage) handleDelete(ctx context.Context, even
 	// the known objects in such a way that it is able to do the reverse-lookup. For
 	// mapped FileFinders, by this point the path should still be in the local cache,
 	// which should make us able to get the ID before deleted from the cache.
-	objectID, err := s.fileFinder.ObjectAt(ctx, s.Filesystem(), event.Path)
+	objectID, err := s.fileFinder.ObjectAt(ctx, event.Path)
 	if err != nil {
 		return fmt.Errorf("failed to reverse lookup ID for deleted file %q: %v", event.Path, err)
 	}
@@ -253,7 +252,7 @@ func (s *GenericUnstructuredEventStorage) handleDelete(ctx context.Context, even
 
 func (s *GenericUnstructuredEventStorage) handleModifyMove(ctx context.Context, event *FileEvent) error {
 	// Read the content of this modified, moved or created file
-	content, err := s.Filesystem().ReadFile(ctx, event.Path)
+	content, err := s.FileFinder().Filesystem().ReadFile(ctx, event.Path)
 	if err != nil {
 		return fmt.Errorf("could not read %q: %v", event.Path, err)
 	}

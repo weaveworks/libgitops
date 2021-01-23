@@ -2,9 +2,17 @@ package raw
 
 import (
 	"context"
+	"errors"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"k8s.io/apimachinery/pkg/util/sets"
+)
+
+var (
+	// ErrNamespacedMismatch is returned by Storage methods if the given UnversionedObjectID
+	// carries invalid data, according to the Namespacer.
+	ErrNamespacedMismatch = errors.New("mismatch between namespacing info for object and the given parameter")
 )
 
 // Storage is a Key-indexed low-level interface to
@@ -23,20 +31,18 @@ type Storage interface {
 	Writer
 }
 
-// Accessors allows access to lower-level interfaces needed by Storage.
-type Accessors interface {
+// StorageCommon is an interface that contains the resources both needed
+// by Reader and Writer.
+type StorageCommon interface {
 	// Namespacer gives access to the namespacer that is used
 	Namespacer() core.Namespacer
-	// Filesystem gets the underlying filesystem abstraction, if
-	// applicable.
-	Filesystem() core.AferoContext
+	// Exists checks if the resource indicated by the ID exists.
+	Exists(ctx context.Context, id core.UnversionedObjectID) bool
 }
 
 // Reader provides the read operations for the Storage.
 type Reader interface {
-	Accessors
-
-	// Read operations
+	StorageCommon
 
 	// Read returns a resource's content based on the ID.
 	// If the resource does not exist, it returns core.NewErrNotFound.
@@ -45,23 +51,40 @@ type Reader interface {
 	// content type, and possibly, path on disk (in the case of
 	// FilesystemStorage), or core.NewErrNotFound if not found
 	Stat(ctx context.Context, id core.UnversionedObjectID) (ObjectInfo, error)
-	// Exists checks if the resource indicated by the ID exists. It is
-	// a shorthand for running Stat() and checking that error was nil.
-	Exists(ctx context.Context, id core.UnversionedObjectID) bool
-	// Checksum returns the ContentType. This operation must function
-	// also before the Object with the given id exists in the system,
-	// in order to support creating new Objects.
-	ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error)
+	// Resolve ContentType
+	ContentTypeResolver
 
 	// List operations
+	Lister
+}
 
-	// List returns all matching object keys based on the given KindKey.
-	// If the GroupKind is namespaced (according to the Namespacer), and
-	// namespace is empty: all namespaces are searched. If namespace in
-	// that case is set; only that namespace is searched. If the GroupKind
-	// is non-namespaced, and namespace is non-empty, an error is returned.
-	// TODO: Make this return []core.UnversionedObjectID instead?
-	List(ctx context.Context, gk core.GroupKind, namespace string) ([]core.ObjectKey, error)
+type ContentTypeResolver interface {
+	// ContentType returns the content type that should be used when serializing
+	// the object with the given ID. This operation must function also before the
+	// Object with the given id exists in the system, in order to be able to
+	// create new Objects.
+	ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error)
+}
+
+type Lister interface {
+	// ListNamespaces lists the available namespaces for the given GroupKind.
+	// This function shall only be called for namespaced objects, it is up to
+	// the caller to make sure they do not call this method for root-spaced
+	// objects. If any of the given rules are violated, ErrNamespacedMismatch
+	// should be returned as a wrapped error.
+	//
+	// The implementer can choose between basing the answer strictly on e.g.
+	// v1.Namespace objects that exist in the system, or just the set of
+	// different namespaces that have been set on any object belonging to
+	// the given GroupKind.
+	ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error)
+
+	// ListObjectIDs returns a list of unversioned ObjectIDs.
+	// For namespaced GroupKinds, the caller must provide a namespace, and for
+	// root-spaced GroupKinds, the caller must not. When namespaced, this function
+	// must only return object IDs for that given namespace. If any of the given
+	// rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
+	ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error)
 }
 
 // ObjectInfo is the return value from Storage.Stat(). It provides the
@@ -99,9 +122,7 @@ type ChecksumContainer interface {
 
 // Reader provides the write operations for the Storage.
 type Writer interface {
-	Accessors
-
-	// Write operations
+	StorageCommon
 
 	// Write writes the given content to the resource indicated by the ID.
 	// Error returns are implementation-specific.
@@ -117,38 +138,36 @@ type Writer interface {
 type FilesystemStorage interface {
 	Storage
 
-	// RootDirectory returns the root directory of this FilesystemStorage.
-	RootDirectory() string
 	// FileFinder returns the underlying FileFinder used.
+	// TODO: Maybe one Storage can have multiple FileFinders?
 	FileFinder() FileFinder
 }
 
 // FileFinder is a generic implementation for locating files on disk, to be
 // used by a FilesystemStorage.
+//
+// Important: The caller MUST guarantee that the implementation can figure
+// out if the GroupKind is namespaced or not by the following check:
+//
+// namespaced := id.ObjectKey().Namespace != ""
+//
+// In other words, the caller must enforce a namespace being set for namespaced
+// kinds, and namespace not being set for non-namespaced kinds.
 type FileFinder interface {
-	// FileFinder must be able to provide a ContentType for a path, although
-	// that path might not exist (i.e. in a create operation).
-	core.ContentTyper
+	// Filesystem gets the underlying filesystem abstraction, if
+	// applicable.
+	Filesystem() core.AferoContext
 
 	// ObjectPath gets the file path relative to the root directory.
 	// In order to support a create operation, this function must also return a valid path for
 	// files that do not yet exist on disk.
-	ObjectPath(ctx context.Context, fs core.AferoContext, id core.UnversionedObjectID, namespaced bool) (string, error)
+	ObjectPath(ctx context.Context, id core.UnversionedObjectID) (string, error)
 	// ObjectAt retrieves the ID based on the given relative file path to fs.
-	ObjectAt(ctx context.Context, fs core.AferoContext, path string) (core.UnversionedObjectID, error)
-
-	// ListNamespaces lists the available namespaces for the given GroupKind
-	// This function shall only be called for namespaced objects, it is up to
-	// the caller to make sure they do not call this method for root-spaced
-	// objects; for that the behavior is undefined (but returning an error
-	// is recommended).
-	ListNamespaces(ctx context.Context, fs core.AferoContext, gk core.GroupKind) ([]string, error)
-	// ListObjectKeys returns a list of names (with optionally, the namespace).
-	// For namespaced GroupKinds, the caller must provide a namespace, and for
-	// root-spaced GroupKinds, the caller must not. When namespaced, this function
-	// must only return object keys for that given namespace.
-	// TODO: Make this return []core.UnversionedObjectID instead?
-	ListObjectKeys(ctx context.Context, fs core.AferoContext, gk core.GroupKind, namespace string) ([]core.ObjectKey, error)
+	ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error)
+	// The FileFinder should be able to resolve the content type for various IDs
+	ContentTypeResolver
+	// The FileFinder should be able to list namespaces and Object IDs
+	Lister
 }
 
 // MappedFileFinder is an extension to FileFinder that allows it to have an internal
@@ -166,8 +185,8 @@ type MappedFileFinder interface {
 	// SetMapping binds an ID to a physical file path. This operation overwrites
 	// any previous mapping for id.
 	SetMapping(ctx context.Context, id core.UnversionedObjectID, checksumPath ChecksumPath)
-	// SetMappings replaces all mappings at once to the ones in m.
-	SetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath)
+	// ResetMappings replaces all mappings at once to the ones in m.
+	ResetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath)
 	// DeleteMapping removes the mapping for the given id.
 	DeleteMapping(ctx context.Context, id core.UnversionedObjectID)
 }
@@ -188,6 +207,9 @@ type UnstructuredStorage interface {
 
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
 	ObjectRecognizer() core.ObjectRecognizer
+	// PathExcluder specifies what paths to not sync
+	// TODO: enable this
+	// PathExcluder() core.PathExcluder
 	// MappedFileFinder returns the underlying MappedFileFinder used.
 	MappedFileFinder() MappedFileFinder
 }

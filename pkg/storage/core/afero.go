@@ -10,6 +10,11 @@ import (
 
 // AferoContext extends afero.Fs and afero.Afero with contexts added to every method.
 type AferoContext interface {
+	// RootDirectory specifies where on disk the root directory is stored.
+	// This path MUST be absolute. All other paths for the other methods
+	// MUST be relative to this directory.
+	RootDirectory() string
+
 	// Members of afero.Fs
 
 	// MkdirAll creates a directory path and all parents that does not exist
@@ -35,14 +40,27 @@ type AferoContext interface {
 	Walk(ctx context.Context, root string, walkFn filepath.WalkFunc) error
 }
 
-// AferoWithoutContext wraps an underlying afero.Fs without context knowledge,
-// in a AferoContext-compliant implementation.
-func AferoWithoutContext(fs afero.Fs) AferoContext {
-	return &aferoWithoutCtx{fs}
+// AferoContextForLocalDir creates a new afero.OsFs for the local directory, wrapped
+// in AferoContextWrapperForDir.
+func AferoContextForLocalDir(rootDir string) AferoContext {
+	return AferoContextWrapperForDir(afero.NewOsFs(), rootDir)
+}
+
+// AferoContextWrapperForDir wraps an underlying afero.Fs without context knowledge,
+// in a AferoContext-compliant implementation; scoped at the given directory
+// (i.e. wrapped in afero.NewBasePathFs(fs, rootDir)).
+func AferoContextWrapperForDir(fs afero.Fs, rootDir string) AferoContext {
+	// TODO: rootDir validation? It must be absolute, exist, and be a directory.
+	return &aferoWithoutCtx{afero.NewBasePathFs(fs, rootDir), rootDir}
 }
 
 type aferoWithoutCtx struct {
-	fs afero.Fs
+	fs      afero.Fs
+	rootDir string
+}
+
+func (a *aferoWithoutCtx) RootDirectory() string {
+	return a.rootDir
 }
 
 func (a *aferoWithoutCtx) MkdirAll(_ context.Context, path string, perm os.FileMode) error {

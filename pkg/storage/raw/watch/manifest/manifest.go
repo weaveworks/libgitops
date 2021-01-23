@@ -17,8 +17,9 @@ func NewManifestStorage(
 	recognizer core.ObjectRecognizer,
 	pathExcluder core.PathExcluder,
 ) (watch.UnstructuredEventStorage, error) {
-	fileFinder := raw.NewGenericMappedFileFinder(contentTyper)
-	fsRaw, err := raw.NewGenericFilesystemStorage(dir, fileFinder, namespacer)
+	fs := core.AferoContextForLocalDir(dir)
+	fileFinder := raw.NewGenericMappedFileFinder(contentTyper, fs)
+	fsRaw, err := raw.NewGenericFilesystemStorage(fileFinder, namespacer)
 	if err != nil {
 		return nil, err
 	}
