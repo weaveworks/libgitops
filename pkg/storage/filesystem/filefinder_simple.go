@@ -16,14 +16,14 @@ import (
 // NewSimpleStorage is a default opinionated constructor for a Storage
 // using SimpleFileFinder as the FileFinder, and the local disk as target.
 // If you need more advanced customizablility than provided here, you can compose
-// the call to NewGenericStorage yourself.
+// the call to filesystem.NewGeneric yourself.
 func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFinderOptions) (Storage, error) {
 	fs := NewOSFilesystem(dir)
 	fileFinder, err := NewSimpleFileFinder(fs, opts)
 	if err != nil {
 		return nil, err
 	}
-	// fileFinder and namespacer are validated by NewGenericStorage.
+	// fileFinder and namespacer are validated by filesystem.NewGeneric.
 	return NewGeneric(fileFinder, namespacer)
 }
 
@@ -31,7 +31,20 @@ func NewSimpleFileFinder(fs Filesystem, opts SimpleFileFinderOptions) (*SimpleFi
 	if fs == nil {
 		return nil, fmt.Errorf("NewSimpleFileFinder: fs is mandatory")
 	}
-	return &SimpleFileFinder{fs: fs, opts: opts}, nil
+	ct := serializer.ContentTypeJSON
+	if len(opts.ContentType) != 0 {
+		ct = opts.ContentType
+	}
+	resolver := DefaultFileExtensionResolver
+	if opts.FileExtensionResolver != nil {
+		resolver = opts.FileExtensionResolver
+	}
+	return &SimpleFileFinder{
+		fs:           fs,
+		opts:         opts,
+		contentTyper: StaticContentTyper{ContentType: ct},
+		resolver:     resolver,
+	}, nil
 }
 
 // isObjectIDNamespaced returns true if the ID is of a namespaced GroupKind, and
@@ -68,8 +81,10 @@ var _ FileFinder = &SimpleFileFinder{}
 //
 // This FileFinder does not support the ObjectAt method.
 type SimpleFileFinder struct {
-	fs   Filesystem
-	opts SimpleFileFinderOptions
+	fs           Filesystem
+	opts         SimpleFileFinderOptions
+	contentTyper StaticContentTyper
+	resolver     FileExtensionResolver
 }
 
 type SimpleFileFinderOptions struct {
@@ -87,6 +102,10 @@ type SimpleFileFinderOptions struct {
 
 func (f *SimpleFileFinder) Filesystem() Filesystem {
 	return f.fs
+}
+
+func (f *SimpleFileFinder) ContentTyper() ContentTyper {
+	return f.contentTyper
 }
 
 // ObjectPath gets the file path relative to the root directory
@@ -128,29 +147,8 @@ func (f *SimpleFileFinder) ObjectAt(ctx context.Context, path string) (core.Unve
 	return nil, errors.New("not implemented")
 }
 
-// ContentType always returns f.ContentType, or ContentTypeJSON as a fallback if
-// f.ContentType was not set.
-func (f *SimpleFileFinder) ContentType(ctx context.Context, _ core.UnversionedObjectID) (serializer.ContentType, error) {
-	return f.contentType(), nil
-}
-
 func (f *SimpleFileFinder) ext() (string, error) {
-	resolver := f.opts.FileExtensionResolver
-	if resolver == nil {
-		resolver = DefaultFileExtensionResolver
-	}
-	ext, err := resolver.ExtensionForContentType(f.contentType())
-	if err != nil {
-		return "", err
-	}
-	return ext, nil
-}
-
-func (f *SimpleFileFinder) contentType() serializer.ContentType {
-	if len(f.opts.ContentType) != 0 {
-		return f.opts.ContentType
-	}
-	return serializer.ContentTypeJSON
+	return f.resolver.ExtensionForContentType(f.contentTyper.ContentType)
 }
 
 // ListNamespaces lists the available namespaces for the given GroupKind.

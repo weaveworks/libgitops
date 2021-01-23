@@ -49,6 +49,19 @@ func (m ContentTypeForExtension) ContentTypeForPath(ctx context.Context, _ Files
 	return ct, nil
 }
 
+// StaticContentTyper always responds with the same, statically-set, ContentType for any path.
+type StaticContentTyper struct {
+	// ContentType is a required field
+	ContentType serializer.ContentType
+}
+
+func (t StaticContentTyper) ContentTypeForPath(_ context.Context, _ Filesystem, _ string) (serializer.ContentType, error) {
+	if len(t.ContentType) == 0 {
+		return "", fmt.Errorf("StaticContentTyper.ContentType must not be empty")
+	}
+	return t.ContentType, nil
+}
+
 // FileExtensionResolver knows how to resolve what file extension to use for
 // a given ContentType.
 type FileExtensionResolver interface {

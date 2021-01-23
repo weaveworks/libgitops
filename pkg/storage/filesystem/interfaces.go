@@ -33,14 +33,17 @@ type FileFinder interface {
 	// applicable.
 	Filesystem() Filesystem
 
+	// ContentTyper gets the underlying ContentTyper used. The ContentTyper
+	// must always return a result although the underlying given path doesn't
+	// exist.
+	ContentTyper() ContentTyper
+
 	// ObjectPath gets the file path relative to the root directory.
 	// In order to support a create operation, this function must also return a valid path for
 	// files that do not yet exist on disk.
 	ObjectPath(ctx context.Context, id core.UnversionedObjectID) (string, error)
 	// ObjectAt retrieves the ID based on the given relative file path to fs.
 	ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error)
-	// The FileFinder should be able to resolve the content type for various IDs
-	storage.ContentTypeResolver
 	// The FileFinder should be able to list namespaces and Object IDs
 	storage.Lister
 }
