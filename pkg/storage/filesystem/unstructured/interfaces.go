@@ -19,13 +19,12 @@ type Storage interface {
 
 	// Sync synchronizes the current state of the filesystem with the
 	// cached mappings in the MappedFileFinder.
-	Sync(ctx context.Context) error
+	Sync(ctx context.Context) ([]ChecksumPathID, error)
 
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
 	ObjectRecognizer() core.ObjectRecognizer
 	// PathExcluder specifies what paths to not sync
-	// TODO: enable this
-	// PathExcluder() core.PathExcluder
+	PathExcluder() filesystem.PathExcluder
 	// MappedFileFinder returns the underlying MappedFileFinder used.
 	MappedFileFinder() MappedFileFinder
 }
@@ -54,9 +53,23 @@ type MappedFileFinder interface {
 // ChecksumPath is a tuple of a given Checksum and relative file Path,
 // for use in MappedFileFinder.
 type ChecksumPath struct {
-	// TODO: Implement ChecksumContainer, or make ChecksumPath a
-	// sub-interface of ObjectID?
+	// Checksum is the checksum of the file at the given path.
+	//
+	// What the checksum is is application-dependent, however, it
+	// should be the same for two invocations, as long as the stored
+	// data is the same. It might change over time although the
+	// underlying data did not. Examples of checksums that can be
+	// used is: the file modification timestamp, a sha256sum of the
+	// file content, or the latest Git commit when the file was
+	// changed.
+	//
+	// The checksum is calculated by the filesystem.Filesystem.
 	Checksum string
-	// Note: path is relative to filesystem.Filesystem.RootDirectory().
+	// Path to the file, relative to filesystem.Filesystem.RootDirectory().
 	Path string
+}
+
+type ChecksumPathID struct {
+	ChecksumPath
+	ID core.ObjectID
 }
