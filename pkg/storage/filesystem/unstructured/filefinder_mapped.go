@@ -1,4 +1,4 @@
-package raw
+package unstructured
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"github.com/fluxcd/go-git-providers/validation"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -21,9 +22,9 @@ var _ MappedFileFinder = &GenericMappedFileFinder{}
 // NewGenericMappedFileFinder creates a new instance of GenericMappedFileFinder,
 // that implements the MappedFileFinder interface. The contentTyper is optional,
 // by default core.DefaultContentTyper will be used.
-func NewGenericMappedFileFinder(contentTyper core.ContentTyper, fs core.AferoContext) MappedFileFinder {
+func NewGenericMappedFileFinder(contentTyper filesystem.ContentTyper, fs filesystem.AferoContext) MappedFileFinder {
 	if contentTyper == nil {
-		contentTyper = core.DefaultContentTyper
+		contentTyper = filesystem.DefaultContentTyper
 	}
 	if fs == nil {
 		panic("NewGenericMappedFileFinder: fs is mandatory")
@@ -47,13 +48,13 @@ func NewGenericMappedFileFinder(contentTyper core.ContentTyper, fs core.AferoCon
 // Objects without someone calling SetMapping() first.
 type GenericMappedFileFinder struct {
 	// Default: DefaultContentTyper
-	contentTyper core.ContentTyper
-	fs           core.AferoContext
+	contentTyper filesystem.ContentTyper
+	fs           filesystem.AferoContext
 
 	branch branch
 }
 
-func (f *GenericMappedFileFinder) Filesystem() core.AferoContext {
+func (f *GenericMappedFileFinder) Filesystem() filesystem.AferoContext {
 	return f.fs
 }
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/rjeczalik/notify"
-	"github.com/weaveworks/libgitops/pkg/storage/raw/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
 	"golang.org/x/sys/unix"
 )
 

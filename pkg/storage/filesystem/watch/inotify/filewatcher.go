@@ -12,7 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/afero"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
-	"github.com/weaveworks/libgitops/pkg/storage/raw/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/util/sets"

@@ -1,4 +1,4 @@
-package raw
+package filesystem
 
 import (
 	"context"
@@ -13,21 +13,21 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-// NewSimpleStorage is a default opinionated constructor for a FilesystemStorage
+// NewSimpleStorage is a default opinionated constructor for a Storage
 // using SimpleFileFinder as the FileFinder, and the local disk as target.
 // If you need more advanced customizablility than provided here, you can compose
-// the call to NewGenericFilesystemStorage yourself.
-func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFinderOptions) (FilesystemStorage, error) {
-	fs := core.AferoContextForLocalDir(dir)
+// the call to NewGenericStorage yourself.
+func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFinderOptions) (Storage, error) {
+	fs := AferoContextForLocalDir(dir)
 	fileFinder, err := NewSimpleFileFinder(fs, opts)
 	if err != nil {
 		return nil, err
 	}
-	// fileFinder and namespacer are validated by NewGenericFilesystemStorage.
-	return NewGenericFilesystemStorage(fileFinder, namespacer)
+	// fileFinder and namespacer are validated by NewGenericStorage.
+	return NewGeneric(fileFinder, namespacer)
 }
 
-func NewSimpleFileFinder(fs core.AferoContext, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
+func NewSimpleFileFinder(fs AferoContext, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
 	if fs == nil {
 		return nil, fmt.Errorf("NewSimpleFileFinder: fs is mandatory")
 	}
@@ -68,7 +68,7 @@ var _ FileFinder = &SimpleFileFinder{}
 //
 // This FileFinder does not support the ObjectAt method.
 type SimpleFileFinder struct {
-	fs   core.AferoContext
+	fs   AferoContext
 	opts SimpleFileFinderOptions
 }
 
@@ -80,12 +80,12 @@ type SimpleFileFinderOptions struct {
 	// Default: serializer.ContentTypeJSON
 	ContentType serializer.ContentType
 	// Default: DefaultFileExtensionResolver
-	FileExtensionResolver core.FileExtensionResolver
+	FileExtensionResolver FileExtensionResolver
 }
 
 // TODO: Use group name "core" if group is "" to support core k8s objects.
 
-func (f *SimpleFileFinder) Filesystem() core.AferoContext {
+func (f *SimpleFileFinder) Filesystem() AferoContext {
 	return f.fs
 }
 
@@ -137,7 +137,7 @@ func (f *SimpleFileFinder) ContentType(ctx context.Context, _ core.UnversionedOb
 func (f *SimpleFileFinder) ext() (string, error) {
 	resolver := f.opts.FileExtensionResolver
 	if resolver == nil {
-		resolver = core.DefaultFileExtensionResolver
+		resolver = DefaultFileExtensionResolver
 	}
 	ext, err := resolver.ExtensionForContentType(f.contentType())
 	if err != nil {
@@ -214,7 +214,7 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 	return ids, nil
 }
 
-func readDir(ctx context.Context, fs core.AferoContext, dir string) ([]string, error) {
+func readDir(ctx context.Context, fs AferoContext, dir string) ([]string, error) {
 	fi, err := fs.Stat(ctx, dir)
 	if os.IsNotExist(err) {
 		// It's ok if the directory doesn't exist (yet), we just don't have any items then :)

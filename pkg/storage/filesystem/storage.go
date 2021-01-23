@@ -1,4 +1,4 @@
-package raw
+package filesystem
 
 import (
 	"context"
@@ -8,47 +8,48 @@ import (
 	"strconv"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-// NewGenericFilesystemStorage creates a new GenericFilesystemStorage using the given lower-level
+// NewGeneric creates a new Generic using the given lower-level
 // FileFinder and Namespacer.
-func NewGenericFilesystemStorage(fileFinder FileFinder, namespacer core.Namespacer) (FilesystemStorage, error) {
+func NewGeneric(fileFinder FileFinder, namespacer core.Namespacer) (Storage, error) {
 	if fileFinder == nil {
-		return nil, fmt.Errorf("NewGenericFilesystemStorage: fileFinder is mandatory")
+		return nil, fmt.Errorf("NewGeneric: fileFinder is mandatory")
 	}
 	if namespacer == nil {
-		return nil, fmt.Errorf("NewGenericFilesystemStorage: namespacer is mandatory")
+		return nil, fmt.Errorf("NewGeneric: namespacer is mandatory")
 	}
 
-	return &GenericFilesystemStorage{
+	return &Generic{
 		fileFinder: fileFinder,
 		namespacer: namespacer,
 	}, nil
 }
 
-// GenericFilesystemStorage is a FilesystemStorage-compliant implementation, that
+// Generic is a Storage-compliant implementation, that
 // combines the given lower-level FileFinder, Namespacer and AferoContext interfaces
 // in a generic manner.
 //
 // Checksum is calculated based on the modification timestamp of the file, or
 // alternatively, from info.Sys() returned from AferoContext.Stat(), if it can
 // be cast to a ChecksumContainer.
-type GenericFilesystemStorage struct {
+type Generic struct {
 	fileFinder FileFinder
 	namespacer core.Namespacer
 }
 
-func (r *GenericFilesystemStorage) Namespacer() core.Namespacer {
+func (r *Generic) Namespacer() core.Namespacer {
 	return r.namespacer
 }
 
-func (r *GenericFilesystemStorage) FileFinder() FileFinder {
+func (r *Generic) FileFinder() FileFinder {
 	return r.fileFinder
 }
 
-func (r *GenericFilesystemStorage) Read(ctx context.Context, id core.UnversionedObjectID) ([]byte, error) {
+func (r *Generic) Read(ctx context.Context, id core.UnversionedObjectID) ([]byte, error) {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
@@ -62,7 +63,7 @@ func (r *GenericFilesystemStorage) Read(ctx context.Context, id core.Unversioned
 	return r.FileFinder().Filesystem().ReadFile(ctx, p)
 }
 
-func (r *GenericFilesystemStorage) Exists(ctx context.Context, id core.UnversionedObjectID) bool {
+func (r *Generic) Exists(ctx context.Context, id core.UnversionedObjectID) bool {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
@@ -71,12 +72,12 @@ func (r *GenericFilesystemStorage) Exists(ctx context.Context, id core.Unversion
 	return r.exists(ctx, p)
 }
 
-func (r *GenericFilesystemStorage) exists(ctx context.Context, path string) bool {
+func (r *Generic) exists(ctx context.Context, path string) bool {
 	exists, _ := r.FileFinder().Filesystem().Exists(ctx, path)
 	return exists
 }
 
-func (r *GenericFilesystemStorage) Stat(ctx context.Context, id core.UnversionedObjectID) (ObjectInfo, error) {
+func (r *Generic) Stat(ctx context.Context, id core.UnversionedObjectID) (storage.ObjectInfo, error) {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
@@ -94,7 +95,7 @@ func (r *GenericFilesystemStorage) Stat(ctx context.Context, id core.Unversioned
 	// Get checksum
 	checksum := checksumFromFileInfo(info)
 	// Allow a custom implementation of afero return ObjectInfo directly
-	if chk, ok := info.Sys().(ChecksumContainer); ok {
+	if chk, ok := info.Sys().(storage.ChecksumContainer); ok {
 		checksum = chk.Checksum()
 	}
 
@@ -104,15 +105,10 @@ func (r *GenericFilesystemStorage) Stat(ctx context.Context, id core.Unversioned
 		return nil, err
 	}
 
-	return &objectInfo{
-		ct:       contentType,
-		checksum: checksum,
-		filepath: p,
-		id:       id,
-	}, nil
+	return storage.NewObjectInfo(contentType, checksum, p, id), nil
 }
 
-func (r *GenericFilesystemStorage) ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error) {
+func (r *Generic) ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error) {
 	// Verify namespacing info
 	if err := r.verifyID(id); err != nil {
 		return "", err
@@ -121,7 +117,7 @@ func (r *GenericFilesystemStorage) ContentType(ctx context.Context, id core.Unve
 	return r.FileFinder().ContentType(ctx, id)
 }
 
-func (r *GenericFilesystemStorage) Write(ctx context.Context, id core.UnversionedObjectID, content []byte) error {
+func (r *Generic) Write(ctx context.Context, id core.UnversionedObjectID, content []byte) error {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
@@ -138,7 +134,7 @@ func (r *GenericFilesystemStorage) Write(ctx context.Context, id core.Unversione
 	return r.FileFinder().Filesystem().WriteFile(ctx, p, content, 0664)
 }
 
-func (r *GenericFilesystemStorage) Delete(ctx context.Context, id core.UnversionedObjectID) error {
+func (r *Generic) Delete(ctx context.Context, id core.UnversionedObjectID) error {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
@@ -158,14 +154,14 @@ func (r *GenericFilesystemStorage) Delete(ctx context.Context, id core.Unversion
 // the caller to make sure they do not call this method for root-spaced
 // objects; for that the behavior is undefined (but returning an error
 // is recommended).
-func (r *GenericFilesystemStorage) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
+func (r *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
 	namespaced, err := r.namespacer.IsNamespaced(gk)
 	if err != nil {
 		return nil, err
 	}
 	// Validate the groupkind
 	if !namespaced {
-		return nil, fmt.Errorf("%w: cannot list namespaces for non-namespaced kind: %v", ErrNamespacedMismatch, gk)
+		return nil, fmt.Errorf("%w: cannot list namespaces for non-namespaced kind: %v", storage.ErrNamespacedMismatch, gk)
 	}
 	// Just use the underlying filefinder
 	return r.FileFinder().ListNamespaces(ctx, gk)
@@ -175,7 +171,7 @@ func (r *GenericFilesystemStorage) ListNamespaces(ctx context.Context, gk core.G
 // For namespaced GroupKinds, the caller must provide a namespace, and for
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
 // must only return object IDs for that given namespace.
-func (r *GenericFilesystemStorage) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
+func (r *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
 	// Validate the namespace parameter
 	if err := VerifyNamespaced(r.Namespacer(), gk, namespace); err != nil {
 		return nil, err
@@ -184,7 +180,7 @@ func (r *GenericFilesystemStorage) ListObjectIDs(ctx context.Context, gk core.Gr
 	return r.FileFinder().ListObjectIDs(ctx, gk, namespace)
 }
 
-func (r *GenericFilesystemStorage) getPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
+func (r *Generic) getPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
 	// Verify namespacing info
 	if err := r.verifyID(id); err != nil {
 		return "", err
@@ -193,7 +189,7 @@ func (r *GenericFilesystemStorage) getPath(ctx context.Context, id core.Unversio
 	return r.FileFinder().ObjectPath(ctx, id)
 }
 
-func (r *GenericFilesystemStorage) verifyID(id core.UnversionedObjectID) error {
+func (r *Generic) verifyID(id core.UnversionedObjectID) error {
 	return VerifyNamespaced(r.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace)
 }
 
@@ -211,9 +207,9 @@ func VerifyNamespaced(namespacer core.Namespacer, gk core.GroupKind, ns string) 
 		return err
 	}
 	if namespaced && ns == "" {
-		return fmt.Errorf("%w: namespaced kind %v requires non-empty namespace", ErrNamespacedMismatch, gk)
+		return fmt.Errorf("%w: namespaced kind %v requires non-empty namespace", storage.ErrNamespacedMismatch, gk)
 	} else if !namespaced && ns != "" {
-		return fmt.Errorf("%w: non-namespaced kind %v must not have namespace parameter set", ErrNamespacedMismatch, gk)
+		return fmt.Errorf("%w: non-namespaced kind %v must not have namespace parameter set", storage.ErrNamespacedMismatch, gk)
 	}
 	return nil
 }

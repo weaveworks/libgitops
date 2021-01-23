@@ -1,4 +1,4 @@
-package core
+package filesystem
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package raw
+package unstructured
 
 import "github.com/weaveworks/libgitops/pkg/storage/core"
 

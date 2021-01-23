@@ -2,13 +2,12 @@ package manifest
 
 import (
 	"github.com/weaveworks/libgitops/pkg/storage/core"
-	"github.com/weaveworks/libgitops/pkg/storage/raw"
-	"github.com/weaveworks/libgitops/pkg/storage/raw/watch"
-	"github.com/weaveworks/libgitops/pkg/storage/raw/watch/inotify"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/watch/inotify"
 )
 
 // NewManifestStorage is a high-level constructor for a generic
-// MappedFileFinder and FilesystemStorage, together with a
+// MappedFileFinder and filesystem.Storage, together with a
 // inotify FileWatcher; all combined into an UnstructuredEventStorage.
 func NewManifestStorage(
 	dir string,

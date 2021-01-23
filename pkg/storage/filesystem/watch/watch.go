@@ -8,7 +8,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
-	"github.com/weaveworks/libgitops/pkg/storage/raw"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 )
 
@@ -16,7 +15,7 @@ const defaultEventsBufferSize = 4096
 
 // NewGenericUnstructuredEventStorage is an extended Storage implementation, which
 // together with the provided ObjectRecognizer and FileEventsEmitter listens for
-// file events, keeps the mappings of the FilesystemStorage's MappedFileFinder
+// file events, keeps the mappings of the filesystem.Storage's MappedFileFinder
 // in sync (s must use the mapped variant), and sends high-level ObjectEvents
 // upstream.
 //
@@ -31,7 +30,7 @@ func NewGenericUnstructuredEventStorage(
 	// TODO: Possibly relax this requirement later, maybe it can also work for the SimpleFileFinder?
 	fileFinder, ok := s.FileFinder().(raw.MappedFileFinder)
 	if !ok {
-		return nil, errors.New("the given FilesystemStorage must use a MappedFileFinder")
+		return nil, errors.New("the given filesystem.Storage must use a MappedFileFinder")
 	}
 
 	return &GenericUnstructuredEventStorage{

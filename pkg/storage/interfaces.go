@@ -1,8 +1,9 @@
-package raw
+package storage
 
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
@@ -49,7 +50,7 @@ type Reader interface {
 	Read(ctx context.Context, id core.UnversionedObjectID) ([]byte, error)
 	// Stat returns information about the object, e.g. checksum,
 	// content type, and possibly, path on disk (in the case of
-	// FilesystemStorage), or core.NewErrNotFound if not found
+	// filesystem.Storage), or core.NewErrNotFound if not found
 	Stat(ctx context.Context, id core.UnversionedObjectID) (ObjectInfo, error)
 	// Resolve ContentType
 	ContentTypeResolver
@@ -90,7 +91,7 @@ type Lister interface {
 // ObjectInfo is the return value from Storage.Stat(). It provides the
 // user with information about the given Object, e.g. its ContentType,
 // a checksum, and its relative path on disk, if the Storage is a
-// FilesystemStorage.
+// filesystem.Storage.
 type ObjectInfo interface {
 	// ContentTyped returns the ContentType of the Object when stored.
 	serializer.ContentTyped
@@ -132,94 +133,25 @@ type Writer interface {
 	Delete(ctx context.Context, id core.UnversionedObjectID) error
 }
 
-// FilesystemStorage extends Storage by specializing it to operate in a
-// filesystem context, and in other words use a FileFinder to locate the
-// files to operate on.
-type FilesystemStorage interface {
+// EventStorageCommon contains the methods that EventStorage adds to the
+// to the normal Storage.
+type EventStorageCommon interface {
+	// WatchForObjectEvents starts feeding ObjectEvents into the given "into"
+	// channel. The caller is responsible for setting a channel buffering
+	// limit large enough to not block normal operation. An error might
+	// be returned if a maximum amount of watches has been opened already,
+	// e.g. ErrTooManyWatches.
+	WatchForObjectEvents(ctx context.Context, into ObjectEventStream) error
+
+	// Close closes the EventStorage and underlying resources gracefully.
+	io.Closer
+}
+
+// EventStorage is the abstract combination of a normal Storage, and
+// a possiblility to listen for changes to objects as they change.
+// TODO: Maybe we could use some of controller-runtime's built-in functionality
+// for watching for changes?
+type EventStorage interface {
 	Storage
-
-	// FileFinder returns the underlying FileFinder used.
-	// TODO: Maybe one Storage can have multiple FileFinders?
-	FileFinder() FileFinder
-}
-
-// FileFinder is a generic implementation for locating files on disk, to be
-// used by a FilesystemStorage.
-//
-// Important: The caller MUST guarantee that the implementation can figure
-// out if the GroupKind is namespaced or not by the following check:
-//
-// namespaced := id.ObjectKey().Namespace != ""
-//
-// In other words, the caller must enforce a namespace being set for namespaced
-// kinds, and namespace not being set for non-namespaced kinds.
-type FileFinder interface {
-	// Filesystem gets the underlying filesystem abstraction, if
-	// applicable.
-	Filesystem() core.AferoContext
-
-	// ObjectPath gets the file path relative to the root directory.
-	// In order to support a create operation, this function must also return a valid path for
-	// files that do not yet exist on disk.
-	ObjectPath(ctx context.Context, id core.UnversionedObjectID) (string, error)
-	// ObjectAt retrieves the ID based on the given relative file path to fs.
-	ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error)
-	// The FileFinder should be able to resolve the content type for various IDs
-	ContentTypeResolver
-	// The FileFinder should be able to list namespaces and Object IDs
-	Lister
-}
-
-// MappedFileFinder is an extension to FileFinder that allows it to have an internal
-// cache with mappings between UnversionedObjectID and a ChecksumPath. This allows
-// higher-order interfaces to manage Objects in files in an unorganized directory
-// (e.g. a Git repo).
-//
-// Multiple Objects in the same file, or multiple Objects with the
-// same ID in multiple files are not supported.
-type MappedFileFinder interface {
-	FileFinder
-
-	// GetMapping retrieves a mapping in the system.
-	GetMapping(ctx context.Context, id core.UnversionedObjectID) (ChecksumPath, bool)
-	// SetMapping binds an ID to a physical file path. This operation overwrites
-	// any previous mapping for id.
-	SetMapping(ctx context.Context, id core.UnversionedObjectID, checksumPath ChecksumPath)
-	// ResetMappings replaces all mappings at once to the ones in m.
-	ResetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath)
-	// DeleteMapping removes the mapping for the given id.
-	DeleteMapping(ctx context.Context, id core.UnversionedObjectID)
-}
-
-// UnstructuredStorage is a raw Storage interface that builds on top
-// of FilesystemStorage. It uses an ObjectRecognizer to recognize
-// otherwise unknown objects in unstructured files.
-// The FilesystemStorage must use a MappedFileFinder underneath.
-//
-// Multiple Objects in the same file, or multiple Objects with the
-// same ID in multiple files are not supported.
-type UnstructuredStorage interface {
-	FilesystemStorage
-
-	// Sync synchronizes the current state of the filesystem with the
-	// cached mappings in the MappedFileFinder.
-	Sync(ctx context.Context) error
-
-	// ObjectRecognizer returns the underlying ObjectRecognizer used.
-	ObjectRecognizer() core.ObjectRecognizer
-	// PathExcluder specifies what paths to not sync
-	// TODO: enable this
-	// PathExcluder() core.PathExcluder
-	// MappedFileFinder returns the underlying MappedFileFinder used.
-	MappedFileFinder() MappedFileFinder
-}
-
-// ChecksumPath is a tuple of a given Checksum and relative file Path,
-// for use in MappedFileFinder.
-type ChecksumPath struct {
-	// TODO: Implement ChecksumContainer, or make ChecksumPath a
-	// sub-interface of ObjectID?
-	Checksum string
-	// Note: path is relative to the AferoContext.
-	Path string
+	EventStorageCommon
 }

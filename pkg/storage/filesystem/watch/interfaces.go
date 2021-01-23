@@ -5,8 +5,9 @@ import (
 	"errors"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/storage/core"
-	"github.com/weaveworks/libgitops/pkg/storage/raw"
+	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 )
 
 var (
@@ -32,51 +33,30 @@ type FileEventsEmitter interface {
 	Suspend(ctx context.Context, path string)
 
 	// PathExcluder returns the PathExcluder used internally
-	PathExcluder() core.PathExcluder
+	PathExcluder() filesystem.PathExcluder
 	// ContentTyper returns the ContentTyper used internally
-	ContentTyper() core.ContentTyper
+	ContentTyper() filesystem.ContentTyper
 	// Filesystem returns the filesystem abstraction used internally
-	Filesystem() core.AferoContext
+	Filesystem() filesystem.AferoContext
 
 	// Close closes the emitter gracefully.
 	io.Closer
 }
 
-// EventStorageCommon contains the methods that EventStorage adds to the
-// to the normal raw.Storage.
-type EventStorageCommon interface {
-	// WatchForObjectEvents starts feeding ObjectEvents into the given "into"
-	// channel. The caller is responsible for setting a channel buffering
-	// limit large enough to not block normal operation. An error might
-	// be returned if a maximum amount of watches has been opened already,
-	// e.g. ErrTooManyWatches.
-	WatchForObjectEvents(ctx context.Context, into ObjectEventStream) error
-
-	// Close closes the EventStorage and underlying resources gracefully.
-	io.Closer
-}
-
 // FileEventStorageCommon is an extension to EventStorageCommon that
 // also contains an underlying FileEventsEmitter. This is meant to be
-// used in tandem with raw.FilesystemStorages.
+// used in tandem with filesystem.Storages.
 type FileEventStorageCommon interface {
-	EventStorageCommon
+	storage.EventStorageCommon
 
 	// FileEventsEmitter gets the FileEventsEmitter used internally.
 	FileEventsEmitter() FileEventsEmitter
 }
 
-// EventStorage is the abstract combination of a normal raw.Storage, and
-// a possiblility to listen for changes to objects as they change.
-type EventStorage interface {
-	raw.Storage
-	EventStorageCommon
-}
-
-// FilesystemEventStorage is the combination of a raw.FilesystemStorage,
+// FilesystemEventStorage is the combination of a filesystem.Storage,
 // and the possibility to listen for object updates from a FileEventsEmitter.
 type FilesystemEventStorage interface {
-	raw.FilesystemStorage
+	filesystem.Storage
 	FileEventStorageCommon
 }
 
@@ -86,6 +66,6 @@ type FilesystemEventStorage interface {
 // When the Sync() function is run; the ObjectEvents that are emitted to the
 // listening channels with have ObjectEvent.Type == ObjectEventSync.
 type UnstructuredEventStorage interface {
-	raw.UnstructuredStorage
+	unstructured.UnstructuredStorage
 	FileEventStorageCommon
 }
