@@ -38,6 +38,18 @@ type Filesystem interface {
 
 	// Custom methods
 
+	// Checksum returns a checksum of the given file.
+	//
+	// What the checksum is is application-dependent, however, it
+	// should be the same for two invocations, as long as the stored
+	// data is the same. It might change over time although the
+	// underlying data did not. Examples of checksums that can be
+	// used is: the file modification timestamp, a sha256sum of the
+	// file content, or the latest Git commit when the file was
+	// changed.
+	//
+	// os.IsNotExist(err) can be used to check if the file doesn't
+	// exist.
 	Checksum(ctx context.Context, filename string) (string, error)
 
 	// RootDirectory specifies where on disk the root directory is stored.
@@ -56,9 +68,7 @@ func NewOSFilesystem(rootDir string) Filesystem {
 // in a Filesystem-compliant implementation; scoped at the given directory
 // (i.e. wrapped in afero.NewBasePathFs(fs, rootDir)).
 //
-// Checksum is calculated based on the modification timestamp of the file, or
-// alternatively, from info.Sys() returned from Filesystem.Stat(), if it can
-// be cast to a ChecksumContainer.
+// Checksum is calculated based on the modification timestamp of the file.
 func NewFilesystem(fs afero.Fs, rootDir string) Filesystem {
 	// TODO: rootDir validation? It must be absolute, exist, and be a directory.
 	return &filesystem{afero.NewBasePathFs(fs, rootDir), rootDir}
@@ -113,7 +123,6 @@ func (f *filesystem) Walk(_ context.Context, root string, walkFn filepath.WalkFu
 	return afero.Walk(f.fs, root, walkFn)
 }
 
-// TODO: Move to the Filesystem abstraction
 func checksumFromFileInfo(fi os.FileInfo) string {
 	return strconv.FormatInt(fi.ModTime().UnixNano(), 10)
 }

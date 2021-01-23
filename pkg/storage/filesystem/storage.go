@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
@@ -71,40 +72,29 @@ func (r *Generic) exists(ctx context.Context, path string) bool {
 	return exists
 }
 
-func (r *Generic) Stat(ctx context.Context, id core.UnversionedObjectID) (storage.ObjectInfo, error) {
+func (r *Generic) Checksum(ctx context.Context, id core.UnversionedObjectID) (string, error) {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	// Make sure the file exists
-	if !r.exists(ctx, p) {
-		return nil, core.NewErrNotFound(id)
-	}
-
-	// Get the checksum
+	// Return a "high level" error if the file does not exist
 	checksum, err := r.FileFinder().Filesystem().Checksum(ctx, p)
-	if err != nil {
-		return nil, err
+	if os.IsNotExist(err) {
+		return "", core.NewErrNotFound(id)
+	} else if err != nil {
+		return "", err
 	}
-
-	// Get content type
-	contentType, err := r.ContentType(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	return storage.NewObjectInfo(contentType, checksum, p, id), nil
+	return checksum, nil
 }
 
 func (r *Generic) ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error) {
-	// Verify namespacing info
-	if err := r.verifyID(id); err != nil {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
 		return "", err
 	}
-
-	return r.FileFinder().ContentType(ctx, id)
+	return r.FileFinder().ContentTyper().ContentTypeForPath(ctx, r.fileFinder.Filesystem(), p)
 }
 
 func (r *Generic) Write(ctx context.Context, id core.UnversionedObjectID, content []byte) error {
@@ -172,13 +162,9 @@ func (r *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespac
 
 func (r *Generic) getPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
 	// Verify namespacing info
-	if err := r.verifyID(id); err != nil {
+	if err := storage.VerifyNamespaced(r.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace); err != nil {
 		return "", err
 	}
 	// Get the path
 	return r.FileFinder().ObjectPath(ctx, id)
-}
-
-func (r *Generic) verifyID(id core.UnversionedObjectID) error {
-	return storage.VerifyNamespaced(r.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace)
 }
