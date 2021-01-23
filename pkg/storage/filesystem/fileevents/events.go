@@ -1,4 +1,4 @@
-package watch
+package fileevents
 
 // FileEventType is an enum describing a change in a file's state
 type FileEventType byte
