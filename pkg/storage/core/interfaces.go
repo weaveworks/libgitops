@@ -16,6 +16,7 @@ import (
 
 // GroupVersionKind aliases
 type GroupKind = schema.GroupKind
+type GroupVersion = schema.GroupVersion
 type GroupVersionKind = schema.GroupVersionKind
 
 // Client-related Object aliases

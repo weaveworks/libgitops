@@ -11,6 +11,8 @@ import (
 	openapi "k8s.io/kube-openapi/pkg/util/proto"
 )
 
+// TODO: Move pkg/util/patch under pkg/serializer?
+
 type Patcher interface {
 	// ApplyOnStruct applies the given patch (JSON-encoded) using the given BytePatcher
 	// (that knows how to operate on that kind of patch type) into obj.

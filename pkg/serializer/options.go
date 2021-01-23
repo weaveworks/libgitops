@@ -2,6 +2,8 @@ package serializer
 
 import "github.com/weaveworks/libgitops/pkg/util"
 
+// TODO: Import k8s.io/utils/pointer instead of baking our own ptrutils package.
+
 type EncodeOption interface {
 	ApplyToEncode(*EncodeOptions)
 }
@@ -21,6 +23,7 @@ type EncodeOptions struct {
 	//
 	// Default: 2, i.e. pretty output
 	// TODO: Make this a property of the FrameWriter instead?
+	// TODO: Use a typed size of the int, e.g. int32?
 	JSONIndent *int
 
 	// Whether to preserve YAML comments internally.

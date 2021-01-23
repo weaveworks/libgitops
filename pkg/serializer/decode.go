@@ -16,6 +16,10 @@ import (
 // This is the groupversionkind for the v1.List object
 var listGVK = metav1.Unversioned.WithKind("List")
 
+// TODO: To think about: should we take in the DecodeOptions at Decode time instead
+// as a variadic-sized Option slice? It would probably take caching the *json.Serializer
+// and runtime.Decoder for the given options they use, though.
+
 func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodeOptions) Decoder {
 	// Allow both YAML and JSON inputs (JSON is a subset of YAML), and deserialize in strict mode
 	s := json.NewSerializerWithOptions(json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme, json.SerializerOptions{

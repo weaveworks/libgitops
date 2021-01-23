@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
-	"sigs.k8s.io/yaml"
 )
 
 // ContentType specifies a content type for Encoders, Decoders, FrameWriters and FrameReaders
@@ -37,33 +36,7 @@ type ContentTyped interface {
 	ContentType() ContentType
 }
 
-// JSONTransformer is an interface for transforming bytes to JSON from
-// a content-type specific implementation.
-type JSONTransformer interface {
-	ContentTyped
-	// TransformToJSON takes bytes of the supported ContentType, and
-	// returns JSON bytes.
-	TransformToJSON([]byte) ([]byte, error)
-}
-
-// ContentType implements JSONTransformer
-var _ JSONTransformer = ContentType("")
-
 func (ct ContentType) ContentType() ContentType { return ct }
-
-// TransformToJSON takes bytes of the supported ContentType, and
-// returns JSON bytes.
-func (ct ContentType) TransformToJSON(in []byte) ([]byte, error) {
-	// If the given content type already is JSON, then we're all good
-	switch ct {
-	case ContentTypeJSON:
-		return in, nil
-	case ContentTypeYAML:
-		return yaml.YAMLToJSONStrict(in)
-	default:
-		return nil, fmt.Errorf("%w: cannot transform %s to JSON", ErrUnsupportedContentType, ct)
-	}
-}
 
 // Serializer is an interface providing high-level decoding/encoding functionality
 // for types registered in a *runtime.Scheme

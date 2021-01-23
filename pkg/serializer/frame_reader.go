@@ -182,7 +182,8 @@ func FromBytes(content []byte) ReadCloser {
 // the specified content type. This avoids overhead if it is known that the
 // byte array only contains one frame. The given frame is returned in
 // whole in the first ReadFrame() call, and io.EOF is returned in all future
-// invocations.
+// invocations. This FrameReader works for any ContentType and transparently
+// exposes what was given through the ContentType() method.
 func NewSingleFrameReader(b []byte, ct ContentType) FrameReader {
 	return &singleFrameReader{
 		ct:            ct,

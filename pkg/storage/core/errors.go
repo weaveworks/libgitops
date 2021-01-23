@@ -1,9 +1,17 @@
 package core
 
 import (
+	goerrors "errors"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+)
+
+var (
+	// ErrNotImplemented can be returned for implementers that do not
+	// implement a specific part of an interface.
+	ErrNotImplemented = goerrors.New("not implemented")
 )
 
 // StatusError is an error that supports also conversion

@@ -16,6 +16,8 @@ import (
 // or FileFinder's objects, and just reads them, converts them into the current
 // hub version.
 
+// TODO: Make a composite Storage that encrypts secrets using a key
+
 var (
 	// ErrNoSuchNamespace means that the set of namespaces was searched in the
 	// system, but the requested namespace wasn't in that list.
