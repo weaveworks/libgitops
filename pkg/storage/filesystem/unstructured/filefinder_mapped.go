@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/fluxcd/go-git-providers/validation"
-	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -56,6 +55,10 @@ type GenericMappedFileFinder struct {
 
 func (f *GenericMappedFileFinder) Filesystem() filesystem.Filesystem {
 	return f.fs
+}
+
+func (f *GenericMappedFileFinder) ContentTyper() filesystem.ContentTyper {
+	return f.contentTyper
 }
 
 // ObjectPath gets the file path relative to the root directory
@@ -117,16 +120,6 @@ func (f *GenericMappedFileFinder) ListObjectIDs(ctx context.Context, gk core.Gro
 		ids = append(ids, core.NewUnversionedObjectID(gk, core.ObjectKey{Name: name, Namespace: namespace}))
 	}
 	return ids, nil
-}
-
-func (f *GenericMappedFileFinder) ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error) {
-	// First, get the path
-	p, err := f.ObjectPath(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	// Then, ask the ContentTyper
-	return f.contentTyper.ContentTypeForPath(ctx, f.fs, p)
 }
 
 // GetMapping retrieves a mapping in the system
