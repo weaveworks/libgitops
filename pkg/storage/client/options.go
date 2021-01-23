@@ -1,4 +1,4 @@
-package storage
+package client
 
 import (
 	"github.com/weaveworks/libgitops/pkg/filter"

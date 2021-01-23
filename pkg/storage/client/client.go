@@ -1,4 +1,4 @@
-package storage
+package client
 
 import (
 	"context"
@@ -9,110 +9,77 @@ import (
 	"github.com/fluxcd/go-git-providers/validation"
 	"github.com/weaveworks/libgitops/pkg/filter"
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TODO: Rename to Client? Talk objects to the "Storage" part instead?
-// TODO: Make it possible to specify the "storage version" manually?
 // TODO: Pass an ObjectID that contains all PartialObjectMetadata info for "downstream" consumers
 // that can make use of it by "casting up".
 
 var (
-	// ErrCannotSaveMetadata is returned if the user tries to save metadata-only objects
-	ErrCannotSaveMetadata = errors.New("cannot save (Create|Update|Patch) *metav1.PartialObjectMetadata")
-	// ErrNameRequired is returned when .metadata.name is unset
-	// TODO: Support generateName?
-	ErrNameRequired = errors.New(".metadata.name is required")
 	// ErrUnsupportedPatchType is returned when an unsupported patch type is used
 	ErrUnsupportedPatchType = errors.New("unsupported patch type")
 )
 
-const (
-	namespaceListKind = "NamespaceList"
-)
-
-var v1GroupKind = schema.GroupVersion{Group: "", Version: "v1"}
-
-type CommonStorage interface {
-	//
-	// Access to underlying Resources.
-	//
-
-	// RawStorage returns the RawStorage instance backing this Storage
-	// It is expected that RawStorage only operates on one "frame" at a time in its Read/Write operations.
-	//RawStorage() raw.Storage
-	// Serializer returns the serializer
-	//Serializer() serializer.Serializer
-	Backend() Backend
-
-	//
-	// Misc methods.
-	//
-
-	// Close closes all underlying resources (e.g. goroutines) used; before the application exits
-	// TODO: Maybe this instead should apply to raw.Storage's now?
-	Close() error
-	// io.Closer
-}
-
-// ReadStorage TODO
-type ReadStorage interface {
-	CommonStorage
-
+type Reader interface {
 	client.Reader
-	// TODO: In the future to support indexing "custom" fields.
-	// Normal fields (not counting arrays) could be supported using
-	// kruntime.DefaultUnstructuredConverter.ToUnstructured() in
-	// filter.FieldFilter
-	// client.FieldIndexer
+	BackendReader() backend.Reader
 }
 
-type WriteStorage interface {
-	CommonStorage
+type Writer interface {
 	client.Writer
-	//client.StatusClient
+	BackendWriter() backend.Writer
 }
 
-// Storage is an interface for persisting and retrieving API objects to/from a backend
-// One Storage instance handles all different Kinds of Objects
-type Storage interface {
-	ReadStorage
-	WriteStorage
+type StatusClient interface {
+	client.StatusClient
+	BackendStatusWriter() backend.StatusWriter
+}
+
+// Client is an interface for persisting and retrieving API objects to/from a backend
+// One Client instance handles all different Kinds of Objects
+type Client interface {
+	Reader
+	Writer
+	// TODO: StatusClient
 	//client.Client
 }
 
-// NewGenericStorage constructs a new Storage
-func NewGenericStorage(backend Backend, patcher serializer.Patcher) Storage {
-	return &storage{backend, patcher}
+// NewGeneric constructs a new Generic client
+// TODO: Construct the default patcher from the given scheme, make patcher an opt instead
+func NewGeneric(backend backend.Backend, patcher serializer.Patcher) (*Generic, error) {
+	if backend == nil {
+		return nil, fmt.Errorf("backend is mandatory")
+	}
+	return &Generic{backend, patcher}, nil
 }
 
-// storage implements the Storage interface
-type storage struct {
-	backend Backend
+// Generic implements the Client interface
+type Generic struct {
+	backend backend.Backend
 	patcher serializer.Patcher
 }
 
-var _ Storage = &storage{}
+var _ Client = &Generic{}
 
-func (s *storage) Backend() Backend {
-	return s.backend
-}
+func (c *Generic) Backend() backend.Backend      { return c.backend }
+func (c *Generic) BackendReader() backend.Reader { return c.backend }
+func (c *Generic) BackendWriter() backend.Writer { return c.backend }
 
 // Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
 // In order to only extract the metadata of this object, pass in a *metav1.PartialObjectMetadata
-func (s *storage) Get(ctx context.Context, key core.ObjectKey, obj core.Object) error {
+func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj core.Object) error {
 	obj.SetName(key.Name)
 	obj.SetNamespace(key.Namespace)
 
-	return s.backend.Get(ctx, obj)
+	return c.backend.Get(ctx, obj)
 }
 
 // List lists Objects for the specific kind. Optionally, filters can be applied (see the filter package
@@ -123,9 +90,9 @@ func (s *storage) Get(ctx context.Context, key core.ObjectKey, obj core.Object) 
 // you need to populate TypeMeta with the GVK you want back.
 // TODO: Check if this works with metav1.List{}
 // TODO: Create constructors for the different kinds of lists?
-func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client.ListOption) error {
+func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client.ListOption) error {
 	// This call will verify that list actually is a List type.
-	gvk, err := serializer.GVKForList(list, s.backend.Scheme())
+	gvk, err := serializer.GVKForList(list, c.Backend().Scheme())
 	if err != nil {
 		return err
 	}
@@ -134,7 +101,7 @@ func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client
 
 	// Get namespacing info
 	gk := gvk.GroupKind()
-	namespaced, err := s.backend.Storage().Namespacer().IsNamespaced(gk)
+	namespaced, err := c.Backend().Storage().Namespacer().IsNamespaced(gk)
 	if err != nil {
 		return err
 	}
@@ -145,7 +112,7 @@ func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client
 	// However, if the GroupKind is namespaced, and the given "filter namespace" in list
 	// options is empty, it means that one should list all namespaces
 	if namespaced && listOpts.Namespace == "" {
-		namespaces, err = s.backend.ListNamespaces(ctx, gk)
+		namespaces, err = c.Backend().ListNamespaces(ctx, gk)
 		if err != nil {
 			return err
 		}
@@ -155,7 +122,7 @@ func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client
 
 	allIDs := []core.UnversionedObjectID{}
 	for ns := range namespaces {
-		ids, err := s.backend.ListObjectIDs(ctx, gk, ns)
+		ids, err := c.Backend().ListObjectIDs(ctx, gk, ns)
 		if err != nil {
 			return err
 		}
@@ -168,13 +135,13 @@ func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client
 	wg.Add(1)
 	var processErr error
 	go func() {
-		createFunc := createObject(gvk, s.backend.Scheme())
+		createFunc := createObject(gvk, c.Backend().Scheme())
 		if serializer.IsPartialObjectList(list) {
 			createFunc = createPartialObject(gvk)
 		} else if serializer.IsUnstructuredList(list) {
 			createFunc = createUnstructuredObject(gvk)
 		}
-		processErr = s.processKeys(ctx, allIDs, &listOpts.FilterOptions, createFunc, ch)
+		processErr = c.processKeys(ctx, allIDs, &listOpts.FilterOptions, createFunc, ch)
 		wg.Done()
 	}()
 
@@ -193,19 +160,19 @@ func (s *storage) List(ctx context.Context, list core.ObjectList, opts ...client
 	return nil
 }
 
-func (s *storage) Create(ctx context.Context, obj core.Object, _ ...client.CreateOption) error {
-	return s.backend.Create(ctx, obj)
+func (c *Generic) Create(ctx context.Context, obj core.Object, _ ...client.CreateOption) error {
+	return c.backend.Create(ctx, obj)
 }
 
-func (s *storage) Update(ctx context.Context, obj core.Object, _ ...client.UpdateOption) error {
-	return s.backend.Update(ctx, obj)
+func (c *Generic) Update(ctx context.Context, obj core.Object, _ ...client.UpdateOption) error {
+	return c.backend.Update(ctx, obj)
 }
 
 // Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
-func (s *storage) Patch(ctx context.Context, obj core.Object, patch core.Patch, _ ...client.PatchOption) error {
+func (c *Generic) Patch(ctx context.Context, obj core.Object, patch core.Patch, _ ...client.PatchOption) error {
 	// Fail-fast: We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
-		return ErrCannotSaveMetadata
+		return backend.ErrCannotSaveMetadata
 	}
 
 	// Acquire the patch data from the "desired state" object given now, i.e. in MergeFrom{}
@@ -217,7 +184,7 @@ func (s *storage) Patch(ctx context.Context, obj core.Object, patch core.Patch, 
 
 	// Load the current latest state into obj temporarily, before patching it
 	// This also validates the GVK, name and namespace.
-	if err := s.backend.Get(ctx, obj); err != nil {
+	if err := c.backend.Get(ctx, obj); err != nil {
 		return err
 	}
 
@@ -231,35 +198,34 @@ func (s *storage) Patch(ctx context.Context, obj core.Object, patch core.Patch, 
 	// Apply the patch into the object using the given byte patcher
 	if unstruct, ok := obj.(kruntime.Unstructured); ok {
 		// TODO: Provide an option for the schema
-		err = s.patcher.ApplyOnUnstructured(bytePatcher, patchJSON, unstruct, nil)
+		err = c.patcher.ApplyOnUnstructured(bytePatcher, patchJSON, unstruct, nil)
 	} else {
-		err = s.patcher.ApplyOnStruct(bytePatcher, patchJSON, obj)
+		err = c.patcher.ApplyOnStruct(bytePatcher, patchJSON, obj)
 	}
 	if err != nil {
 		return err
 	}
 
 	// Perform an update internally, similar to what .Update would yield
-	// TODO: Maybe write to storage conditionally? using DryRun all
-	return s.Update(ctx, obj)
-	//return s.update(ctx, obj, id)
+	// TODO: Maybe write to the Storage conditionally? using DryRun all
+	return c.Update(ctx, obj)
 }
 
-// Delete removes an Object from the storage
+// Delete removes an Object from the backend
 // PartialObjectMetadata should work here.
-func (s *storage) Delete(ctx context.Context, obj core.Object, _ ...client.DeleteOption) error {
-	return s.backend.Delete(ctx, obj)
+func (c *Generic) Delete(ctx context.Context, obj core.Object, _ ...client.DeleteOption) error {
+	return c.backend.Delete(ctx, obj)
 }
 
 // DeleteAllOf deletes all matched resources by first doing a List() operation on the given GVK of
 // obj (obj is not used for anything else) and the given filters in opts. Only the Partial Meta
-func (s *storage) DeleteAllOf(ctx context.Context, obj core.Object, opts ...client.DeleteAllOfOption) error {
+func (c *Generic) DeleteAllOf(ctx context.Context, obj core.Object, opts ...client.DeleteAllOfOption) error {
 	// This applies both upstream and custom options, and propagates the options correctly to both
 	// List() and Delete()
 	customDeleteAllOpts := (&DeleteAllOfOptions{}).ApplyOptions(opts)
 
 	// Get the GVK of the object
-	gvk, err := serializer.GVKForObject(s.backend.Scheme(), obj)
+	gvk, err := serializer.GVKForObject(c.Backend().Scheme(), obj)
 	if err != nil {
 		return err
 	}
@@ -268,31 +234,26 @@ func (s *storage) DeleteAllOf(ctx context.Context, obj core.Object, opts ...clie
 	// UnstructuredList is used here so that we can use filters that operate on fields
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk)
-	if err := s.List(ctx, list, customDeleteAllOpts); err != nil {
+	if err := c.List(ctx, list, customDeleteAllOpts); err != nil {
 		return err
 	}
 
 	// Loop through all of the matched items, and Delete them one-by-one
 	for i := range list.Items {
-		if err := s.Delete(ctx, &list.Items[i], customDeleteAllOpts); err != nil {
+		if err := c.Delete(ctx, &list.Items[i], customDeleteAllOpts); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Close closes all underlying resources (e.g. goroutines) used; before the application exits
-func (s *storage) Close() error {
-	return nil // nothing to do here for storage
-}
-
 // Scheme returns the scheme this client is using.
-func (s *storage) Scheme() *kruntime.Scheme {
-	return s.backend.Scheme()
+func (c *Generic) Scheme() *kruntime.Scheme {
+	return c.backend.Scheme()
 }
 
 // RESTMapper returns the rest this client is using. For now, this returns nil, so don't use.
-func (s *storage) RESTMapper() meta.RESTMapper {
+func (c *Generic) RESTMapper() meta.RESTMapper {
 	return nil
 }
 
@@ -320,7 +281,7 @@ func createUnstructuredObject(gvk core.GroupVersionKind) newObjectFunc {
 	}
 }
 
-func (s *storage) processKeys(ctx context.Context, ids []core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
+func (c *Generic) processKeys(ctx context.Context, ids []core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
 	wg := &sync.WaitGroup{}
 	wg.Add(len(ids))
 	multiErr := &validation.MultiError{} // TODO: Thread-safe append
@@ -335,7 +296,7 @@ func (s *storage) processKeys(ctx context.Context, ids []core.UnversionedObjectI
 				return
 			}
 
-			if err := s.Get(ctx, id.ObjectKey(), obj); err != nil {
+			if err := c.Get(ctx, id.ObjectKey(), obj); err != nil {
 				multiErr.Errors = append(multiErr.Errors, err)
 				return
 			}

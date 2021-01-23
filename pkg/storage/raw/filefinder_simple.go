@@ -17,12 +17,9 @@ import (
 // using SimpleFileFinder as the FileFinder, and the local disk as target.
 // If you need more advanced customizablility than provided here, you can compose
 // the call to NewGenericFilesystemStorage yourself.
-func NewSimpleStorage(dir string, ct serializer.ContentType, namespacer core.Namespacer) (FilesystemStorage, error) {
+func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFinderOptions) (FilesystemStorage, error) {
 	fs := core.AferoContextForLocalDir(dir)
-	fileFinder, err := NewSimpleFileFinder(fs, SimpleFileFinderOptions{
-		// ContentType is optional; JSON is used by default
-		ContentType: ct,
-	})
+	fileFinder, err := NewSimpleFileFinder(fs, opts)
 	if err != nil {
 		return nil, err
 	}
