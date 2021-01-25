@@ -44,7 +44,9 @@ func NewManifest(
 	if err != nil {
 		return nil, err
 	}
-	emitter, err := inotify.NewFileWatcher(dir)
+	emitter, err := inotify.NewFileWatcher(dir, &inotify.FileWatcherOptions{
+		PathExcluder: pathExcluder,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -61,7 +61,7 @@ func TestExcludeGitDirectory_ShouldExcludePath(t *testing.T) {
 	ctx := context.Background()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := e.ShouldExcludePath(ctx, nil, tt.path); got != tt.want {
+			if got := e.ShouldExcludePath(ctx, tt.path); got != tt.want {
 				t.Errorf("ExcludeGitDirectory.ShouldExcludePath() = %v, want %v", got, tt.want)
 			}
 		})
