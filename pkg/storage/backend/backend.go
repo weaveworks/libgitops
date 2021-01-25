@@ -20,8 +20,6 @@ var (
 	// ErrNameRequired is returned when .metadata.name is unset
 	// TODO: Support generateName?
 	ErrNameRequired = errors.New(".metadata.name is required")
-
-	namespaceGVK = core.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"}
 )
 
 // TODO: Make a *core.Unknown that has
@@ -34,7 +32,7 @@ var (
 
 type Accessors interface {
 	Storage() storage.Storage
-	NamespaceEnforcer() core.NamespaceEnforcer
+	NamespaceEnforcer() NamespaceEnforcer
 	Scheme() *runtime.Scheme
 }
 
@@ -92,7 +90,7 @@ type StorageVersioner interface {
 func NewGeneric(
 	storage storage.Storage,
 	serializer serializer.Serializer, // TODO: only scheme required, encode/decode optional?
-	enforcer core.NamespaceEnforcer,
+	enforcer NamespaceEnforcer,
 	validator Validator, // TODO: optional?
 	versioner StorageVersioner, // TODO: optional?
 ) (*Generic, error) {
@@ -126,7 +124,7 @@ type Generic struct {
 	encoder serializer.Encoder
 
 	storage   storage.Storage
-	enforcer  core.NamespaceEnforcer
+	enforcer  NamespaceEnforcer
 	validator Validator
 	versioner StorageVersioner
 }
@@ -139,7 +137,7 @@ func (b *Generic) Storage() storage.Storage {
 	return b.storage
 }
 
-func (b *Generic) NamespaceEnforcer() core.NamespaceEnforcer {
+func (b *Generic) NamespaceEnforcer() NamespaceEnforcer {
 	return b.enforcer
 }
 
@@ -316,27 +314,15 @@ func (b *Generic) idForObj(ctx context.Context, obj core.Object) (core.ObjectID,
 		return nil, ErrNameRequired
 	}
 
-	// Check if the GroupKind is namespaced
-	namespaced, err := b.storage.Namespacer().IsNamespaced(gvk.GroupKind())
-	if err != nil {
-		return nil, err
-	}
-
-	var namespaces sets.String
-	// If the namespace enforcer requires listing all the other namespaces,
-	// look them up
-	if b.enforcer.RequireSetNamespaceExists() {
-		objIDs, err := b.storage.ListObjectIDs(ctx, namespaceGVK.GroupKind(), "")
-		if err != nil {
-			return nil, err
-		}
-		namespaces = sets.NewString()
-		for _, id := range objIDs {
-			namespaces.Insert(id.ObjectKey().Name)
-		}
-	}
-	// Enforce the given namespace policy. This might mutate obj
-	if err := b.enforcer.EnforceNamespace(obj, namespaced, namespaces); err != nil {
+	// Enforce the given namespace policy. This might mutate obj.
+	// TODO: disallow "upcasting" the Lister to a full-blown Storage?
+	if err := b.enforcer.EnforceNamespace(
+		ctx,
+		obj,
+		gvk,
+		b.Storage().Namespacer(),
+		b.Storage(),
+	); err != nil {
 		return nil, err
 	}
 

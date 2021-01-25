@@ -1,15 +1,13 @@
 package kube
 
 import (
-	"errors"
-	"fmt"
 	"sync"
 
+	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // TODO: Make an example component that iterates through all of a raw.Storage's
@@ -18,40 +16,36 @@ import (
 
 // TODO: Make a composite Storage that encrypts secrets using a key
 
-var (
-	// ErrNoSuchNamespace means that the set of namespaces was searched in the
-	// system, but the requested namespace wasn't in that list.
-	ErrNoSuchNamespace = errors.New("no such namespace in the system")
-)
-
-// NamespaceEnforcer implements core.NamespaceEnforcer similarly to how the
-// Kubernetes API server behaves.
-type NamespaceEnforcer struct{}
-
-var _ core.NamespaceEnforcer = NamespaceEnforcer{}
-
-func (NamespaceEnforcer) RequireSetNamespaceExists() bool { return true }
-
-func (NamespaceEnforcer) EnforceNamespace(obj core.Object, namespaced bool, namespaces sets.String) error {
-	ns := obj.GetNamespace()
-	if !namespaced {
-		// If a namespace was set, it should be sanitized.
-		if len(ns) != 0 {
-			obj.SetNamespace("")
-		}
-		return nil
+// NewNamespaceEnforcer returns a backend.NamespaceEnforcer that
+// enforces namespacing rules (approximately) in the same way as
+// Kubernetes itself does. The following rules are applied:
+//
+// if object is namespaced {
+// 		if .metadata.namespace == "" {
+// 			.metadata.namespace = "default"
+// 		} else { // .metadata.namespace != ""
+// 			Make sure that such a v1.Namespace object
+// 			exists in the system.
+//		}
+// } else { // object is non-namespaced
+//		if .metadata.namespace != "" {
+// 			.metadata.namespace = ""
+//		}
+// }
+//
+// Underneath, backend.GenericNamespaceEnforcer is used. Refer
+// to the documentation of that if you want the functionality
+// to be slightly different. (e.g. any namespace value is valid).
+//
+// TODO: Maybe we want to validate the namespace string itself?
+func NewNamespaceEnforcer() backend.NamespaceEnforcer {
+	return backend.GenericNamespaceEnforcer{
+		DefaultNamespace: metav1.NamespaceDefault,
+		NamespaceGroupKind: &core.GroupKind{
+			Group: "", // legacy name for the core API group
+			Kind:  "Namespace",
+		},
 	}
-	// The resource is namespaced.
-	// If it is empty, set it to the default namespace.
-	if len(ns) == 0 {
-		obj.SetNamespace(metav1.NamespaceDefault)
-		return nil
-	}
-	// If the namespace field is set, but it doesn't exist in the set, error
-	if !namespaces.Has(ns) {
-		return fmt.Errorf("%w: %q", ErrNoSuchNamespace, ns)
-	}
-	return nil
 }
 
 // SimpleRESTMapper is a subset of the meta.RESTMapper interface

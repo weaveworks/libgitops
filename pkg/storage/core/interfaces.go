@@ -5,7 +5,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -35,23 +34,6 @@ type DeleteAllOfOption = client.DeleteAllOfOption
 
 // Helper functions from client.
 var ObjectKeyFromObject = client.ObjectKeyFromObject
-
-// NamespaceEnforcer enforces a namespace policy for the Storage.
-type NamespaceEnforcer interface {
-	// RequireSetNamespaceExists specifies whether the namespace must exist in the system.
-	// For example, Kubernetes requires this by default.
-	RequireSetNamespaceExists() bool
-	// EnforceNamespace operates on the object to make it conform with a given set of rules.
-	// If RequireNamespaceExists() is true, all the namespaces available in the system must
-	// be passed to namespaces.
-	// For example, Kubernetes enforces the following rules:
-	// Namespaced resources:
-	// 		If .metadata.namespace == "": .metadata.namespace = "default"
-	// 		If .metadata.namespace != "": Make sure there is such a namespace, and use it in that case
-	// Non-namespaced resources:
-	//		If .metadata.namespace != "": .metadata.namespace = ""
-	EnforceNamespace(obj Object, namespaced bool, namespaces sets.String) error
-}
 
 // Namespacer is an interface that lets the caller know if a GroupKind is namespaced
 // or not. There are two ready-made implementations:

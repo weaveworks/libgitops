@@ -12,6 +12,10 @@ var (
 	// ErrNotImplemented can be returned for implementers that do not
 	// implement a specific part of an interface.
 	ErrNotImplemented = goerrors.New("not implemented")
+	// ErrInvalidParameter specifies that a given parameter
+	// (as a public struct field or function argument) was
+	// not valid according to the specification.
+	ErrInvalidParameter = goerrors.New("invalid parameter")
 )
 
 // StatusError is an error that supports also conversion
