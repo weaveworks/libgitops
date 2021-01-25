@@ -117,6 +117,8 @@ func (w *FileWatcher) monitorFunc() {
 	defer log.Debug("FileWatcher: Monitoring thread stopped")
 	defer close(w.outbound) // Close the update stream after the FileWatcher has stopped
 
+	ctx := context.Background()
+
 	for {
 		event, ok := <-w.inbound
 		if !ok {
@@ -125,6 +127,10 @@ func (w *FileWatcher) monitorFunc() {
 
 		if ievent(event).Mask&unix.IN_ISDIR != 0 {
 			continue // Skip directories
+		}
+
+		if w.opts.PathExcluder.ShouldExcludePath(ctx, event.Path()) {
+			continue // Skip ignored files
 		}
 
 		// Get any events registered for the specific file, and append the specified event
