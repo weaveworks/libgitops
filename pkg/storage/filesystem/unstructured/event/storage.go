@@ -290,6 +290,8 @@ func (s *Generic) handleModifyMove(ctx context.Context, ev *fileevents.FileEvent
 
 	// If the file was just moved around, just overwrite the earlier mapping
 	if ev.Type == fileevents.FileEventMove {
+		// This assumes that the file content does not change in the move
+		// operation. TODO: document this as a requirement for the Emitter.
 		s.setMapping(ctx, versionedID, ev.Path)
 
 		// Internal move events are a no-op
@@ -304,13 +306,13 @@ func (s *Generic) handleModifyMove(ctx context.Context, ev *fileevents.FileEvent
 	objectEvent := event.ObjectEventUpdate
 	// Set the mapping if it didn't exist before; assume this is a Create event
 	if _, ok := s.MappedFileFinder().GetMapping(ctx, versionedID); !ok {
-		// Add a mapping between this object and path.
-		s.setMapping(ctx, versionedID, ev.Path)
-
 		// This is what actually determines if an Object is created,
 		// so update the event to update.ObjectEventCreate here
 		objectEvent = event.ObjectEventCreate
 	}
+	// Update the mapping between this object and path (this updates
+	// the checksum underneath too).
+	s.setMapping(ctx, versionedID, ev.Path)
 	// Send the event to the channel
 	s.sendEvent(objectEvent, versionedID)
 	return nil

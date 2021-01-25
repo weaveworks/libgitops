@@ -46,7 +46,7 @@ func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
 		ctx,
 		fileFinder.Filesystem(),
 		fileFinder.ContentTyper(),
-		s.pathExcluder,
+		s.PathExcluder(),
 	)
 	if err != nil {
 		return nil, err

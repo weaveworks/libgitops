@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/fluxcd/go-git-providers/validation"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -66,7 +66,7 @@ func (f *GenericMappedFileFinder) ObjectPath(ctx context.Context, id core.Unvers
 	cp, ok := f.GetMapping(ctx, id)
 	if !ok {
 		// TODO: separate interface for "new creates"?
-		return "", &validation.MultiError{Errors: []error{ErrNotTracked, core.NewErrNotFound(id)}}
+		return "", utilerrs.NewAggregate([]error{ErrNotTracked, core.NewErrNotFound(id)})
 	}
 	return cp.Path, nil
 }
