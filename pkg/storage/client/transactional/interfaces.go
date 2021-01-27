@@ -22,8 +22,10 @@ type BranchManager interface {
 	ResetToCleanBranch(ctx context.Context, branch string) error
 	Commit(ctx context.Context, commit Commit) error
 
-	CommitHandler() CommitHandler
-	TransactionHandler() TransactionHandler
+	// CommitHookChain must be non-nil, but can be a no-op
+	CommitHookChain() CommitHookChain
+	// TransactionHookChain must be non-nil, but can be a no-op
+	TransactionHookChain() TransactionHookChain
 }
 
 type BranchMerger interface {

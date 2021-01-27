@@ -33,10 +33,7 @@ func (tx *txCommon) Abort(err error) error {
 
 func (tx *txCommon) handlePreCommit(c Commit) txFunc {
 	return func() error {
-		if tx.manager.CommitHandler() == nil {
-			return nil
-		}
-		return tx.manager.CommitHandler().HandlePreCommit(tx.ctx, c, tx.info)
+		return tx.manager.CommitHookChain().PreCommitHook(tx.ctx, c, tx.info)
 	}
 }
 
@@ -48,10 +45,7 @@ func (tx *txCommon) commit(c Commit) txFunc {
 
 func (tx *txCommon) handlePostCommit(c Commit) txFunc {
 	return func() error {
-		if tx.manager.CommitHandler() == nil {
-			return nil
-		}
-		return tx.manager.CommitHandler().HandlePostCommit(tx.ctx, c, tx.info)
+		return tx.manager.CommitHookChain().PostCommitHook(tx.ctx, c, tx.info)
 	}
 }
 

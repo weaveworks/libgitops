@@ -180,17 +180,13 @@ func (c *Generic) initTx(ctx context.Context, info TxInfo) (context.Context, txF
 }
 
 func (c *Generic) cleanupAfterTx(ctx context.Context, info *TxInfo) error {
-	// Always run both the "clean branch" command...
-	errs := []error{c.manager.ResetToCleanBranch(ctx, info.Base)}
-	if c.manager.TransactionHandler() != nil {
-		// ... and the post-transaction command
+	// Always both clean the branch, and run post-tx tasks
+	return utilerrs.NewAggregate([]error{
+		c.manager.ResetToCleanBranch(ctx, info.Base),
 		// TODO: should this be in its own goroutine to switch back to main
 		// ASAP?
-		errs = append(errs,
-			c.manager.TransactionHandler().HandlePostTransaction(ctx, *info))
-	}
-	// Return an aggregate error
-	return utilerrs.NewAggregate(errs)
+		c.manager.TransactionHookChain().PostTransactionHook(ctx, *info),
+	})
 }
 
 func (c *Generic) BackendReader() backend.Reader {
@@ -227,7 +223,7 @@ func (c *Generic) validateCtx(ctx context.Context) (core.VersionRef, error) {
 	if !ref.IsWritable() {
 		return nil, fmt.Errorf("must not give a writable VersionRef to (Branch)Transaction()")
 	}
-
+	// Just return its
 	return ref, nil
 }
 
@@ -251,7 +247,7 @@ func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error)
 	ctxWithDeadline, cleanupFunc := c.initTx(ctx, info)
 
 	// Run pre-tx checks
-	err = c.manager.TransactionHandler().HandlePreTransaction(ctxWithDeadline, info)
+	err = c.manager.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info)
 
 	return &txImpl{
 		&txCommon{
@@ -305,7 +301,7 @@ func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts
 
 	// Run pre-tx checks and create the new branch
 	err = utilerrs.NewAggregate([]error{
-		c.manager.TransactionHandler().HandlePreTransaction(ctxWithDeadline, info),
+		c.manager.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info),
 		c.manager.CreateBranch(ctxWithDeadline, headBranch),
 	})
 

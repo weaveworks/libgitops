@@ -8,66 +8,94 @@ type TxInfo struct {
 	Options TxOptions
 }
 
-type CommitHandler interface {
-	HandlePreCommit(ctx context.Context, commit Commit, info TxInfo) error
-	HandlePostCommit(ctx context.Context, commit Commit, info TxInfo) error
+type CommitHookChain interface {
+	// The chain also itself implements CommitHook
+	CommitHook
+	// Register registers a new CommitHook to the chain
+	Register(CommitHook)
 }
 
-type MultiCommitHandler struct {
-	CommitHandlers []CommitHandler
+type CommitHook interface {
+	PreCommitHook(ctx context.Context, commit Commit, info TxInfo) error
+	PostCommitHook(ctx context.Context, commit Commit, info TxInfo) error
 }
 
-func (m *MultiCommitHandler) HandlePreCommit(ctx context.Context, commit Commit, info TxInfo) error {
-	for _, ch := range m.CommitHandlers {
+var _ CommitHookChain = &MultiCommitHook{}
+var _ CommitHook = &MultiCommitHook{}
+
+type MultiCommitHook struct {
+	CommitHooks []CommitHook
+}
+
+func (m *MultiCommitHook) Register(h CommitHook) {
+	m.CommitHooks = append(m.CommitHooks, h)
+}
+
+func (m *MultiCommitHook) PreCommitHook(ctx context.Context, commit Commit, info TxInfo) error {
+	for _, ch := range m.CommitHooks {
 		if ch == nil {
 			continue
 		}
-		if err := ch.HandlePreCommit(ctx, commit, info); err != nil {
+		if err := ch.PreCommitHook(ctx, commit, info); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m *MultiCommitHandler) HandlePostCommit(ctx context.Context, commit Commit, info TxInfo) error {
-	for _, ch := range m.CommitHandlers {
+func (m *MultiCommitHook) PostCommitHook(ctx context.Context, commit Commit, info TxInfo) error {
+	for _, ch := range m.CommitHooks {
 		if ch == nil {
 			continue
 		}
-		if err := ch.HandlePostCommit(ctx, commit, info); err != nil {
+		if err := ch.PostCommitHook(ctx, commit, info); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-type TransactionHandler interface {
-	HandlePreTransaction(ctx context.Context, info TxInfo) error
-	HandlePostTransaction(ctx context.Context, info TxInfo) error
+type TransactionHookChain interface {
+	// The chain also itself implements TransactionHook
+	TransactionHook
+	// Register registers a new CommitHook to the chain
+	Register(TransactionHook)
 }
 
-type MultiTransactionHandler struct {
-	TransactionHandlers []TransactionHandler
+type TransactionHook interface {
+	PreTransactionHook(ctx context.Context, info TxInfo) error
+	PostTransactionHook(ctx context.Context, info TxInfo) error
 }
 
-func (m *MultiTransactionHandler) HandlePreTransaction(ctx context.Context, info TxInfo) error {
-	for _, th := range m.TransactionHandlers {
+var _ TransactionHookChain = &MultiTransactionHook{}
+var _ TransactionHook = &MultiTransactionHook{}
+
+type MultiTransactionHook struct {
+	TransactionHooks []TransactionHook
+}
+
+func (m *MultiTransactionHook) Register(h TransactionHook) {
+	m.TransactionHooks = append(m.TransactionHooks, h)
+}
+
+func (m *MultiTransactionHook) PreTransactionHook(ctx context.Context, info TxInfo) error {
+	for _, th := range m.TransactionHooks {
 		if th == nil {
 			continue
 		}
-		if err := th.HandlePreTransaction(ctx, info); err != nil {
+		if err := th.PreTransactionHook(ctx, info); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m *MultiTransactionHandler) HandlePostTransaction(ctx context.Context, info TxInfo) error {
-	for _, th := range m.TransactionHandlers {
+func (m *MultiTransactionHook) PostTransactionHook(ctx context.Context, info TxInfo) error {
+	for _, th := range m.TransactionHooks {
 		if th == nil {
 			continue
 		}
-		if err := th.HandlePostTransaction(ctx, info); err != nil {
+		if err := th.PostTransactionHook(ctx, info); err != nil {
 			return err
 		}
 	}
