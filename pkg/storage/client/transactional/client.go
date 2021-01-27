@@ -67,20 +67,20 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...core.L
 
 func (c *Generic) lockForReading(ctx context.Context, operation func() error) error {
 	ref := core.GetVersionRef(ctx)
-	switch ref.Type() {
-	case core.VersionRefTypeCommit:
-		// Never block reads for specific commits
+	if !ref.IsWritable() {
+		// Never block reads for read-only VersionRefs. We know nobody can change
+		// them during the read operation, so they should be race condition-free.
 		return operation()
-	case core.VersionRefTypeBranch:
-		return c.readBranch(ref.String(), operation)
-	default:
-		return fmt.Errorf("%w: %s", core.ErrInvalidVersionRefType, ref.Type())
 	}
+	// If the VersionRef is writable; treat it as a branch and lock it to avoid
+	// race conditions.
+	return c.lockAndReadBranch(ref.String(), operation)
 }
 
-func (c *Generic) readBranch(branch string, callback func() error) error {
-	// Aquire the tx-specific lock
+func (c *Generic) lockAndReadBranch(branch string, callback func() error) error {
+	// Use c.txsMu to guard reads and writes to the c.txs map
 	c.txsMu.Lock()
+	// Check if information about a transaction on this branch exists.
 	txState, ok := c.txs[branch]
 	if !ok {
 		// grow the txs map by one
@@ -90,8 +90,12 @@ func (c *Generic) readBranch(branch string, callback func() error) error {
 		txState = c.txs[branch]
 	}
 	c.txsMu.Unlock()
-	// During this period, no transactions can be started,
-	// only reads can be active
+
+	// In the atomic mode, we lock the txLock during the read,
+	// so no new transactions can be started while the read
+	// operation goes on. In non-atomic modes, reads aren't locked,
+	// instead it is assumed that downstream implementations just
+	// read the latest commit on the given branch.
 	if txState.mode == TxModeAtomic {
 		txState.mu.RLock()
 	}
@@ -218,16 +222,13 @@ func (c *Generic) BranchTransaction(ctx context.Context, headBranch string, opts
 }
 
 func (c *Generic) validateCtx(ctx context.Context) (core.VersionRef, error) {
-	// Check so versionref isn't set here
+	// Check so versionref is writable
 	ref := core.GetVersionRef(ctx)
-	switch ref.Type() {
-	case core.VersionRefTypeCommit:
-		return nil, fmt.Errorf("must not give a VersionRef of type Commit to (Branch)Transaction()")
-	case core.VersionRefTypeBranch:
-		return ref, nil
-	default:
-		return nil, fmt.Errorf("%w: %s", core.ErrInvalidVersionRefType, ref.Type())
+	if !ref.IsWritable() {
+		return nil, fmt.Errorf("must not give a writable VersionRef to (Branch)Transaction()")
 	}
+
+	return ref, nil
 }
 
 func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error) {
