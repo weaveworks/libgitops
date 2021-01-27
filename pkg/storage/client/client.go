@@ -10,6 +10,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
+	syncutil "github.com/weaveworks/libgitops/pkg/util/sync"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -128,28 +129,27 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client
 		allIDs = append(allIDs, ids...)
 	}
 
-	// TODO: Is this a good default? Need to balance mem usage and speed. This is prob. too much
-	ch := make(chan core.Object, len(allIDs))
-
+	// Populate objs through the given (non-buffered) channel
+	ch := make(chan core.Object)
 	objs := make([]kruntime.Object, 0, len(allIDs))
-	go func() {
-		for o := range ch {
-			objs = append(objs, o)
-		}
-	}()
 
+	// How should the object be created?
 	createFunc := createObject(gvk, c.Backend().Scheme())
 	if serializer.IsPartialObjectList(list) {
 		createFunc = createPartialObject(gvk)
 	} else if serializer.IsUnstructuredList(list) {
 		createFunc = createUnstructuredObject(gvk)
 	}
-	// Start one goroutine per ID, and get back an aggregate error
-	err = c.processKeys(ctx, allIDs, &listOpts.FilterOptions, createFunc, ch)
-	// Always unconditionally stop the channel after this, we know there won't
-	// be any more writes to it. This will terminate the for-range loop above.
-	close(ch)
-	if err != nil {
+	// Temporary processing goroutine; execution starts instantly
+	m := syncutil.RunMonitor(func() error {
+		return c.processKeys(ctx, allIDs, &listOpts.FilterOptions, createFunc, ch)
+	})
+
+	for o := range ch {
+		objs = append(objs, o)
+	}
+
+	if err := m.Wait(); err != nil {
 		return err
 	}
 
@@ -283,6 +283,9 @@ func (c *Generic) processKeys(ctx context.Context, ids []core.UnversionedObjectI
 	for _, id := range ids {
 		goroutines = append(goroutines, c.processKey(ctx, id, filterOpts, fn, output))
 	}
+
+	defer close(output)
+
 	return utilerrs.AggregateGoroutines(goroutines...)
 }
 
