@@ -112,24 +112,34 @@ func (w *FileWatcher) WatchForFileEvents(ctx context.Context, into fileevents.Fi
 	return nil // all ok
 }
 
-func (w *FileWatcher) monitorFunc() {
+func (w *FileWatcher) monitorFunc() error {
 	log.Debug("FileWatcher: Monitoring thread started")
 	defer log.Debug("FileWatcher: Monitoring thread stopped")
 	defer close(w.outbound) // Close the update stream after the FileWatcher has stopped
 
-	ctx := context.Background()
-
 	for {
 		event, ok := <-w.inbound
 		if !ok {
-			return
+			logrus.Debug("FileWatcher: Got non-ok channel recieve from w.inbound, exiting monitorFunc")
+			return nil
 		}
 
 		if ievent(event).Mask&unix.IN_ISDIR != 0 {
 			continue // Skip directories
 		}
 
-		if w.opts.PathExcluder.ShouldExcludePath(ctx, event.Path()) {
+		// Get the relative path between the root directory and the changed file
+		// Note: This is just used for the PathExcluder, absolute paths are used
+		// in the underlying file-change computation system, until in sendUpdate
+		// where they are converted into relative paths before sending to the listener.
+		relativePath, err := filepath.Rel(w.dir, event.Path())
+		if err != nil {
+			logrus.Errorf("FileWatcher: Error occurred when computing relative path between: %s and %s: %v", w.dir, event.Path(), err)
+			continue
+		}
+
+		// The PathExcluder only operates on relative paths.
+		if w.opts.PathExcluder.ShouldExcludePath(relativePath) {
 			continue // Skip ignored files
 		}
 
@@ -142,18 +152,20 @@ func (w *FileWatcher) monitorFunc() {
 		eventList = append(eventList, event)
 
 		// Register the event in the map, and dispatch all the events at once after the timeout
+		// Note that event.Path() is just the unique key for the map here, it is not actually
+		// used later when computing the changes of the filesystem.
 		w.batcher.Store(event.Path(), eventList)
 		log.Debugf("FileWatcher: Registered inotify events %v for path %q", eventList, event.Path())
 	}
 }
 
-func (w *FileWatcher) dispatchFunc() {
+func (w *FileWatcher) dispatchFunc() error {
 	log.Debug("FileWatcher: Dispatch thread started")
 	defer log.Debug("FileWatcher: Dispatch thread stopped")
 
 	for {
 		// Wait until we have a batch dispatched to us
-		ok := w.batcher.ProcessBatch(func(key, val interface{}) bool {
+		ok := w.batcher.ProcessBatch(func(_, val interface{}) bool {
 			// Concatenate all known events, and dispatch them to be handled one by one
 			for _, event := range w.concatenateEvents(val.(notifyEvents)) {
 				w.sendUpdate(event)
@@ -163,7 +175,8 @@ func (w *FileWatcher) dispatchFunc() {
 			return true
 		})
 		if !ok {
-			return // The BatchWriter channel is closed, stop processing
+			logrus.Debug("FileWatcher: Got non-ok channel recieve from w.batcher, exiting dispatchFunc")
+			return nil // The BatchWriter channel is closed, stop processing
 		}
 
 		log.Debug("FileWatcher: Dispatched events batch and reset the events cache")
@@ -194,8 +207,9 @@ func (w *FileWatcher) Close() error {
 	notify.Stop(w.inbound)
 	w.batcher.Close()
 	close(w.inbound) // Close the inbound event stream
-	w.monitor.Wait()
-	w.dispatcher.Wait()
+	// No need to check the error here, as we only return nil above
+	_ = w.monitor.Wait()
+	_ = w.dispatcher.Wait()
 	return nil
 }
 
@@ -258,7 +272,7 @@ func (w *FileWatcher) newMoveCache(event notify.EventInfo) *moveCache {
 	}
 
 	// moveCaches wait one second to be cancelled before firing
-	m.timer = time.AfterFunc(time.Second, m.incomplete)
+	m.timer = time.AfterFunc(w.opts.BatchTimeout, m.incomplete)
 	return m
 }
 

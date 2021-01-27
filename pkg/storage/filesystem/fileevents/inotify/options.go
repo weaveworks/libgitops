@@ -26,7 +26,7 @@ type FileWatcherOptions struct {
 	// Default: DefaultEventBufferSize
 	EventBufferSize int32
 	// PathExcluder provides a way to exclude paths.
-	// Default: filesystem.ExcludeGitDirectory{}
+	// Default: filesystem.DefaultPathExcluders()
 	PathExcluder filesystem.PathExcluder
 }
 
@@ -54,6 +54,6 @@ func defaultOptions() *FileWatcherOptions {
 	return &FileWatcherOptions{
 		BatchTimeout:    1 * time.Second,
 		EventBufferSize: DefaultEventBufferSize,
-		PathExcluder:    filesystem.ExcludeGitDirectory{},
+		PathExcluder:    filesystem.DefaultPathExcluders(),
 	}
 }
