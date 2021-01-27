@@ -26,5 +26,4 @@ require (
 	k8s.io/kube-openapi v0.0.0-20200805222855-6aeccd4b50c6
 	sigs.k8s.io/controller-runtime v0.7.0
 	sigs.k8s.io/kustomize/kyaml v0.10.5
-	sigs.k8s.io/yaml v1.2.0
 )
