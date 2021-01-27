@@ -24,6 +24,7 @@ require (
 	k8s.io/api v0.19.2
 	k8s.io/apimachinery v0.19.6
 	k8s.io/kube-openapi v0.0.0-20200805222855-6aeccd4b50c6
+	k8s.io/utils v0.0.0-20200912215256-4140de9c8800
 	sigs.k8s.io/controller-runtime v0.7.0
 	sigs.k8s.io/kustomize/kyaml v0.10.5
 )
