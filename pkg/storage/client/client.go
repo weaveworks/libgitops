@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
-	"github.com/fluxcd/go-git-providers/validation"
 	"github.com/weaveworks/libgitops/pkg/filter"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
@@ -16,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
+	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -131,33 +130,31 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client
 
 	// TODO: Is this a good default? Need to balance mem usage and speed. This is prob. too much
 	ch := make(chan core.Object, len(allIDs))
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	var processErr error
-	go func() {
-		createFunc := createObject(gvk, c.Backend().Scheme())
-		if serializer.IsPartialObjectList(list) {
-			createFunc = createPartialObject(gvk)
-		} else if serializer.IsUnstructuredList(list) {
-			createFunc = createUnstructuredObject(gvk)
-		}
-		processErr = c.processKeys(ctx, allIDs, &listOpts.FilterOptions, createFunc, ch)
-		wg.Done()
-	}()
 
 	objs := make([]kruntime.Object, 0, len(allIDs))
-	for o := range ch {
-		objs = append(objs, o)
+	go func() {
+		for o := range ch {
+			objs = append(objs, o)
+		}
+	}()
+
+	createFunc := createObject(gvk, c.Backend().Scheme())
+	if serializer.IsPartialObjectList(list) {
+		createFunc = createPartialObject(gvk)
+	} else if serializer.IsUnstructuredList(list) {
+		createFunc = createUnstructuredObject(gvk)
 	}
-	// Wait for processErr to be set, and the above goroutine to finish
-	wg.Wait()
-	if processErr != nil {
-		return processErr
+	// Start one goroutine per ID, and get back an aggregate error
+	err = c.processKeys(ctx, allIDs, &listOpts.FilterOptions, createFunc, ch)
+	// Always unconditionally stop the channel after this, we know there won't
+	// be any more writes to it. This will terminate the for-range loop above.
+	close(ch)
+	if err != nil {
+		return err
 	}
 
 	// Populate the List's Items field with the objects returned
-	meta.SetList(list, objs)
-	return nil
+	return meta.SetList(list, objs)
 }
 
 func (c *Generic) Create(ctx context.Context, obj core.Object, _ ...client.CreateOption) error {
@@ -282,45 +279,34 @@ func createUnstructuredObject(gvk core.GroupVersionKind) newObjectFunc {
 }
 
 func (c *Generic) processKeys(ctx context.Context, ids []core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
-	wg := &sync.WaitGroup{}
-	wg.Add(len(ids))
-	multiErr := &validation.MultiError{} // TODO: Thread-safe append
-	for _, i := range ids {
-		go func(id core.UnversionedObjectID) {
-			defer wg.Done()
+	goroutines := []func() error{}
+	for _, id := range ids {
+		goroutines = append(goroutines, c.processKey(ctx, id, filterOpts, fn, output))
+	}
+	return utilerrs.AggregateGoroutines(goroutines...)
+}
 
-			// Create a new object, and decode into it using Get
-			obj, err := fn()
-			if err != nil {
-				multiErr.Errors = append(multiErr.Errors, err)
-				return
-			}
+func (c *Generic) processKey(ctx context.Context, id core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) func() error {
+	return func() error {
+		// Create a new object, and decode into it using Get
+		obj, err := fn()
+		if err != nil {
+			return err
+		}
 
-			if err := c.Get(ctx, id.ObjectKey(), obj); err != nil {
-				multiErr.Errors = append(multiErr.Errors, err)
-				return
-			}
+		if err := c.Get(ctx, id.ObjectKey(), obj); err != nil {
+			return err
+		}
 
-			// Match the object against the filters
-			matched, err := filterOpts.Match(obj)
-			if err != nil {
-				multiErr.Errors = append(multiErr.Errors, err)
-				return
-			}
-			if !matched {
-				return
-			}
-
+		// Match the object against the filters
+		matched, err := filterOpts.Match(obj)
+		if err != nil {
+			return err
+		}
+		if matched {
 			output <- obj
-		}(i)
-	}
-	wg.Wait()
-	// Close the output channel so that the for-range loop stops
-	close(output)
+		}
 
-	// TODO: upstream this
-	if len(multiErr.Errors) != 0 {
-		return multiErr
+		return nil
 	}
-	return nil
 }
