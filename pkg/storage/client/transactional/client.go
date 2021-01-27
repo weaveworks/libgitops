@@ -2,6 +2,8 @@ package transactional
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,7 +13,6 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/client"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
-	"github.com/weaveworks/libgitops/pkg/util"
 	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 )
 
@@ -271,7 +272,7 @@ func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts
 
 	// Append random bytes to the end of the head branch if it ends with a dash
 	if strings.HasSuffix(headBranch, "-") {
-		suffix, err := util.RandomSHA(4)
+		suffix, err := randomSHA(4)
 		if err != nil {
 			return nil, err
 		}
@@ -316,4 +317,14 @@ func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts
 		},
 		merger: c.merger,
 	}, nil
+}
+
+// randomSHA returns a hex-encoded string from {byteLen} random bytes.
+func randomSHA(byteLen int) (string, error) {
+	b := make([]byte, byteLen)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

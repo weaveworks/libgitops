@@ -1,6 +1,8 @@
 package serializer
 
-import "github.com/weaveworks/libgitops/pkg/util"
+import (
+	"k8s.io/utils/pointer"
+)
 
 // TODO: Import k8s.io/utils/pointer instead of baking our own ptrutils package.
 
@@ -11,7 +13,7 @@ type EncodeOption interface {
 func defaultEncodeOpts() *EncodeOptions {
 	return &EncodeOptions{
 		// Default to "pretty encoding"
-		JSONIndent:       util.IntPtr(2),
+		JSONIndent:       pointer.Int32Ptr(2),
 		PreserveComments: PreserveCommentsDisable,
 	}
 }
@@ -23,8 +25,7 @@ type EncodeOptions struct {
 	//
 	// Default: 2, i.e. pretty output
 	// TODO: Make this a property of the FrameWriter instead?
-	// TODO: Use a typed size of the int, e.g. int32?
-	JSONIndent *int
+	JSONIndent *int32
 
 	// Whether to preserve YAML comments internally.
 	// This only works for objects embedding metav1.ObjectMeta.
@@ -88,12 +89,12 @@ func (p PreserveComments) ApplyToDecode(target *DecodeOptions) {
 // Indent JSON encoding output with this many spaces.
 // Use PrettyEncode(false) or JSONIndent(0) to disable pretty output.
 // Only applicable to ContentTypeJSON framers.
-type JSONIndent int
+type JSONIndent int32
 
 var _ EncodeOption = JSONIndent(0)
 
 func (i JSONIndent) ApplyToEncode(target *EncodeOptions) {
-	target.JSONIndent = util.IntPtr(int(i))
+	target.JSONIndent = pointer.Int32Ptr(int32(i))
 }
 
 // Shorthand for JSONIndent(0) if false, or JSONIndent(2) if true
@@ -117,12 +118,12 @@ type DecodeOption interface {
 
 func defaultDecodeOpts() *DecodeOptions {
 	return &DecodeOptions{
-		ConvertToHub:       util.BoolPtr(false),
-		Strict:             util.BoolPtr(true),
-		Default:            util.BoolPtr(false),
-		DecodeListElements: util.BoolPtr(true),
+		ConvertToHub:       pointer.BoolPtr(false),
+		Strict:             pointer.BoolPtr(true),
+		Default:            pointer.BoolPtr(false),
+		DecodeListElements: pointer.BoolPtr(true),
 		PreserveComments:   PreserveCommentsDisable,
-		DecodeUnknown:      util.BoolPtr(false),
+		DecodeUnknown:      pointer.BoolPtr(false),
 	}
 }
 
@@ -210,7 +211,7 @@ type ConvertToHub bool
 var _ DecodeOption = ConvertToHub(false)
 
 func (b ConvertToHub) ApplyToDecode(target *DecodeOptions) {
-	target.ConvertToHub = util.BoolPtr(bool(b))
+	target.ConvertToHub = pointer.BoolPtr(bool(b))
 }
 
 // Parse the YAML/JSON in strict mode, returning a specific error if the input
@@ -220,7 +221,7 @@ type DecodeStrict bool
 var _ DecodeOption = DecodeStrict(false)
 
 func (b DecodeStrict) ApplyToDecode(target *DecodeOptions) {
-	target.Strict = util.BoolPtr(bool(b))
+	target.Strict = pointer.BoolPtr(bool(b))
 }
 
 // Automatically default the decoded object.
@@ -229,7 +230,7 @@ type DefaultAtDecode bool
 var _ DecodeOption = DefaultAtDecode(false)
 
 func (b DefaultAtDecode) ApplyToDecode(target *DecodeOptions) {
-	target.Default = util.BoolPtr(bool(b))
+	target.Default = pointer.BoolPtr(bool(b))
 }
 
 // Only applicable for Decoder.DecodeAll(). If the underlying data contains a v1.List,
@@ -242,7 +243,7 @@ type DecodeListElements bool
 var _ DecodeOption = DecodeListElements(false)
 
 func (b DecodeListElements) ApplyToDecode(target *DecodeOptions) {
-	target.DecodeListElements = util.BoolPtr(bool(b))
+	target.DecodeListElements = pointer.BoolPtr(bool(b))
 }
 
 // DecodeUnknown specifies whether decode objects with an unknown GroupVersionKind into a
@@ -253,5 +254,5 @@ type DecodeUnknown bool
 var _ DecodeOption = DecodeUnknown(false)
 
 func (b DecodeUnknown) ApplyToDecode(target *DecodeOptions) {
-	target.DecodeUnknown = util.BoolPtr(bool(b))
+	target.DecodeUnknown = pointer.BoolPtr(bool(b))
 }
