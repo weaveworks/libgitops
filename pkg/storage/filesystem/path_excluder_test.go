@@ -1,7 +1,6 @@
 package filesystem
 
 import (
-	"context"
 	"testing"
 )
 
@@ -13,17 +12,17 @@ func TestExcludeGitDirectory_ShouldExcludePath(t *testing.T) {
 	}{
 		{
 			name: "normal",
-			path: ".git",
+			path: ".git/foo",
 			want: true,
 		},
 		{
 			name: "with relative path",
-			path: "./.git",
+			path: "./.git/bar/baz",
 			want: true,
 		},
 		{
 			name: "with many parents",
-			path: "/foo/bar/.git",
+			path: "/foo/bar/.git/hello",
 			want: true,
 		},
 		{
@@ -56,12 +55,21 @@ func TestExcludeGitDirectory_ShouldExcludePath(t *testing.T) {
 			path: ".gitea",
 			want: false,
 		},
+		{
+			name: "absolute path without git",
+			path: "/foo/bar/no/git/here",
+			want: false,
+		},
+		{
+			name: "don't catch files named .git",
+			path: "/hello/.git",
+			want: false,
+		},
 	}
-	e := ExcludeGitDirectory{}
-	ctx := context.Background()
+	e := ExcludeDirectoryNames{DirectoryNamesToExclude: []string{".git"}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := e.ShouldExcludePath(ctx, tt.path); got != tt.want {
+			if got := e.ShouldExcludePath(tt.path); got != tt.want {
 				t.Errorf("ExcludeGitDirectory.ShouldExcludePath() = %v, want %v", got, tt.want)
 			}
 		})
