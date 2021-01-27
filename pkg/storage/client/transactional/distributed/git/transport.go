@@ -1,4 +1,4 @@
-package gitdir
+package git
 
 import (
 	"errors"
