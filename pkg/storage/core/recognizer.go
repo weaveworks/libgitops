@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +22,9 @@ var _ ObjectRecognizer = &SerializerObjectRecognizer{}
 type SerializerObjectRecognizer struct {
 	// Serializer is a required field in order for ResolveObjectID to function.
 	Serializer serializer.Serializer
+	// AllowUnrecognized controls whether this implementation allows recognizing
+	// GVK combinations not known to the underlying Scheme. Default: false
+	AllowUnrecognized bool
 }
 
 func (r *SerializerObjectRecognizer) ResolveObjectID(_ context.Context, _ string, content []byte) (ObjectID, error) {
@@ -35,5 +39,20 @@ func (r *SerializerObjectRecognizer) ResolveObjectID(_ context.Context, _ string
 	if err != nil {
 		return nil, err
 	}
+	// Validate the object info
+	gvk := metaObj.GroupVersionKind()
+	if gvk.Group == "" && gvk.Version == "" {
+		return nil, fmt.Errorf(".apiVersion field must not be empty")
+	}
+	if gvk.Kind == "" {
+		return nil, fmt.Errorf(".kind field must not be empty")
+	}
+	if metaObj.Kind == "" {
+		return nil, fmt.Errorf(".metadata.name field must not be empty")
+	}
+	if !r.AllowUnrecognized && !r.Serializer.Scheme().Recognizes(gvk) {
+		return nil, fmt.Errorf("GroupVersionKind %v not recognized by the scheme", gvk)
+	}
+
 	return NewObjectID(metaObj.GroupVersionKind(), ObjectKeyFromObject(metaObj)), nil
 }
