@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"os"
 	"time"
@@ -15,14 +17,22 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"github.com/weaveworks/libgitops/cmd/common"
+	"github.com/weaveworks/libgitops/cmd/common/logs"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
-	"github.com/weaveworks/libgitops/pkg/gitdir"
-	"github.com/weaveworks/libgitops/pkg/logs"
-	"github.com/weaveworks/libgitops/pkg/storage"
-	"github.com/weaveworks/libgitops/pkg/storage/transaction"
-	githubpr "github.com/weaveworks/libgitops/pkg/storage/transaction/pullrequest/github"
-	"github.com/weaveworks/libgitops/pkg/storage/watch"
-	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
+	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
+	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage/backend"
+	"github.com/weaveworks/libgitops/pkg/storage/client"
+	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
+	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/distributed"
+	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/distributed/git"
+	githubpr "github.com/weaveworks/libgitops/pkg/storage/client/transactional/distributed/git/github"
+	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/event"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	unstructuredevent "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured/event"
+	"github.com/weaveworks/libgitops/pkg/storage/kube"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 var (
@@ -30,8 +40,9 @@ var (
 	authorNameFlag  = pflag.String("author-name", defaultAuthorName, "Author name for Git commits")
 	authorEmailFlag = pflag.String("author-email", defaultAuthorEmail, "Author email for Git commits")
 	gitURLFlag      = pflag.String("git-url", "", "HTTPS Git URL; where the Git repository is, e.g. https://github.com/luxas/ignite-gitops")
-	prAssigneeFlag  = pflag.StringSlice("pr-assignees", nil, "What user logins to assign for the created PR. The user must have pull access to the repo.")
 	prMilestoneFlag = pflag.String("pr-milestone", "", "What milestone to tag the PR with")
+	prAssigneesFlag = pflag.StringSlice("pr-assignees", nil, "What user logins to assign for the created PR. The user must have pull access to the repo.")
+	prLabelsFlag    = pflag.StringSlice("pr-labels", nil, "What labels to apply on the created PR. The labels must already exist. E.g. \"user/bot,actuator/libgitops,kind/status-update\"")
 )
 
 const (
@@ -46,7 +57,16 @@ func main() {
 	common.ParseVersionFlag()
 
 	// Run the application
-	if err := run(*identityFlag, *gitURLFlag, os.Getenv("GITHUB_TOKEN"), *authorNameFlag, *authorEmailFlag); err != nil {
+	if err := run(
+		*identityFlag,
+		*gitURLFlag,
+		os.Getenv("GITHUB_TOKEN"),
+		*authorNameFlag,
+		*authorEmailFlag,
+		*prMilestoneFlag,
+		*prAssigneesFlag,
+		*prLabelsFlag,
+	); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -60,7 +80,8 @@ func expandAndRead(filePath string) ([]byte, error) {
 	return ioutil.ReadFile(expandedPath)
 }
 
-func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
+func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone string,
+	prAssignees, prLabels []string) error {
 	// Validate parameters
 	if len(identityFile) == 0 {
 		return fmt.Errorf("--identity-file is required")
@@ -69,7 +90,7 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
 		return fmt.Errorf("--git-url is required")
 	}
 	if len(ghToken) == 0 {
-		return fmt.Errorf("--github-token is required")
+		return fmt.Errorf("GITHUB_TOKEN is required")
 	}
 	if len(authorName) == 0 {
 		return fmt.Errorf("--author-name is required")
@@ -77,6 +98,9 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
 	if len(authorEmail) == 0 {
 		return fmt.Errorf("--author-email is required")
 	}
+
+	// Set the log level
+	logs.Logger.SetLevel(logrus.TraceLevel)
 
 	// Read the identity and known_hosts files
 	identityContent, err := expandAndRead(identityFile)
@@ -101,58 +125,101 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
 	}
 
 	// Authenticate to the GitDirectory using Git SSH
-	authMethod, err := gitdir.NewSSHAuthMethod(identityContent, knownHostsContent)
+	authMethod, err := git.NewSSHAuthMethod(identityContent, knownHostsContent)
 	if err != nil {
 		return err
 	}
 
-	// Construct the GitDirectory implementation which backs the storage
-	gitDir, err := gitdir.NewGitDirectory(repoRef, gitdir.GitDirectoryOptions{
+	ctx, cancel := context.WithCancel(context.Background())
+
+	defer func() { cancel() }()
+
+	// Construct the LocalClone implementation which backs the storage
+	localClone, err := git.NewLocalClone(ctx, repoRef, git.LocalCloneOptions{
 		Branch:     "master",
-		Interval:   10 * time.Second,
 		AuthMethod: authMethod,
 	})
 	if err != nil {
 		return err
 	}
 
-	// Create a new PR provider for the GitStorage
-	prProvider, err := githubpr.NewGitHubPRProvider(ghClient)
-	if err != nil {
-		return err
-	}
-	// Create a new GitStorage using the GitDirectory, PR provider, and Serializer
-	gitStorage, err := transaction.NewGitStorage(gitDir, prProvider, scheme.Serializer)
+	rawManifest, err := unstructuredevent.NewManifest(
+		localClone.Dir(),
+		filesystem.DefaultContentTyper,
+		core.StaticNamespacer{NamespacedIsDefaultPolicy: false}, // all objects root-spaced
+		&core.SerializerObjectRecognizer{Serializer: scheme.Serializer},
+		filesystem.DefaultPathExcluders(),
+	)
 	if err != nil {
 		return err
 	}
 
-	// Set the log level
-	logs.Logger.SetLevel(logrus.InfoLevel)
+	// Create the channel to receive events to, and register it with the EventStorage
+	updates := make(event.ObjectEventStream, 4096)
+	if err := rawManifest.WatchForObjectEvents(ctx, updates); err != nil {
+		return err
+	}
 
-	watchStorage, err := watch.NewManifestStorage(gitDir.Dir(), scheme.Serializer)
+	defer func() { _ = rawManifest.Close() }()
+
+	b, err := backend.NewGeneric(rawManifest, scheme.Serializer, kube.NewNamespaceEnforcer(), nil, nil)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = watchStorage.Close() }()
 
-	updates := make(chan update.Update, 4096)
-	watchStorage.SetUpdateStream(updates)
+	gitClient, err := client.NewGeneric(b, scheme.Serializer.Patcher())
+	if err != nil {
+		return err
+	}
+
+	txGeneralClient, err := transactional.NewGeneric(gitClient, localClone, nil)
+	if err != nil {
+		return err
+	}
+
+	txClient, err := distributed.NewClient(txGeneralClient, localClone)
+	if err != nil {
+		return err
+	}
+
+	// Create a new CommitHook for sending PRs
+	prCommitHook, err := githubpr.NewGitHubPRCommitHandler(ghClient, localClone.RepositoryRef())
+	if err != nil {
+		return err
+	}
+
+	// Register the PR CommitHook with the BranchManager
+	// This needs to be done after the distributed.NewClient call, so
+	// it has been able to handle pushing of the branch first.
+	localClone.CommitHookChain().Register(prCommitHook)
+
+	// Start the sync loop in the background
+	txClient.StartResyncLoop(ctx, 15*time.Second)
 
 	go func() {
 		for upd := range updates {
-			logrus.Infof("Got %s update for: %v %v", upd.Event, upd.PartialObject.GetObjectKind().GroupVersionKind(), upd.PartialObject.GetObjectMeta())
+			logrus.Infof("Got %s update for: %v %v", upd.Type, upd.ID.GroupKind(), upd.ID.ObjectKey())
 		}
 	}()
 
 	e := common.NewEcho()
 
 	e.GET("/git/", func(c echo.Context) error {
-		objs, err := gitStorage.List(storage.NewKindKey(common.CarGVK))
-		if err != nil {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(v1alpha1.SchemeGroupVersion.WithKind("CarList"))
+
+		/*if br := c.QueryParam("branch"); len(br) != 0 {
+			ctx = core.WithVersionRef(ctx, core.NewBranchRef(br))
+		}*/
+
+		if err := txClient.List(ctx, list); err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, objs)
+		var content bytes.Buffer
+		if err := scheme.Serializer.Encoder().Encode(serializer.NewJSONFrameWriter(&content), list); err != nil {
+			return err
+		}
+		return c.JSONBlob(http.StatusOK, content.Bytes())
 	})
 
 	e.PUT("/git/:name", func(c echo.Context) error {
@@ -161,26 +228,36 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
-		objKey := common.CarKeyForName(name)
-		err := gitStorage.Transaction(context.Background(), fmt.Sprintf("%s-update-", name), func(ctx context.Context, s storage.Storage) (transaction.CommitResult, error) {
+		car := v1alpha1.Car{}
+		carKey := core.ObjectKey{Name: name}
 
-			// Update the status of the car
-			if err := common.SetNewCarStatus(s, objKey); err != nil {
-				return nil, err
-			}
+		branchCtx := core.WithVersionRef(ctx, core.NewBranchRef(localClone.MainBranch()))
 
-			return &transaction.GenericPullRequestResult{
-				CommitResult: &transaction.GenericCommitResult{
-					AuthorName:  authorName,
-					AuthorEmail: authorEmail,
-					Title:       "Update Car speed",
-					Description: "We really need to sync this state!",
+		headBranch := fmt.Sprintf("%s-update-", name)
+		err := txClient.
+			BranchTransaction(branchCtx, headBranch).
+			Get(carKey, &car).
+			Custom(func(ctx context.Context) error {
+				car.Status.Distance = rand.Uint64()
+				car.Status.Speed = rand.Float64() * 100
+				return nil
+			}).
+			Update(&car).
+			CreateTx(githubpr.GenericPullRequest{
+				Commit: transactional.GenericCommit{
+					Author: transactional.GenericCommitAuthor{
+						Name:  authorName,
+						Email: authorEmail,
+					},
+					Message: transactional.GenericCommitMessage{
+						Title:       "Update Car speed",
+						Description: "We really need to sync this state!",
+					},
 				},
-				Labels:    []string{"user/bot", "actuator/libgitops", "kind/status-update"},
-				Assignees: *prAssigneeFlag,
-				Milestone: *prMilestoneFlag,
-			}, nil
-		})
+				Labels:    prLabels,
+				Assignees: prAssignees,
+				Milestone: prMilestone,
+			}).Error()
 		if err != nil {
 			return err
 		}
