@@ -212,11 +212,12 @@ func (s *Generic) getPath(ctx context.Context, id core.UnversionedObjectID) (str
 
 func (s *Generic) Close() error {
 	err := s.emitter.Close()
-	s.monitor.Wait()
+	// No need to check the error here
+	_ = s.monitor.Wait()
 	return err
 }
 
-func (s *Generic) monitorFunc() {
+func (s *Generic) monitorFunc() error {
 	logrus.Debug("WatchStorage: Monitoring thread started")
 	defer logrus.Debug("WatchStorage: Monitoring thread stopped")
 
@@ -227,7 +228,7 @@ func (s *Generic) monitorFunc() {
 		ev, ok := <-s.inbound
 		if !ok {
 			logrus.Error("WatchStorage: Fatal: Got non-ok response from watcher.GetFileEventStream()")
-			return
+			return nil
 		}
 
 		logrus.Tracef("WatchStorage: Processing event: %s", ev.Type)
