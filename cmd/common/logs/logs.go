@@ -8,6 +8,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// TODO: Move to the way controller-runtime does logs instead?
+
 // Quiet specifies whether to only print machine-readable IDs
 var Quiet bool
 

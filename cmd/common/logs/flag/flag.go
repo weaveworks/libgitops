@@ -5,6 +5,9 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// TODO: Use these flags in the sample binaries?
+// TODO: Move to the way controller-runtime does logs instead?
+
 type LogLevelFlag struct {
 	value *logrus.Level
 }
