@@ -82,13 +82,19 @@ type Validator interface {
 	ValidateChange(ctx context.Context, backend Reader, op ChangeOperation, obj core.Object) error
 }
 
+// NewGeneric creates a new generic Backend for the given underlying Storage for storing the
+// objects once serialized, encoders and decoders for (de)serialization, the NamespaceEnforcer
+// for enforcing a namespacing policy, the StorageVersioner for telling the encoder what version
+// of many to use when encoding, and optionally, a Validator.
+//
+// All parameters except the validator are mandatory.
 func NewGeneric(
 	storage storage.Storage,
 	encoder serializer.Encoder,
 	decoder serializer.Decoder,
 	enforcer NamespaceEnforcer,
 	versioner StorageVersioner,
-	validator Validator, // TODO: optional?
+	validator Validator,
 ) (*Generic, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
@@ -105,7 +111,6 @@ func NewGeneric(
 	if versioner == nil {
 		return nil, fmt.Errorf("versioner is mandatory")
 	}
-	// TODO: validate options
 	return &Generic{
 		// It shouldn't matter if we use the encoder's or decoder's SchemeLock
 		LockedScheme: encoder.SchemeLock(),
@@ -173,8 +178,7 @@ func (b *Generic) Get(ctx context.Context, obj core.Object) error {
 		return err
 	}
 
-	// TODO: Support various decoding options, e.g. defaulting?
-	// TODO: Does this "replace" already-set fields?
+	// TODO: Check if the decoder "replaces" already-set fields or "leaks" old data?
 	return b.decoder.DecodeInto(serializer.NewSingleFrameReader(content, ct), obj)
 }
 
@@ -275,7 +279,8 @@ func (b *Generic) write(ctx context.Context, id core.ObjectID, obj core.Object) 
 	}
 
 	var objBytes bytes.Buffer
-	// TODO: Work with any ContentType, not just JSON/YAML. Or, make a SingleFrameWriter for any ct.
+	// TODO: Work with any ContentType, not just JSON/YAML. Make a SingleFrameWriter
+	// that works for any ContentType, and just ever writes one doc (which is what we need)
 	err = b.encoder.EncodeForGroupVersion(serializer.NewFrameWriter(ct, &objBytes), obj, gv)
 	if err != nil {
 		return err
