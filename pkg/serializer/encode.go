@@ -7,19 +7,30 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
-func newEncoder(schemeAndCodec *schemeAndCodec, opts EncodeOptions) Encoder {
+func NewEncoder(schemeLock LockedScheme, codecs *k8sserializer.CodecFactory, opts ...EncodeOption) Encoder {
 	return &encoder{
-		schemeAndCodec,
-		opts,
+		LockedScheme: schemeLock,
+		codecs:       codecs,
+		opts:         *defaultEncodeOpts().ApplyOptions(opts),
 	}
 }
 
 type encoder struct {
-	*schemeAndCodec
+	LockedScheme
+	codecs *k8sserializer.CodecFactory
 
 	opts EncodeOptions
+}
+
+func (e *encoder) SchemeLock() LockedScheme {
+	return e.LockedScheme
+}
+
+func (e *encoder) CodecFactory() *k8sserializer.CodecFactory {
+	return e.codecs
 }
 
 // Encode encodes the given objects and writes them to the specified FrameWriter.
@@ -31,14 +42,14 @@ type encoder struct {
 func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 	for _, obj := range objs {
 		// Get the kind for the given object
-		gvk, err := GVKForObject(e.scheme, obj)
+		gvk, err := GVKForObject(e.Scheme(), obj)
 		if err != nil {
 			return err
 		}
 
 		// If the object is internal, convert it to the preferred external one
 		if gvk.Version == runtime.APIVersionInternal {
-			gv, err := prioritizedVersionForGroup(e.scheme, gvk.Group)
+			gv, err := prioritizedVersionForGroup(e.Scheme(), gvk.Group)
 			if err != nil {
 				return err
 			}
@@ -72,7 +83,7 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 	encoder := serializerInfo.Serializer
 
 	// Get a version-specific encoder for the specified groupversion
-	versionEncoder := encoderForVersion(e.scheme, encoder, gv)
+	versionEncoder := encoderForVersion(e.Scheme(), encoder, gv)
 
 	// Check if the user requested prettified JSON output.
 	// If the ContentType is JSON this is ok, we will intent the encode output on the fly.
@@ -105,14 +116,14 @@ func encoderForVersion(scheme *runtime.Scheme, encoder runtime.Encoder, gv schem
 }
 
 type jsonPrettyFrameWriter struct {
-	indent int
+	indent int32
 	fw     FrameWriter
 }
 
 func (w *jsonPrettyFrameWriter) Write(p []byte) (n int, err error) {
 	// Indent the source bytes
 	var indented bytes.Buffer
-	err = json.Indent(&indented, p, "", strings.Repeat(" ", w.indent))
+	err = json.Indent(&indented, p, "", strings.Repeat(" ", int(w.indent)))
 	if err != nil {
 		return
 	}

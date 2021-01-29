@@ -143,11 +143,15 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		return err
 	}
 
+	// Just use default encoders and decoders
+	encoder := scheme.Serializer.Encoder()
+	decoder := scheme.Serializer.Decoder()
+
 	rawManifest, err := unstructuredevent.NewManifest(
 		localClone.Dir(),
 		filesystem.DefaultContentTyper,
 		core.StaticNamespacer{NamespacedIsDefaultPolicy: false}, // all objects root-spaced
-		&core.SerializerObjectRecognizer{Serializer: scheme.Serializer},
+		&core.KubeObjectRecognizer{Decoder: decoder},
 		filesystem.DefaultPathExcluders(),
 	)
 	if err != nil {
@@ -162,12 +166,12 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 
 	defer func() { _ = rawManifest.Close() }()
 
-	b, err := backend.NewGeneric(rawManifest, scheme.Serializer, kube.NewNamespaceEnforcer(), nil, nil)
+	b, err := backend.NewGeneric(rawManifest, encoder, decoder, kube.NewNamespaceEnforcer(), nil, nil)
 	if err != nil {
 		return err
 	}
 
-	gitClient, err := client.NewGeneric(b, scheme.Serializer.Patcher())
+	gitClient, err := client.NewGeneric(b)
 	if err != nil {
 		return err
 	}

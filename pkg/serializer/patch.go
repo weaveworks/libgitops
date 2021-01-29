@@ -35,10 +35,32 @@ type Patcher interface {
 	// If knowledge about the schema is required by the patch type (e.g. StrategicMergePatch),
 	// it is the liability of the caller to provide an OpenAPI schema.
 	ApplyOnUnstructured(bytePatcher patch.BytePatcher, patch []byte, obj runtime.Unstructured, schema openapi.Schema) error
+
+	// Encoder gets the underlying Encoder
+	Encoder() Encoder
+
+	// Decoder gets the underlying Decoder
+	Decoder() Decoder
+}
+
+func NewPatcher(encoder Encoder, decoder Decoder) Patcher {
+	// It shouldn't matter if we use the LockedScheme from the encoder or decoder
+	// TODO: Does this work with pretty encoders?
+	return &patcher{encoder.SchemeLock(), encoder, decoder}
 }
 
 type patcher struct {
-	*schemeAndCodec
+	LockedScheme
+	encoder Encoder
+	decoder Decoder
+}
+
+func (p *patcher) Encoder() Encoder {
+	return p.encoder
+}
+
+func (p *patcher) Decoder() Decoder {
+	return p.decoder
 }
 
 // ApplyOnStruct applies the given patch (JSON-encoded) using the given BytePatcher
@@ -56,11 +78,11 @@ type patcher struct {
 // this function looks that metadata up using reflection of obj.
 func (p *patcher) ApplyOnStruct(bytePatcher patch.BytePatcher, patch []byte, obj runtime.Object) error {
 	// Require that obj is typed
-	if !IsTyped(obj, p.scheme) {
+	if !IsTyped(obj, p.Scheme()) {
 		return errors.New("obj must be typed")
 	}
 	// Get the GVK so we can check if obj is internal
-	gvk, err := GVKForObject(p.scheme, obj)
+	gvk, err := GVKForObject(p.Scheme(), obj)
 	if err != nil {
 		return err
 	}
@@ -69,12 +91,9 @@ func (p *patcher) ApplyOnStruct(bytePatcher patch.BytePatcher, patch []byte, obj
 		return errors.New("obj must not be internal")
 	}
 
-	// Create a non-pretty encoder
-	encopt := *defaultEncodeOpts().ApplyOptions([]EncodeOption{PrettyEncode(false)})
-	enc := newEncoder(p.schemeAndCodec, encopt)
 	// Encode without conversion to the buffer
 	var buf bytes.Buffer
-	if err := enc.EncodeForGroupVersion(NewJSONFrameWriter(&buf), obj, gvk.GroupVersion()); err != nil {
+	if err := p.encoder.EncodeForGroupVersion(NewJSONFrameWriter(&buf), obj, gvk.GroupVersion()); err != nil {
 		return err
 	}
 
@@ -92,8 +111,7 @@ func (p *patcher) ApplyOnStruct(bytePatcher patch.BytePatcher, patch []byte, obj
 
 	// Decode into the object to apply the changes
 	fr := NewSingleFrameReader(newJSON, ContentTypeJSON)
-	dec := newDecoder(p.schemeAndCodec, *defaultDecodeOpts())
-	if err := dec.DecodeInto(fr, obj); err != nil {
+	if err := p.decoder.DecodeInto(fr, obj); err != nil {
 		return err
 	}
 

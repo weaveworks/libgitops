@@ -20,23 +20,30 @@ var listGVK = metav1.Unversioned.WithKind("List")
 // as a variadic-sized Option slice? It would probably take caching the *json.Serializer
 // and runtime.Decoder for the given options they use, though.
 
-func newDecoder(schemeAndCodec *schemeAndCodec, opts DecodeOptions) Decoder {
+func NewDecoder(schemeLock LockedScheme, opts ...DecodeOption) Decoder {
+	// Make the options struct
+	o := *defaultDecodeOpts().ApplyOptions(opts)
+
 	// Allow both YAML and JSON inputs (JSON is a subset of YAML), and deserialize in strict mode
-	s := json.NewSerializerWithOptions(json.DefaultMetaFactory, schemeAndCodec.scheme, schemeAndCodec.scheme, json.SerializerOptions{
+	s := json.NewSerializerWithOptions(json.DefaultMetaFactory, schemeLock.Scheme(), schemeLock.Scheme(), json.SerializerOptions{
 		Yaml:   true,
-		Strict: *opts.Strict,
+		Strict: *o.Strict,
 	})
 
-	decodeCodec := decoderForVersion(schemeAndCodec.scheme, s, *opts.Default, *opts.ConvertToHub)
+	decodeCodec := decoderForVersion(schemeLock.Scheme(), s, *o.Default, *o.ConvertToHub)
 
-	return &decoder{schemeAndCodec, decodeCodec, opts}
+	return &decoder{schemeLock, decodeCodec, o}
 }
 
 type decoder struct {
-	*schemeAndCodec
+	LockedScheme
 
 	decoder runtime.Decoder
 	opts    DecodeOptions
+}
+
+func (d *decoder) SchemeLock() LockedScheme {
+	return d.LockedScheme
 }
 
 // Decode returns the decoded object from the next document in the FrameReader stream.
@@ -71,11 +78,11 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 	if *d.opts.DecodeListElements {
 		// As .AddKnownTypes is writing to the scheme, make sure we guard the check and the write with a
 		// mutex.
-		d.schemeMu.Lock()
-		if !d.scheme.Recognizes(listGVK) {
-			d.scheme.AddKnownTypes(metav1.Unversioned, &metav1.List{})
+		d.SchemeLock()
+		if !d.Scheme().Recognizes(listGVK) {
+			d.Scheme().AddKnownTypes(metav1.Unversioned, &metav1.List{})
 		}
-		d.schemeMu.Unlock()
+		d.SchemeUnlock()
 	}
 
 	// Record if this decode call should have runtime.DecodeInto-functionality
@@ -201,18 +208,18 @@ func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
 	// TODO: Unit test that typed errors are returned properly
 
 	// Check if the group was known. If not, return that specific error
-	if !d.scheme.IsGroupRegistered(gvk.Group) {
+	if !d.Scheme().IsGroupRegistered(gvk.Group) {
 		return NewUnrecognizedGroupError(*gvk, origErr)
 	}
 
 	// Return a structured error if the group was registered with the scheme but the version was unrecognized
-	if !d.scheme.IsVersionRegistered(gvk.GroupVersion()) {
-		gvs := d.scheme.PrioritizedVersionsForGroup(gvk.Group)
+	if !d.Scheme().IsVersionRegistered(gvk.GroupVersion()) {
+		gvs := d.Scheme().PrioritizedVersionsForGroup(gvk.Group)
 		return NewUnrecognizedVersionError(gvs, *gvk, origErr)
 	}
 
 	// Return a structured error if the kind is not known
-	if !d.scheme.Recognizes(*gvk) {
+	if !d.Scheme().Recognizes(*gvk) {
 		return NewUnrecognizedKindError(*gvk, origErr)
 	}
 

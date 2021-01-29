@@ -19,17 +19,23 @@ var (
 	errObjMustNotBeBoth   = errors.New("given object must not implement both the Convertible and Hub interfaces")
 )
 
-func newConverter(scheme *runtime.Scheme) *converter {
+func NewConverter(schemeLock LockedScheme) *converter {
 	return &converter{
-		scheme:    scheme,
-		convertor: newObjectConvertor(scheme, true),
+		LockedScheme: schemeLock,
+		convertor:    newObjectConvertor(schemeLock.Scheme(), true),
 	}
 }
 
 // converter implements the Converter interface
+// TODO: This implementation should support converting from a
+// convertible to an other convertible through the Hub
 type converter struct {
-	scheme    *runtime.Scheme
+	LockedScheme
 	convertor *objectConvertor
+}
+
+func (c *converter) SchemeLock() LockedScheme {
+	return c.LockedScheme
 }
 
 // Convert converts in directly into out. out should be an empty object of the destination type.
@@ -46,7 +52,7 @@ func (c *converter) Convert(in, out runtime.Object) error {
 // TODO: If needed, this function could only accept a GroupVersion, not GroupVersionKind
 func (c *converter) ConvertIntoNew(in runtime.Object, gvk schema.GroupVersionKind) (runtime.Object, error) {
 	// Create a new object of the given gvk
-	obj, err := c.scheme.New(gvk)
+	obj, err := c.Scheme().New(gvk)
 	if err != nil {
 		return nil, err
 	}

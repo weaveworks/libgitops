@@ -3,6 +3,7 @@ package serializer
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +13,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
+
+// LockedScheme describes a shared scheme that should be locked before writing, and unlocked
+// after writing. Reading can be done safely without any locking.
+type LockedScheme interface {
+	Scheme() *runtime.Scheme
+	SchemeLock()
+	SchemeUnlock()
+}
+
+func newLockedScheme(scheme *runtime.Scheme) LockedScheme {
+	return &lockedScheme{scheme, &sync.Mutex{}}
+}
+
+type lockedScheme struct {
+	scheme *runtime.Scheme
+	mu     *sync.Mutex
+}
+
+func (s *lockedScheme) Scheme() *runtime.Scheme {
+	return s.scheme
+}
+
+func (s *lockedScheme) SchemeLock() {
+	s.mu.Lock()
+}
+
+func (s *lockedScheme) SchemeUnlock() {
+	s.mu.Unlock()
+}
 
 func GVKForObject(scheme *runtime.Scheme, obj runtime.Object) (schema.GroupVersionKind, error) {
 	// Safety check: one should not do this

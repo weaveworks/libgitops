@@ -9,30 +9,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// SerializerObjectRecognizer implements ObjectRecognizer.
-var _ ObjectRecognizer = &SerializerObjectRecognizer{}
+// KubeObjectRecognizer implements ObjectRecognizer.
+var _ ObjectRecognizer = &KubeObjectRecognizer{}
 
-// SerializerObjectRecognizer is a simple implementation of ObjectRecognizer, that
+// KubeObjectRecognizer is a simple implementation of ObjectRecognizer, that
 // decodes the given byte content with the assumption that it is YAML (which covers
 // both YAML and JSON formats) into a *metav1.PartialObjectMetadata, which allows
 // extracting the ObjectID from any Kubernetes API Machinery-compatible Object.
 //
 // This operation works even though *metav1.PartialObjectMetadata is not registered
 // with the underlying Scheme in any way.
-type SerializerObjectRecognizer struct {
-	// Serializer is a required field in order for ResolveObjectID to function.
-	Serializer serializer.Serializer
+type KubeObjectRecognizer struct {
+	// Decoder is a required field in order for ResolveObjectID to function.
+	Decoder serializer.Decoder
 	// AllowUnrecognized controls whether this implementation allows recognizing
 	// GVK combinations not known to the underlying Scheme. Default: false
 	AllowUnrecognized bool
 }
 
-func (r *SerializerObjectRecognizer) ResolveObjectID(_ context.Context, _ string, content []byte) (ObjectID, error) {
-	if r.Serializer == nil {
-		return nil, errors.New("programmer error: SerializerObjectRecognizer.Serializer is nil")
+func (r *KubeObjectRecognizer) ResolveObjectID(_ context.Context, _ string, content []byte) (ObjectID, error) {
+	if r.Decoder == nil {
+		return nil, errors.New("programmer error: KubeObjectRecognizer.Decoder is nil")
 	}
 	metaObj := &metav1.PartialObjectMetadata{}
-	err := r.Serializer.Decoder().DecodeInto(
+	err := r.Decoder.DecodeInto(
 		serializer.NewSingleFrameReader(content, serializer.ContentTypeYAML),
 		metaObj,
 	)
@@ -50,7 +50,7 @@ func (r *SerializerObjectRecognizer) ResolveObjectID(_ context.Context, _ string
 	if metaObj.Kind == "" {
 		return nil, fmt.Errorf(".metadata.name field must not be empty")
 	}
-	if !r.AllowUnrecognized && !r.Serializer.Scheme().Recognizes(gvk) {
+	if !r.AllowUnrecognized && !r.Decoder.SchemeLock().Scheme().Recognizes(gvk) {
 		return nil, fmt.Errorf("GroupVersionKind %v not recognized by the scheme", gvk)
 	}
 

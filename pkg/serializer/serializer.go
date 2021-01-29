@@ -3,7 +3,6 @@ package serializer
 import (
 	"errors"
 	"fmt"
-	"sync"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -62,20 +61,14 @@ type Serializer interface {
 
 	Patcher() Patcher
 
-	// Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
-	// the "type universe" and advanced conversion/defaulting features
-	Scheme() *runtime.Scheme
+	// SchemeLock exposes the underlying LockedScheme.
+	// A Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
+	// the "type universe" and advanced conversion/defaulting features.
+	SchemeLock() LockedScheme
 
-	// Codecs provides access to the underlying serializer.CodecFactory, may be used if low-level access
-	// is needed for encoding and decoding
-	Codecs() *k8sserializer.CodecFactory
-}
-
-type schemeAndCodec struct {
-	// scheme is not thread-safe, hence it is guarded by a mutex
-	scheme   *runtime.Scheme
-	schemeMu *sync.Mutex
-	codecs   *k8sserializer.CodecFactory
+	// CodecFactory provides access to the underlying CodecFactory, may be used if low-level access
+	// is needed for encoding and decoding.
+	CodecFactory() *k8sserializer.CodecFactory
 }
 
 // Encoder is a high-level interface for encoding Kubernetes API Machinery objects and writing them
@@ -91,6 +84,12 @@ type Encoder interface {
 	// is not of that version currently it will try to convert. The output bytes are written to the
 	// FrameWriter. The FrameWriter specifies the ContentType.
 	EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv schema.GroupVersion) error
+
+	// SchemeLock exposes the underlying LockedScheme
+	SchemeLock() LockedScheme
+
+	// CodecFactory exposes the underlying CodecFactory
+	CodecFactory() *k8sserializer.CodecFactory
 }
 
 // Decoder is a high-level interface for decoding Kubernetes API Machinery objects read from
@@ -149,6 +148,9 @@ type Decoder interface {
 	// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
 	// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 	DecodeAll(fr FrameReader) ([]runtime.Object, error)
+
+	// SchemeLock exposes the underlying LockedScheme
+	SchemeLock() LockedScheme
 }
 
 // Converter is an interface that allows access to object conversion capabilities
@@ -168,6 +170,9 @@ type Converter interface {
 	// or the sigs.k8s.io/controller-runtime/pkg/conversion.Hub for the given conversion.Convertible object in
 	// the "in" argument. No defaulting is performed.
 	ConvertToHub(in runtime.Object) (runtime.Object, error)
+
+	// SchemeLock exposes the underlying LockedScheme
+	SchemeLock() LockedScheme
 }
 
 // Defaulter is a high-level interface for accessing defaulting functions in a scheme
@@ -183,6 +188,9 @@ type Defaulter interface {
 	// scheme.Default(obj), but with extra logic to cover also internal versions.
 	// Important to note here is that the TypeMeta information is NOT applied automatically.
 	NewDefaultedObject(gvk schema.GroupVersionKind) (runtime.Object, error)
+
+	// SchemeLock exposes the underlying LockedScheme
+	SchemeLock() LockedScheme
 }
 
 // NewSerializer constructs a new serializer based on a scheme, and optionally a codecfactory
@@ -197,45 +205,42 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 		*codecs = k8sserializer.NewCodecFactory(scheme)
 	}
 
-	schemeCodec := &schemeAndCodec{
-		scheme:   scheme,
-		schemeMu: &sync.Mutex{},
-		codecs:   codecs,
-	}
+	schemeLock := newLockedScheme(scheme)
+
 	return &serializer{
-		schemeAndCodec: schemeCodec,
-		converter:      newConverter(scheme),
-		defaulter:      newDefaulter(scheme),
-		patcher:        &patcher{schemeCodec},
+		LockedScheme: schemeLock,
+		converter:    NewConverter(schemeLock),
+		defaulter:    NewDefaulter(schemeLock),
+		patcher: NewPatcher(
+			NewEncoder(schemeLock, codecs, PrettyEncode(true)),
+			NewDecoder(schemeLock),
+		),
 	}
 }
 
 // serializer implements the Serializer interface
 type serializer struct {
-	*schemeAndCodec
+	LockedScheme
+	codecs    *k8sserializer.CodecFactory
 	converter *converter
-	defaulter *defaulter
-	patcher   *patcher
+	defaulter Defaulter
+	patcher   Patcher
 }
 
-// Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
-// the "type universe" and advanced conversion/defaulting features
-func (s *serializer) Scheme() *runtime.Scheme {
-	return s.scheme
+func (s *serializer) SchemeLock() LockedScheme {
+	return s.LockedScheme
 }
 
-// Codecs provides access to the underlying serializer.CodecFactory, may be used if low-level access
-// is needed for encoding and decoding
-func (s *serializer) Codecs() *k8sserializer.CodecFactory {
+func (s *serializer) CodecFactory() *k8sserializer.CodecFactory {
 	return s.codecs
 }
 
 func (s *serializer) Decoder(opts ...DecodeOption) Decoder {
-	return newDecoder(s.schemeAndCodec, *defaultDecodeOpts().ApplyOptions(opts))
+	return NewDecoder(s.LockedScheme, opts...)
 }
 
 func (s *serializer) Encoder(opts ...EncodeOption) Encoder {
-	return newEncoder(s.schemeAndCodec, *defaultEncodeOpts().ApplyOptions(opts))
+	return NewEncoder(s.LockedScheme, s.codecs, opts...)
 }
 
 func (s *serializer) Converter() Converter {

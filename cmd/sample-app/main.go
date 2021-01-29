@@ -63,12 +63,14 @@ func run(manifestDir string) error {
 		return err
 	}
 
-	b, err := backend.NewGeneric(s, scheme.Serializer, kube.NewNamespaceEnforcer(), nil, nil)
+	encoder := scheme.Serializer.Encoder()
+	decoder := scheme.Serializer.Decoder()
+	b, err := backend.NewGeneric(s, encoder, decoder, kube.NewNamespaceEnforcer(), nil, nil)
 	if err != nil {
 		return err
 	}
 
-	plainClient, err := client.NewGeneric(b, scheme.Serializer.Patcher())
+	plainClient, err := client.NewGeneric(b)
 	if err != nil {
 		return err
 	}

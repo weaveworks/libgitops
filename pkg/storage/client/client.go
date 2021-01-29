@@ -54,11 +54,11 @@ type Client interface {
 
 // NewGeneric constructs a new Generic client
 // TODO: Construct the default patcher from the given scheme, make patcher an opt instead
-func NewGeneric(backend backend.Backend, patcher serializer.Patcher) (*Generic, error) {
+func NewGeneric(backend backend.Backend) (*Generic, error) {
 	if backend == nil {
 		return nil, fmt.Errorf("backend is mandatory")
 	}
-	return &Generic{backend, patcher}, nil
+	return &Generic{backend, serializer.NewPatcher(backend.Encoder(), backend.Decoder())}, nil
 }
 
 // Generic implements the Client interface
@@ -92,7 +92,7 @@ func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj core.Object) 
 // TODO: Create constructors for the different kinds of lists?
 func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client.ListOption) error {
 	// This call will verify that list actually is a List type.
-	gvk, err := serializer.GVKForList(list, c.Backend().Scheme())
+	gvk, err := serializer.GVKForList(list, c.Scheme())
 	if err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client
 	objs := make([]kruntime.Object, 0, len(allIDs))
 
 	// How should the object be created?
-	createFunc := createObject(gvk, c.Backend().Scheme())
+	createFunc := createObject(gvk, c.Scheme())
 	if serializer.IsPartialObjectList(list) {
 		createFunc = createPartialObject(gvk)
 	} else if serializer.IsUnstructuredList(list) {
@@ -222,7 +222,7 @@ func (c *Generic) DeleteAllOf(ctx context.Context, obj core.Object, opts ...clie
 	customDeleteAllOpts := (&DeleteAllOfOptions{}).ApplyOptions(opts)
 
 	// Get the GVK of the object
-	gvk, err := serializer.GVKForObject(c.Backend().Scheme(), obj)
+	gvk, err := serializer.GVKForObject(c.Scheme(), obj)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (c *Generic) DeleteAllOf(ctx context.Context, obj core.Object, opts ...clie
 
 // Scheme returns the scheme this client is using.
 func (c *Generic) Scheme() *kruntime.Scheme {
-	return c.backend.Scheme()
+	return c.Backend().Encoder().SchemeLock().Scheme()
 }
 
 // RESTMapper returns the rest this client is using. For now, this returns nil, so don't use.

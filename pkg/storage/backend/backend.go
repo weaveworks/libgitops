@@ -10,7 +10,6 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -33,7 +32,8 @@ var (
 type Accessors interface {
 	Storage() storage.Storage
 	NamespaceEnforcer() NamespaceEnforcer
-	Scheme() *runtime.Scheme
+	Encoder() serializer.Encoder
+	Decoder() serializer.Decoder
 }
 
 type WriteAccessors interface {
@@ -89,7 +89,8 @@ type StorageVersioner interface {
 
 func NewGeneric(
 	storage storage.Storage,
-	serializer serializer.Serializer, // TODO: only scheme required, encode/decode optional?
+	encoder serializer.Encoder,
+	decoder serializer.Decoder,
 	enforcer NamespaceEnforcer,
 	validator Validator, // TODO: optional?
 	versioner StorageVersioner, // TODO: optional?
@@ -97,17 +98,21 @@ func NewGeneric(
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
 	}
-	if serializer == nil { // TODO: relax this to scheme, and add encoder/decoder to opts?
-		return nil, fmt.Errorf("serializer is mandatory")
+	if encoder == nil {
+		return nil, fmt.Errorf("encoder is mandatory")
+	}
+	if decoder == nil {
+		return nil, fmt.Errorf("decoder is mandatory")
 	}
 	if enforcer == nil {
 		return nil, fmt.Errorf("enforcer is mandatory")
 	}
 	// TODO: validate options
 	return &Generic{
-		scheme:  serializer.Scheme(),
-		encoder: serializer.Encoder(),
-		decoder: serializer.Decoder(),
+		// It shouldn't matter if we use the encoder's or decoder's SchemeLock
+		LockedScheme: encoder.SchemeLock(),
+		encoder:      encoder,
+		decoder:      decoder,
 
 		storage:   storage,
 		enforcer:  enforcer,
@@ -119,9 +124,9 @@ func NewGeneric(
 var _ Backend = &Generic{}
 
 type Generic struct {
-	scheme  *runtime.Scheme
-	decoder serializer.Decoder
+	serializer.LockedScheme
 	encoder serializer.Encoder
+	decoder serializer.Decoder
 
 	storage   storage.Storage
 	enforcer  NamespaceEnforcer
@@ -129,8 +134,12 @@ type Generic struct {
 	versioner StorageVersioner
 }
 
-func (b *Generic) Scheme() *runtime.Scheme {
-	return b.scheme
+func (b *Generic) Encoder() serializer.Encoder {
+	return b.encoder
+}
+
+func (b *Generic) Decoder() serializer.Decoder {
+	return b.decoder
 }
 
 func (b *Generic) Storage() storage.Storage {
@@ -304,7 +313,7 @@ func (b *Generic) Delete(ctx context.Context, obj core.Object) error {
 
 // Note: This should also work for unstructured and partial metadata objects
 func (b *Generic) idForObj(ctx context.Context, obj core.Object) (core.ObjectID, error) {
-	gvk, err := serializer.GVKForObject(b.scheme, obj)
+	gvk, err := serializer.GVKForObject(b.Scheme(), obj)
 	if err != nil {
 		return nil, err
 	}
