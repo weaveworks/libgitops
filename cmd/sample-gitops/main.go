@@ -166,7 +166,10 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 
 	defer func() { _ = rawManifest.Close() }()
 
-	b, err := backend.NewGeneric(rawManifest, encoder, decoder, kube.NewNamespaceEnforcer(), nil, nil)
+	// Use the version information in the scheme to determine the storage version
+	versioner := backend.SchemePreferredVersioner{Scheme: scheme.Scheme}
+
+	b, err := backend.NewGeneric(rawManifest, encoder, decoder, kube.NewNamespaceEnforcer(), versioner, nil)
 	if err != nil {
 		return err
 	}

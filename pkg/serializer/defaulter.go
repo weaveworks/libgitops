@@ -60,7 +60,7 @@ func (d *defaulter) runDefaulting(obj runtime.Object) error {
 
 	// We know that the current object is internal
 	// Get the preferred external version...
-	gv, err := prioritizedVersionForGroup(d.Scheme(), gvk.Group)
+	gv, err := PreferredVersionForGroup(d.Scheme(), gvk.Group)
 	if err != nil {
 		return err
 	}

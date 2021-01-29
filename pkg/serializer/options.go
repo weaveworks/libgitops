@@ -4,8 +4,6 @@ import (
 	"k8s.io/utils/pointer"
 )
 
-// TODO: Import k8s.io/utils/pointer instead of baking our own ptrutils package.
-
 type EncodeOption interface {
 	ApplyToEncode(*EncodeOptions)
 }

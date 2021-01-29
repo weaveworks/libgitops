@@ -82,18 +82,13 @@ type Validator interface {
 	ValidateChange(ctx context.Context, backend Reader, op ChangeOperation, obj core.Object) error
 }
 
-type StorageVersioner interface {
-	// TODO: Do we need the context here?
-	StorageVersion(ctx context.Context, id core.ObjectID) (core.GroupVersion, error)
-}
-
 func NewGeneric(
 	storage storage.Storage,
 	encoder serializer.Encoder,
 	decoder serializer.Decoder,
 	enforcer NamespaceEnforcer,
+	versioner StorageVersioner,
 	validator Validator, // TODO: optional?
-	versioner StorageVersioner, // TODO: optional?
 ) (*Generic, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
@@ -106,6 +101,9 @@ func NewGeneric(
 	}
 	if enforcer == nil {
 		return nil, fmt.Errorf("enforcer is mandatory")
+	}
+	if versioner == nil {
+		return nil, fmt.Errorf("versioner is mandatory")
 	}
 	// TODO: validate options
 	return &Generic{
@@ -259,17 +257,16 @@ func (b *Generic) UpdateStatus(ctx context.Context, obj core.Object) error {
 }
 
 func (b *Generic) write(ctx context.Context, id core.ObjectID, obj core.Object) error {
-	// TODO: Figure out how to get ContentType before the object actually exists!
+	// Get the content type of the object
 	ct, err := b.storage.ContentType(ctx, id)
 	if err != nil {
 		return err
 	}
 	// Resolve the desired storage version
-	/* TODO: re-enable later
-	gv, err := b.versioner.StorageVersion(ctx, id)
+	gv, err := b.versioner.StorageVersion(id)
 	if err != nil {
 		return err
-	}*/
+	}
 
 	// Set creationTimestamp if not already populated
 	t := obj.GetCreationTimestamp()
@@ -279,7 +276,7 @@ func (b *Generic) write(ctx context.Context, id core.ObjectID, obj core.Object) 
 
 	var objBytes bytes.Buffer
 	// TODO: Work with any ContentType, not just JSON/YAML. Or, make a SingleFrameWriter for any ct.
-	err = b.encoder.Encode(serializer.NewFrameWriter(ct, &objBytes), obj)
+	err = b.encoder.EncodeForGroupVersion(serializer.NewFrameWriter(ct, &objBytes), obj, gv)
 	if err != nil {
 		return err
 	}

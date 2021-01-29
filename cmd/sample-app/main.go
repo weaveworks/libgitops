@@ -63,9 +63,14 @@ func run(manifestDir string) error {
 		return err
 	}
 
+	// Just use default encoders and decoders
 	encoder := scheme.Serializer.Encoder()
 	decoder := scheme.Serializer.Decoder()
-	b, err := backend.NewGeneric(s, encoder, decoder, kube.NewNamespaceEnforcer(), nil, nil)
+
+	// Use the version information in the scheme to determine the storage version
+	versioner := backend.SchemePreferredVersioner{Scheme: scheme.Scheme}
+
+	b, err := backend.NewGeneric(s, encoder, decoder, kube.NewNamespaceEnforcer(), versioner, nil)
 	if err != nil {
 		return err
 	}

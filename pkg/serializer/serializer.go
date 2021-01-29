@@ -2,7 +2,6 @@ package serializer
 
 import (
 	"errors"
-	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -253,14 +252,4 @@ func (s *serializer) Defaulter() Defaulter {
 
 func (s *serializer) Patcher() Patcher {
 	return s.patcher
-}
-
-func prioritizedVersionForGroup(scheme *runtime.Scheme, groupName string) (schema.GroupVersion, error) {
-	// Get the prioritized versions for the given group
-	gvs := scheme.PrioritizedVersionsForGroup(groupName)
-	if len(gvs) < 1 {
-		return schema.GroupVersion{}, fmt.Errorf("expected some version to be registered for group %s", groupName)
-	}
-	// Use the first, preferred, (external) version
-	return gvs[0], nil
 }

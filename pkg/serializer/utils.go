@@ -98,6 +98,18 @@ func GVKForList(obj client.ObjectList, scheme *runtime.Scheme) (schema.GroupVers
 	return gvk, nil
 }
 
+// PreferredVersionForGroup returns the most preferred version of a group in the scheme.
+// In order to tell the scheme what your preferred ordering is, use scheme.SetVersionPriority().
+func PreferredVersionForGroup(scheme *runtime.Scheme, groupName string) (schema.GroupVersion, error) {
+	// Get the prioritized versions for the given group
+	gvs := scheme.PrioritizedVersionsForGroup(groupName)
+	if len(gvs) < 1 {
+		return schema.GroupVersion{}, fmt.Errorf("expected some version to be registered for group %s", groupName)
+	}
+	// Use the first, preferred, (external) version
+	return gvs[0], nil
+}
+
 // EqualsGK returns true if gk1 and gk2 have the same fields.
 func EqualsGK(gk1, gk2 schema.GroupKind) bool {
 	return gk1.Group == gk2.Group && gk1.Kind == gk2.Kind
