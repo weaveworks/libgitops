@@ -7,9 +7,13 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage"
 )
 
-// StorageCommon contains the methods that EventStorage adds to the
-// to the normal Storage.
-type StorageCommon interface {
+// EventStorage is the abstract combination of a normal Storage, and
+// a possiblility to listen for changes to objects as they change.
+// TODO: Maybe we could use some of controller-runtime's built-in functionality
+// for watching for changes?
+type Storage interface {
+	storage.Storage
+
 	// WatchForObjectEvents starts feeding ObjectEvents into the given "into"
 	// channel. The caller is responsible for setting a channel buffering
 	// limit large enough to not block normal operation. An error might
@@ -19,13 +23,4 @@ type StorageCommon interface {
 
 	// Close closes the EventStorage and underlying resources gracefully.
 	io.Closer
-}
-
-// EventStorage is the abstract combination of a normal Storage, and
-// a possiblility to listen for changes to objects as they change.
-// TODO: Maybe we could use some of controller-runtime's built-in functionality
-// for watching for changes?
-type EventStorage interface {
-	storage.Storage
-	StorageCommon
 }

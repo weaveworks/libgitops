@@ -16,28 +16,27 @@ import (
 	"github.com/weaveworks/libgitops/pkg/util/sync"
 )
 
-// UnstructuredEventStorage is an extension of raw.UnstructuredStorage, that
-// adds the possiblility to listen for object updates from a FileEventsEmitter.
+// Storage is a union of unstructured.Storage and fileevents.Storage.
 //
 // When the Sync() function is run; the ObjectEvents that are emitted to the
 // listening channels with have ObjectEvent.Type == ObjectEventSync.
-type UnstructuredEventStorage interface {
+type Storage interface {
 	unstructured.Storage
-	fileevents.StorageCommon
+	fileevents.Storage
 }
 
 const defaultEventsBufferSize = 4096
 
 // NewManifest is a high-level constructor for a generic
 // MappedFileFinder and filesystem.Storage, together with a
-// inotify FileWatcher; all combined into an UnstructuredEventStorage.
+// inotify FileWatcher; all combined into an unstructuredevent.Storage.
 func NewManifest(
 	dir string,
 	contentTyper filesystem.ContentTyper,
 	namespacer core.Namespacer,
 	recognizer core.ObjectRecognizer,
 	pathExcluder filesystem.PathExcluder,
-) (UnstructuredEventStorage, error) {
+) (Storage, error) {
 	fs := filesystem.NewOSFilesystem(dir)
 	fileFinder := unstructured.NewGenericMappedFileFinder(contentTyper, fs)
 	fsRaw, err := filesystem.NewGeneric(fileFinder, namespacer)
@@ -72,7 +71,7 @@ func NewGeneric(
 	s unstructured.Storage,
 	emitter fileevents.Emitter,
 	opts GenericStorageOptions,
-) (UnstructuredEventStorage, error) {
+) (Storage, error) {
 	return &Generic{
 		Storage: s,
 		emitter: emitter,
@@ -96,8 +95,8 @@ type GenericStorageOptions struct {
 	SyncAtStart bool
 }
 
-// Generic implements UnstructuredEventStorage.
-var _ UnstructuredEventStorage = &Generic{}
+// Generic implements unstructuredevent.Storage.
+var _ Storage = &Generic{}
 
 // Generic is an extended raw.Storage implementation, which provides a watcher
 // for watching changes in the directory managed by the embedded Storage's RawStorage.

@@ -39,19 +39,12 @@ type Emitter interface {
 	io.Closer
 }
 
-// StorageCommon is an extension to event.StorageCommon that
-// also contains an underlying Emitter. This is meant to be
-// used in tandem with filesystem.Storages.
-type StorageCommon interface {
-	event.StorageCommon
+// Storage is the union of a filesystem.Storage, and event.Storage,
+// and the possibility to listen for object updates from a Emitter.
+type Storage interface {
+	filesystem.Storage
+	event.Storage
 
 	// FileEventsEmitter gets the Emitter used internally.
 	FileEventsEmitter() Emitter
-}
-
-// FilesystemEventStorage is the combination of a filesystem.Storage,
-// and the possibility to listen for object updates from a Emitter.
-type FilesystemEventStorage interface {
-	filesystem.Storage
-	StorageCommon
 }
