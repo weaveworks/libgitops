@@ -42,8 +42,8 @@ type FileFinder interface {
 	// In order to support a create operation, this function must also return a valid path for
 	// files that do not yet exist on disk.
 	ObjectPath(ctx context.Context, id core.UnversionedObjectID) (string, error)
-	// ObjectAt retrieves the ID based on the given relative file path to fs.
-	ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error)
+	// ObjectsAt retrieves the ObjectIDs in the file with the given relative file path.
+	ObjectsAt(ctx context.Context, path string) (core.UnversionedObjectIDSet, error)
 	// The FileFinder should be able to list namespaces and Object IDs
 	storage.Lister
 }

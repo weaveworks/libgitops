@@ -265,9 +265,9 @@ func (s *Generic) handleDelete(ctx context.Context, ev *fileevents.FileEvent) er
 	// the known objects in such a way that it is able to do the reverse-lookup. For
 	// mapped FileFinders, by this point the path should still be in the local cache,
 	// which should make us able to get the ID before deleted from the cache.
-	objectID, err := s.UnstructuredFileFinder().ObjectAt(ctx, ev.Path)
+	objectID, err := unstructured.SingleObjectAt(ctx, s.UnstructuredFileFinder(), ev.Path)
 	if err != nil {
-		return fmt.Errorf("failed to reverse lookup ID for deleted file %q: %v", ev.Path, err)
+		return fmt.Errorf("failed to reverse lookup ID for deleted file %q: %w", ev.Path, err)
 	}
 
 	// Remove the mapping from the FileFinder cache for this ID as it's now deleted

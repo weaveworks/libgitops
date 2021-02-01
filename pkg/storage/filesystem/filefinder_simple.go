@@ -146,9 +146,8 @@ func (f *SimpleFileFinder) kindKeyPath(gk core.GroupKind) string {
 	return filepath.Join(group, gk.Kind)
 }
 
-// ObjectAt retrieves the ID containing the virtual path based
-// on the given physical file path.
-func (f *SimpleFileFinder) ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error) {
+// ObjectsAt retrieves the ObjectIDs in the file with the given relative file path.
+func (f *SimpleFileFinder) ObjectsAt(ctx context.Context, path string) (core.UnversionedObjectIDSet, error) {
 	return nil, core.ErrNotImplemented
 }
 

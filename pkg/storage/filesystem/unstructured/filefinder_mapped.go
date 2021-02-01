@@ -3,6 +3,7 @@ package unstructured
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
@@ -30,9 +31,11 @@ func NewGenericFileFinder(contentTyper filesystem.ContentTyper, fs filesystem.Fi
 	}
 	return &GenericFileFinder{
 		contentTyper: contentTyper,
+		fs:           fs,
 		// TODO: Support multiple branches
-		branch: &branchImpl{},
-		fs:     fs,
+		branch:    &branchImpl{},
+		pathToIDs: make(map[string]core.UnversionedObjectIDSet),
+		mu:        &sync.RWMutex{},
 	}
 }
 
@@ -50,7 +53,10 @@ type GenericFileFinder struct {
 	contentTyper filesystem.ContentTyper
 	fs           filesystem.Filesystem
 
-	branch branch
+	branch    branch
+	pathToIDs map[string]core.UnversionedObjectIDSet
+	// mu guards branch and pathToIDs
+	mu *sync.RWMutex
 }
 
 func (f *GenericFileFinder) Filesystem() filesystem.Filesystem {
@@ -71,22 +77,18 @@ func (f *GenericFileFinder) ObjectPath(ctx context.Context, id core.UnversionedO
 	return cp.Path, nil
 }
 
-// ObjectAt retrieves the ID containing the virtual path based
-// on the given physical file path.
-func (f *GenericFileFinder) ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error) {
-	// TODO: Add reverse tracking too?
-	for gk, gkIter := range f.branch.raw() {
-		for ns, nsIter := range gkIter.raw() {
-			for name, cp := range nsIter.raw() {
-				if cp.Path == path {
-					return core.NewUnversionedObjectID(gk, core.ObjectKey{Name: name, Namespace: ns}), nil
-				}
-			}
-		}
+// ObjectsAt retrieves the ObjectIDs in the file with the given relative file path.
+func (f *GenericFileFinder) ObjectsAt(ctx context.Context, path string) (core.UnversionedObjectIDSet, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	// TODO: This needs to be per-branch too
+	ids, ok := f.pathToIDs[path]
+	if !ok {
+		// TODO: Support "creation" of Objects easier, in a generic way through an interface, e.g.
+		// NewObjectPlacer?
+		return nil, ErrNotTracked
 	}
-	// TODO: Support "creation" of Objects easier, in a generic way through an interface, e.g.
-	// NewObjectPlacer?
-	return nil, ErrNotTracked
+	return ids, nil
 }
 
 // ListNamespaces lists the available namespaces for the given GroupKind.
@@ -100,6 +102,9 @@ func (f *GenericFileFinder) ObjectAt(ctx context.Context, path string) (core.Unv
 // different namespaces that have been set on any object belonging to
 // the given GroupKind.
 func (f *GenericFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	m := f.branch.groupKind(gk).raw()
 	nsSet := sets.NewString()
 	for ns := range m {
@@ -114,6 +119,9 @@ func (f *GenericFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKin
 // must only return object IDs for that given namespace. If any of the given
 // rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
 func (f *GenericFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	m := f.branch.groupKind(gk).namespace(namespace).raw()
 	ids := make([]core.UnversionedObjectID, 0, len(m))
 	for name := range m {
@@ -124,6 +132,13 @@ func (f *GenericFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind
 
 // GetMapping retrieves a mapping in the system
 func (f *GenericFileFinder) GetMapping(ctx context.Context, id core.UnversionedObjectID) (ChecksumPath, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.getMapping(ctx, id)
+}
+
+// getMapping is like GetMapping; but without a read lock; for internal operations
+func (f *GenericFileFinder) getMapping(ctx context.Context, id core.UnversionedObjectID) (ChecksumPath, bool) {
 	cp, ok := f.branch.
 		groupKind(id.GroupKind()).
 		namespace(id.ObjectKey().Namespace).
@@ -133,10 +148,21 @@ func (f *GenericFileFinder) GetMapping(ctx context.Context, id core.UnversionedO
 
 // SetMapping binds an ID's virtual path to a physical file path
 func (f *GenericFileFinder) SetMapping(ctx context.Context, id core.UnversionedObjectID, checksumPath ChecksumPath) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	f.branch.
 		groupKind(id.GroupKind()).
 		namespace(id.ObjectKey().Namespace).
 		setName(id.ObjectKey().Name, checksumPath)
+
+	// Create the mapping between the path and a set of IDs if it doesn't exist
+	_, ok := f.pathToIDs[checksumPath.Path]
+	if !ok {
+		f.pathToIDs[checksumPath.Path] = core.NewUnversionedObjectIDSet()
+	}
+	// Register the ID with the given path
+	f.pathToIDs[checksumPath.Path].Insert(id)
 }
 
 // ResetMappings replaces all mappings at once
@@ -150,8 +176,23 @@ func (f *GenericFileFinder) ResetMappings(ctx context.Context, m map[core.Unvers
 // DeleteMapping removes the physical file path mapping
 // matching the given id
 func (f *GenericFileFinder) DeleteMapping(ctx context.Context, id core.UnversionedObjectID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	cp, ok := f.getMapping(ctx, id)
+	if !ok {
+		// Nothing to delete if it doesn't exist yet
+		return
+	}
+	// Delete it from the cache
 	f.branch.
 		groupKind(id.GroupKind()).
 		namespace(id.ObjectKey().Namespace).
 		deleteName(id.ObjectKey().Name)
+	// Delete the related ID from the path mapping too
+	f.pathToIDs[cp.Path].Delete(id)
+	// If the length of the set was shrunk to zero; delete it from the map completely
+	if f.pathToIDs[cp.Path].Len() == 0 {
+		delete(f.pathToIDs, cp.Path)
+	}
 }

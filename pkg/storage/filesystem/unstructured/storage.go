@@ -11,6 +11,9 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
 
+// ErrOnlySingleFrameSupported tells that only single frame-files are supported so far for the unstructured Storage.
+var ErrOnlySingleFrameSupported = errors.New("file contains multiple Objects; for now only single-frame files are supported")
+
 func NewGeneric(storage filesystem.Storage, recognizer ObjectRecognizer, pathExcluder filesystem.PathExcluder) (Storage, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
@@ -67,7 +70,7 @@ func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
 		// If the given file already is tracked; i.e. has a mapping with a
 		// non-empty checksum, and the current checksum matches, we do not
 		// need to do anything.
-		if id, err := fileFinder.ObjectAt(ctx, filePath); err == nil {
+		if id, err := SingleObjectAt(ctx, fileFinder, filePath); err == nil {
 			if cp, ok := fileFinder.GetMapping(ctx, id); ok && len(cp.Checksum) != 0 {
 				if cp.Checksum == currentChecksum {
 					logrus.Tracef("Checksum for file %q is up-to-date: %q, skipping...", filePath, cp.Checksum)
@@ -150,8 +153,22 @@ func ReadAndRecognizeFile(
 	// For now; we only support single-frame files
 	// TODO: Change this.
 	if ids.Len() != 1 {
-		return nil, fmt.Errorf("File %q contained multiple objects; for now only single-frame files are supported", filePath)
+		return nil, fmt.Errorf("%w: %q", ErrOnlySingleFrameSupported, filePath)
 	}
 	// Return that one ID
 	return ids.List()[0], nil
+}
+
+func SingleObjectAt(ctx context.Context, fileFinder filesystem.FileFinder, filePath string) (core.UnversionedObjectID, error) {
+	idSet, err := fileFinder.ObjectsAt(ctx, filePath)
+	if err != nil {
+		return nil, err
+	}
+	// For now; we only support single-frame files
+	// TODO: Change this.
+	if idSet.Len() != 1 {
+		return nil, fmt.Errorf("%w: %q", ErrOnlySingleFrameSupported, filePath)
+	}
+	// Return that one ID
+	return idSet.List()[0], nil
 }
