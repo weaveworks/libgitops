@@ -213,8 +213,9 @@ func (w *FileWatcher) Close() error {
 	return nil
 }
 
-// Suspend enables a one-time suspend of the given path
-// TODO: clarify how the path should be formatted
+// Suspend enables a one-time suspend for any event from the given path.
+// The path must be relative to the root directory, i.e. computed as
+// path = filepath.Rel(<rootDir>, <absFilePath>).
 func (w *FileWatcher) Suspend(_ context.Context, path string) {
 	w.suspendFilesMu.Lock()
 	defer w.suspendFilesMu.Unlock()
