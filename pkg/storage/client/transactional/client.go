@@ -26,11 +26,13 @@ func NewGeneric(c client.Client, manager BranchManager, merger BranchMerger) (Cl
 		return nil, fmt.Errorf("%w: manager is required", core.ErrInvalidParameter)
 	}
 	return &Generic{
-		c:       c,
-		txs:     make(map[string]*txLock),
-		txsMu:   &sync.Mutex{},
-		manager: manager,
-		merger:  merger,
+		c:           c,
+		txs:         make(map[string]*txLock),
+		txsMu:       &sync.Mutex{},
+		txHooks:     &MultiTransactionHook{},
+		commitHooks: &MultiCommitHook{},
+		manager:     manager,
+		merger:      merger,
 	}, nil
 }
 
@@ -41,6 +43,10 @@ type Generic struct {
 	txs map[string]*txLock
 	// txsMu guards reads and writes of txs
 	txsMu *sync.Mutex
+
+	// Hooks
+	txHooks     TransactionHookChain
+	commitHooks CommitHookChain
 
 	// +optional
 	merger BranchMerger
@@ -191,7 +197,7 @@ func (c *Generic) cleanupAfterTx(ctx context.Context, info *TxInfo) error {
 		c.manager.ResetToCleanBranch(ctx, info.Base),
 		// TODO: should this be in its own goroutine to switch back to main
 		// ASAP?
-		c.manager.TransactionHookChain().PostTransactionHook(ctx, *info),
+		c.TransactionHookChain().PostTransactionHook(ctx, *info),
 	})
 }
 
@@ -205,6 +211,14 @@ func (c *Generic) BranchMerger() BranchMerger {
 
 func (c *Generic) BranchManager() BranchManager {
 	return c.manager
+}
+
+func (c *Generic) TransactionHookChain() TransactionHookChain {
+	return c.txHooks
+}
+
+func (c *Generic) CommitHookChain() CommitHookChain {
+	return c.commitHooks
 }
 
 func (c *Generic) Transaction(ctx context.Context, opts ...TxOption) Tx {
@@ -253,7 +267,7 @@ func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error)
 	ctxWithDeadline, cleanupFunc := c.initTx(ctx, info)
 
 	// Run pre-tx checks
-	err = c.manager.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info)
+	err = c.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info)
 
 	return &txImpl{
 		&txCommon{
@@ -307,7 +321,7 @@ func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts
 
 	// Run pre-tx checks and create the new branch
 	err = utilerrs.NewAggregate([]error{
-		c.manager.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info),
+		c.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info),
 		c.manager.CreateBranch(ctxWithDeadline, headBranch),
 	})
 

@@ -8,14 +8,13 @@ import (
 )
 
 // Client is a client that can sync state with a remote in a transactional way.
+//
+// A distributed.Client is itself most likely both a CommitHook and TransactionHook; if so,
+// it should be automatically registered with the transactional.Client's *HookChain in the
+// distributed.Client's constructor.
 type Client interface {
 	// The distributed Client extends the transactional Client
 	transactional.Client
-	// This Client is itself both a CommitHook and TransactionHook; these should
-	// be automatically registered with the transactional.Client's BranchManager
-	// in this Client's constructor.
-	transactional.CommitHook
-	transactional.TransactionHook
 
 	// StartResyncLoop starts a resync loop for the given branches for
 	// the given interval.

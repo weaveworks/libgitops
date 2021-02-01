@@ -198,10 +198,10 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		return err
 	}
 
-	// Register the PR CommitHook with the BranchManager
+	// Register the PR CommitHook with the distributed transaction Client
 	// This needs to be done after the distributed.NewClient call, so
 	// it has been able to handle pushing of the branch first.
-	localClone.CommitHookChain().Register(prCommitHook)
+	txClient.CommitHookChain().Register(prCommitHook)
 
 	// Start the sync loop in the background
 	txClient.StartResyncLoop(ctx, 15*time.Second)

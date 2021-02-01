@@ -65,12 +65,10 @@ func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts 
 	log.Debugf("Created temporary directory for the git clone at %q", tmpDir)
 
 	d := &LocalClone{
-		repoRef:     repoRef,
-		opts:        opts,
-		cloneDir:    tmpDir,
-		lock:        &sync.Mutex{},
-		commitHooks: &transactional.MultiCommitHook{},
-		txHooks:     &transactional.MultiTransactionHook{},
+		repoRef:  repoRef,
+		opts:     opts,
+		cloneDir: tmpDir,
+		lock:     &sync.Mutex{},
 	}
 
 	log.Trace("URL endpoint parsed and authentication method chosen")
@@ -104,17 +102,6 @@ type LocalClone struct {
 
 	// the lock for git operations (so no ops are done simultaneously)
 	lock *sync.Mutex
-
-	commitHooks transactional.CommitHookChain
-	txHooks     transactional.TransactionHookChain
-}
-
-func (d *LocalClone) CommitHookChain() transactional.CommitHookChain {
-	return d.commitHooks
-}
-
-func (d *LocalClone) TransactionHookChain() transactional.TransactionHookChain {
-	return d.txHooks
 }
 
 func (d *LocalClone) Dir() string {

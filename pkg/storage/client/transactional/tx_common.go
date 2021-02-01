@@ -13,6 +13,7 @@ type txCommon struct {
 	err         error
 	c           client.Client
 	manager     BranchManager
+	commitHook  CommitHook
 	ctx         context.Context
 	ops         []txFunc
 	info        TxInfo
@@ -33,7 +34,7 @@ func (tx *txCommon) Abort(err error) error {
 
 func (tx *txCommon) handlePreCommit(c Commit) txFunc {
 	return func() error {
-		return tx.manager.CommitHookChain().PreCommitHook(tx.ctx, c, tx.info)
+		return tx.commitHook.PreCommitHook(tx.ctx, c, tx.info)
 	}
 }
 
@@ -45,7 +46,7 @@ func (tx *txCommon) commit(c Commit) txFunc {
 
 func (tx *txCommon) handlePostCommit(c Commit) txFunc {
 	return func() error {
-		return tx.manager.CommitHookChain().PostCommitHook(tx.ctx, c, tx.info)
+		return tx.commitHook.PostCommitHook(tx.ctx, c, tx.info)
 	}
 }
 

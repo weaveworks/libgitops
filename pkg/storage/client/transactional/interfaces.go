@@ -14,6 +14,11 @@ type Client interface {
 	// BranchMerger is optional.
 	BranchMerger() BranchMerger
 
+	// CommitHookChain is a chain of hooks that are run before and after a commit is made.
+	CommitHookChain() CommitHookChain
+	// TransactionHookChain is a chain of hooks that are run before and after a transaction.
+	TransactionHookChain() TransactionHookChain
+
 	// Transaction creates a new transaction on the branch stored in the context, so that
 	// no other writes to that branch can take place meanwhile.
 	Transaction(ctx context.Context, opts ...TxOption) Tx
@@ -32,11 +37,6 @@ type BranchManager interface {
 	ResetToCleanBranch(ctx context.Context, branch string) error
 	// Commit creates a new commit for the branch stored in the context.
 	Commit(ctx context.Context, commit Commit) error
-
-	// CommitHookChain must be non-nil, but can be a no-op
-	CommitHookChain() CommitHookChain
-	// TransactionHookChain must be non-nil, but can be a no-op
-	TransactionHookChain() TransactionHookChain
 }
 
 type BranchMerger interface {

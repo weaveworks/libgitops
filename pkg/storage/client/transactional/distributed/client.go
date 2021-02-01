@@ -32,9 +32,9 @@ func NewClient(c transactional.Client, remote Remote, opts ...ClientOption) (*Ge
 		branchLocksMu: &sync.Mutex{},
 	}
 
-	// Register ourselves to hook into the branch manager's operations
-	c.BranchManager().CommitHookChain().Register(g)
-	c.BranchManager().TransactionHookChain().Register(g)
+	// Register ourselves to hook into the transactional.Client's operations
+	c.CommitHookChain().Register(g)
+	c.TransactionHookChain().Register(g)
 
 	return g, nil
 }
