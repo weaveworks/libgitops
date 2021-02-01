@@ -28,7 +28,7 @@ type ObjectIDSet interface {
 
 // NewObjectIDSet creates a new ObjectIDSet
 func NewObjectIDSet(ids ...ObjectID) ObjectIDSet {
-	return (objectIDSet{}).Insert(ids...)
+	return (make(objectIDSet, len(ids))).Insert(ids...)
 }
 
 type objectIDSet map[ObjectID]sets.Empty

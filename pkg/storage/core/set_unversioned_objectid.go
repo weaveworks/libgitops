@@ -28,7 +28,7 @@ type UnversionedObjectIDSet interface {
 
 // NewUnversionedObjectIDSet creates a new UnversionedObjectIDSet
 func NewUnversionedObjectIDSet(ids ...UnversionedObjectID) UnversionedObjectIDSet {
-	return (unversionedObjectIDSet{}).Insert(ids...)
+	return (make(unversionedObjectIDSet, len(ids))).Insert(ids...)
 }
 
 type unversionedObjectIDSet map[UnversionedObjectID]sets.Empty
