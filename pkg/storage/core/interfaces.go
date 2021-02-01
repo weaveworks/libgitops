@@ -1,37 +1,27 @@
 package core
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Note: package core must not depend on any other parts of the libgitops repo, possibly the serializer package as an exception.
-// Anything under k8s.io/apimachinery goes though, and important external imports
-// like github.com/spf13/afero is also ok. The pretty large sigs.k8s.io/controller-runtime
-// import is a bit sub-optimal, though.
+// Note: package core must not depend on any other parts of the libgitops repo, only
+// essentially anything under k8s.io/apimachinery is ok.
 
-// GroupVersionKind aliases
+// GroupVersionKind and ObjectID aliases
 type GroupKind = schema.GroupKind
 type GroupVersion = schema.GroupVersion
 type GroupVersionKind = schema.GroupVersionKind
-
-// Client-related Object aliases
-type Object = client.Object
 type ObjectKey = types.NamespacedName
-type ObjectList = client.ObjectList
-type Patch = client.Patch
 
-// Client-related Option aliases
-type ListOption = client.ListOption
-type CreateOption = client.CreateOption
-type UpdateOption = client.UpdateOption
-type PatchOption = client.PatchOption
-type DeleteOption = client.DeleteOption
-type DeleteAllOfOption = client.DeleteAllOfOption
-
-// Helper functions from client.
-var ObjectKeyFromObject = client.ObjectKeyFromObject
+// ObjectKeyFromObject returns the ObjectKey of a given metav1.Object.
+func ObjectKeyFromMetav1Object(obj metav1.Object) ObjectKey {
+	return ObjectKey{
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+	}
+}
 
 // UnversionedObjectID represents an ID for an Object whose version is not known.
 // However, the Group, Kind, Name and optionally, Namespace is known and should

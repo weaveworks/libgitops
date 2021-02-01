@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/weaveworks/libgitops/pkg/storage/client"
 	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -57,13 +58,13 @@ type branchLock struct {
 	lastPull time.Time
 }
 
-func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj core.Object) error {
+func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
 	return c.readWhenPossible(ctx, func() error {
 		return c.Client.Get(ctx, key, obj)
 	})
 }
 
-func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...core.ListOption) error {
+func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	return c.readWhenPossible(ctx, func() error {
 		return c.Client.List(ctx, list, opts...)
 	})

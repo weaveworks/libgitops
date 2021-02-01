@@ -65,13 +65,13 @@ type txLock struct {
 	active uint32
 }
 
-func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj core.Object) error {
+func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
 	return c.lockForReading(ctx, func() error {
 		return c.c.Get(ctx, key, obj)
 	})
 }
 
-func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...core.ListOption) error {
+func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	return c.lockForReading(ctx, func() error {
 		return c.c.List(ctx, list, opts...)
 	})

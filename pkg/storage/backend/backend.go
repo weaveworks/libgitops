@@ -11,6 +11,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -29,6 +30,9 @@ var (
 // 5. Status { Data []byte, ContentType ContentType, Object interface{} }
 // TODO: Need to make sure we never write this internal struct to disk (MarshalJSON error?)
 
+// Create an alias for the Object type
+type Object = client.Object
+
 type Accessors interface {
 	Storage() storage.Storage
 	NamespaceEnforcer() NamespaceEnforcer
@@ -44,7 +48,7 @@ type WriteAccessors interface {
 type Reader interface {
 	Accessors
 
-	Get(ctx context.Context, obj core.Object) error
+	Get(ctx context.Context, obj Object) error
 	storage.Lister
 }
 
@@ -52,16 +56,16 @@ type Writer interface {
 	Accessors
 	WriteAccessors
 
-	Create(ctx context.Context, obj core.Object) error
-	Update(ctx context.Context, obj core.Object) error
-	Delete(ctx context.Context, obj core.Object) error
+	Create(ctx context.Context, obj Object) error
+	Update(ctx context.Context, obj Object) error
+	Delete(ctx context.Context, obj Object) error
 }
 
 type StatusWriter interface {
 	Accessors
 	WriteAccessors
 
-	UpdateStatus(ctx context.Context, obj core.Object) error
+	UpdateStatus(ctx context.Context, obj Object) error
 }
 
 type Backend interface {
@@ -79,7 +83,7 @@ const (
 )
 
 type Validator interface {
-	ValidateChange(ctx context.Context, backend Reader, op ChangeOperation, obj core.Object) error
+	ValidateChange(ctx context.Context, backend Reader, op ChangeOperation, obj Object) error
 }
 
 // NewGeneric creates a new generic Backend for the given underlying Storage for storing the
@@ -161,7 +165,7 @@ func (b *Generic) StorageVersioner() StorageVersioner {
 	return b.versioner
 }
 
-func (b *Generic) Get(ctx context.Context, obj core.Object) error {
+func (b *Generic) Get(ctx context.Context, obj Object) error {
 	// Get the versioned ID for the given obj. This might mutate obj wrt namespacing info.
 	id, err := b.idForObj(ctx, obj)
 	if err != nil {
@@ -199,7 +203,7 @@ func (b *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespac
 	return b.storage.ListObjectIDs(ctx, gk, namespace)
 }
 
-func (b *Generic) Create(ctx context.Context, obj core.Object) error {
+func (b *Generic) Create(ctx context.Context, obj Object) error {
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
@@ -227,7 +231,7 @@ func (b *Generic) Create(ctx context.Context, obj core.Object) error {
 	// Internal, common write shared with Update()
 	return b.write(ctx, id, obj)
 }
-func (b *Generic) Update(ctx context.Context, obj core.Object) error {
+func (b *Generic) Update(ctx context.Context, obj Object) error {
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
@@ -256,11 +260,11 @@ func (b *Generic) Update(ctx context.Context, obj core.Object) error {
 	return b.write(ctx, id, obj)
 }
 
-func (b *Generic) UpdateStatus(ctx context.Context, obj core.Object) error {
+func (b *Generic) UpdateStatus(ctx context.Context, obj Object) error {
 	return core.ErrNotImplemented // TODO
 }
 
-func (b *Generic) write(ctx context.Context, id core.ObjectID, obj core.Object) error {
+func (b *Generic) write(ctx context.Context, id core.ObjectID, obj Object) error {
 	// Get the content type of the object
 	ct, err := b.storage.ContentType(ctx, id)
 	if err != nil {
@@ -289,7 +293,7 @@ func (b *Generic) write(ctx context.Context, id core.ObjectID, obj core.Object) 
 	return b.storage.Write(ctx, id, objBytes.Bytes())
 }
 
-func (b *Generic) Delete(ctx context.Context, obj core.Object) error {
+func (b *Generic) Delete(ctx context.Context, obj Object) error {
 	// Get the versioned ID for the given obj. This might mutate obj wrt namespacing info.
 	id, err := b.idForObj(ctx, obj)
 	if err != nil {
@@ -314,7 +318,7 @@ func (b *Generic) Delete(ctx context.Context, obj core.Object) error {
 }
 
 // Note: This should also work for unstructured and partial metadata objects
-func (b *Generic) idForObj(ctx context.Context, obj core.Object) (core.ObjectID, error) {
+func (b *Generic) idForObj(ctx context.Context, obj Object) (core.ObjectID, error) {
 	gvk, err := serializer.GVKForObject(b.Scheme(), obj)
 	if err != nil {
 		return nil, err
@@ -339,5 +343,5 @@ func (b *Generic) idForObj(ctx context.Context, obj core.Object) (core.ObjectID,
 
 	// At this point we know name is non-empty, and the namespace field is correct,
 	// according to policy
-	return core.NewObjectID(gvk, core.ObjectKeyFromObject(obj)), nil
+	return core.NewObjectID(gvk, core.ObjectKeyFromMetav1Object(obj)), nil
 }

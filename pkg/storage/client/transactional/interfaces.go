@@ -53,17 +53,17 @@ type Tx interface {
 
 	Custom(CustomTxFunc) Tx
 
-	Get(key core.ObjectKey, obj core.Object) Tx
-	List(list core.ObjectList, opts ...core.ListOption) Tx
+	Get(key core.ObjectKey, obj client.Object) Tx
+	List(list client.ObjectList, opts ...client.ListOption) Tx
 
-	Create(obj core.Object, opts ...core.CreateOption) Tx
-	Update(obj core.Object, opts ...core.UpdateOption) Tx
-	Patch(obj core.Object, patch core.Patch, opts ...core.PatchOption) Tx
-	Delete(obj core.Object, opts ...core.DeleteOption) Tx
-	DeleteAllOf(obj core.Object, opts ...core.DeleteAllOfOption) Tx
+	Create(obj client.Object, opts ...client.CreateOption) Tx
+	Update(obj client.Object, opts ...client.UpdateOption) Tx
+	Patch(obj client.Object, patch client.Patch, opts ...client.PatchOption) Tx
+	Delete(obj client.Object, opts ...client.DeleteOption) Tx
+	DeleteAllOf(obj client.Object, opts ...client.DeleteAllOfOption) Tx
 
-	UpdateStatus(obj core.Object, opts ...core.UpdateOption) Tx
-	PatchStatus(obj core.Object, patch core.Patch, opts ...core.PatchOption) Tx
+	UpdateStatus(obj client.Object, opts ...client.UpdateOption) Tx
+	PatchStatus(obj client.Object, patch client.Patch, opts ...client.PatchOption) Tx
 }
 
 type BranchTx interface {
@@ -74,17 +74,17 @@ type BranchTx interface {
 
 	Custom(CustomTxFunc) BranchTx
 
-	Get(key core.ObjectKey, obj core.Object) BranchTx
-	List(list core.ObjectList, opts ...core.ListOption) BranchTx
+	Get(key core.ObjectKey, obj client.Object) BranchTx
+	List(list client.ObjectList, opts ...client.ListOption) BranchTx
 
-	Create(obj core.Object, opts ...core.CreateOption) BranchTx
-	Update(obj core.Object, opts ...core.UpdateOption) BranchTx
-	Patch(obj core.Object, patch core.Patch, opts ...core.PatchOption) BranchTx
-	Delete(obj core.Object, opts ...core.DeleteOption) BranchTx
-	DeleteAllOf(obj core.Object, opts ...core.DeleteAllOfOption) BranchTx
+	Create(obj client.Object, opts ...client.CreateOption) BranchTx
+	Update(obj client.Object, opts ...client.UpdateOption) BranchTx
+	Patch(obj client.Object, patch client.Patch, opts ...client.PatchOption) BranchTx
+	Delete(obj client.Object, opts ...client.DeleteOption) BranchTx
+	DeleteAllOf(obj client.Object, opts ...client.DeleteAllOfOption) BranchTx
 
-	UpdateStatus(obj core.Object, opts ...core.UpdateOption) BranchTx
-	PatchStatus(obj core.Object, patch core.Patch, opts ...core.PatchOption) BranchTx
+	UpdateStatus(obj client.Object, opts ...client.UpdateOption) BranchTx
+	PatchStatus(obj client.Object, patch client.Patch, opts ...client.PatchOption) BranchTx
 }
 
 type BranchTxResult interface {

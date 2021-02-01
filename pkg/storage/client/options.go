@@ -5,27 +5,27 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type ListOption interface {
+type ExtendedListOption interface {
 	client.ListOption
 	filter.FilterOption
 }
 
-type ListOptions struct {
+type ExtendedListOptions struct {
 	client.ListOptions
 	filter.FilterOptions
 }
 
-var _ ListOption = &ListOptions{}
+var _ ExtendedListOption = &ExtendedListOptions{}
 
-func (o *ListOptions) ApplyToList(target *client.ListOptions) {
+func (o *ExtendedListOptions) ApplyToList(target *client.ListOptions) {
 	o.ListOptions.ApplyToList(target)
 }
 
-func (o *ListOptions) ApplyToFilterOptions(target *filter.FilterOptions) {
+func (o *ExtendedListOptions) ApplyToFilterOptions(target *filter.FilterOptions) {
 	o.FilterOptions.ApplyToFilterOptions(target)
 }
 
-func (o *ListOptions) ApplyOptions(opts []client.ListOption) *ListOptions {
+func (o *ExtendedListOptions) ApplyOptions(opts []client.ListOption) *ExtendedListOptions {
 	// Apply the "normal" ListOptions
 	o.ListOptions.ApplyOptions(opts)
 	// Apply all FilterOptions, if they implement that interface
@@ -45,26 +45,26 @@ func (o *ListOptions) ApplyOptions(opts []client.ListOption) *ListOptions {
 	return o
 }
 
-type DeleteAllOfOption interface {
-	ListOption
+type ExtendedDeleteAllOfOption interface {
+	ExtendedListOption
 	client.DeleteAllOfOption
 }
 
-type DeleteAllOfOptions struct {
-	ListOptions
+type ExtendedDeleteAllOfOptions struct {
+	ExtendedListOptions
 	client.DeleteOptions
 }
 
-var _ DeleteAllOfOption = &DeleteAllOfOptions{}
+var _ ExtendedDeleteAllOfOption = &ExtendedDeleteAllOfOptions{}
 
-func (o *DeleteAllOfOptions) ApplyToDeleteAllOf(target *client.DeleteAllOfOptions) {
+func (o *ExtendedDeleteAllOfOptions) ApplyToDeleteAllOf(target *client.DeleteAllOfOptions) {
 	o.DeleteOptions.ApplyToDelete(&target.DeleteOptions)
 }
 
-func (o *DeleteAllOfOptions) ApplyOptions(opts []client.DeleteAllOfOption) *DeleteAllOfOptions {
+func (o *ExtendedDeleteAllOfOptions) ApplyOptions(opts []client.DeleteAllOfOption) *ExtendedDeleteAllOfOptions {
 	// Cannot directly apply to o, hence, create a temporary object to which upstream opts are applied
 	do := (&client.DeleteAllOfOptions{}).ApplyOptions(opts)
-	o.ListOptions.ListOptions = do.ListOptions
+	o.ExtendedListOptions.ListOptions = do.ListOptions
 	o.DeleteOptions = do.DeleteOptions
 
 	// Apply all FilterOptions, if they implement that interface

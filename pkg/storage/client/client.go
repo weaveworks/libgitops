@@ -17,40 +17,10 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // TODO: Pass an ObjectID that contains all PartialObjectMetadata info for "downstream" consumers
 // that can make use of it by "casting up".
-
-var (
-	// ErrUnsupportedPatchType is returned when an unsupported patch type is used
-	ErrUnsupportedPatchType = errors.New("unsupported patch type")
-)
-
-type Reader interface {
-	client.Reader
-	BackendReader() backend.Reader
-}
-
-type Writer interface {
-	client.Writer
-	BackendWriter() backend.Writer
-}
-
-type StatusClient interface {
-	client.StatusClient
-	BackendStatusWriter() backend.StatusWriter
-}
-
-// Client is an interface for persisting and retrieving API objects to/from a backend
-// One Client instance handles all different Kinds of Objects
-type Client interface {
-	Reader
-	Writer
-	// TODO: StatusClient
-	//client.Client
-}
 
 // NewGeneric constructs a new Generic client
 // TODO: Construct the default patcher from the given scheme, make patcher an opt instead
@@ -75,7 +45,7 @@ func (c *Generic) BackendWriter() backend.Writer { return c.backend }
 
 // Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
 // In order to only extract the metadata of this object, pass in a *metav1.PartialObjectMetadata
-func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj core.Object) error {
+func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj Object) error {
 	obj.SetName(key.Name)
 	obj.SetNamespace(key.Namespace)
 
@@ -90,14 +60,14 @@ func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj core.Object) 
 // you need to populate TypeMeta with the GVK you want back.
 // TODO: Check if this works with metav1.List{}
 // TODO: Create constructors for the different kinds of lists?
-func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client.ListOption) error {
+func (c *Generic) List(ctx context.Context, list ObjectList, opts ...ListOption) error {
 	// This call will verify that list actually is a List type.
 	gvk, err := serializer.GVKForList(list, c.Scheme())
 	if err != nil {
 		return err
 	}
 	// This applies both upstream and custom options
-	listOpts := (&ListOptions{}).ApplyOptions(opts)
+	listOpts := (&ExtendedListOptions{}).ApplyOptions(opts)
 
 	// Get namespacing info
 	gk := gvk.GroupKind()
@@ -130,7 +100,7 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client
 	}
 
 	// Populate objs through the given (non-buffered) channel
-	ch := make(chan core.Object)
+	ch := make(chan Object)
 	objs := make([]kruntime.Object, 0, allIDs.Len())
 
 	// How should the object be created?
@@ -157,16 +127,16 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client
 	return meta.SetList(list, objs)
 }
 
-func (c *Generic) Create(ctx context.Context, obj core.Object, _ ...client.CreateOption) error {
+func (c *Generic) Create(ctx context.Context, obj Object, _ ...CreateOption) error {
 	return c.backend.Create(ctx, obj)
 }
 
-func (c *Generic) Update(ctx context.Context, obj core.Object, _ ...client.UpdateOption) error {
+func (c *Generic) Update(ctx context.Context, obj Object, _ ...UpdateOption) error {
 	return c.backend.Update(ctx, obj)
 }
 
 // Patch performs a strategic merge patch on the object with the given UID, using the byte-encoded patch given
-func (c *Generic) Patch(ctx context.Context, obj core.Object, patch core.Patch, _ ...client.PatchOption) error {
+func (c *Generic) Patch(ctx context.Context, obj Object, patch Patch, _ ...PatchOption) error {
 	// Fail-fast: We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return backend.ErrCannotSaveMetadata
@@ -210,16 +180,16 @@ func (c *Generic) Patch(ctx context.Context, obj core.Object, patch core.Patch, 
 
 // Delete removes an Object from the backend
 // PartialObjectMetadata should work here.
-func (c *Generic) Delete(ctx context.Context, obj core.Object, _ ...client.DeleteOption) error {
+func (c *Generic) Delete(ctx context.Context, obj Object, _ ...DeleteOption) error {
 	return c.backend.Delete(ctx, obj)
 }
 
 // DeleteAllOf deletes all matched resources by first doing a List() operation on the given GVK of
 // obj (obj is not used for anything else) and the given filters in opts. Only the Partial Meta
-func (c *Generic) DeleteAllOf(ctx context.Context, obj core.Object, opts ...client.DeleteAllOfOption) error {
+func (c *Generic) DeleteAllOf(ctx context.Context, obj Object, opts ...DeleteAllOfOption) error {
 	// This applies both upstream and custom options, and propagates the options correctly to both
 	// List() and Delete()
-	customDeleteAllOpts := (&DeleteAllOfOptions{}).ApplyOptions(opts)
+	customDeleteAllOpts := (&ExtendedDeleteAllOfOptions{}).ApplyOptions(opts)
 
 	// Get the GVK of the object
 	gvk, err := serializer.GVKForObject(c.Scheme(), obj)
@@ -254,16 +224,16 @@ func (c *Generic) RESTMapper() meta.RESTMapper {
 	return nil
 }
 
-type newObjectFunc func() (core.Object, error)
+type newObjectFunc func() (Object, error)
 
 func createObject(gvk core.GroupVersionKind, scheme *kruntime.Scheme) newObjectFunc {
-	return func() (core.Object, error) {
+	return func() (Object, error) {
 		return NewObjectForGVK(gvk, scheme)
 	}
 }
 
 func createPartialObject(gvk core.GroupVersionKind) newObjectFunc {
-	return func() (core.Object, error) {
+	return func() (Object, error) {
 		obj := &metav1.PartialObjectMetadata{}
 		obj.SetGroupVersionKind(gvk)
 		return obj, nil
@@ -271,14 +241,14 @@ func createPartialObject(gvk core.GroupVersionKind) newObjectFunc {
 }
 
 func createUnstructuredObject(gvk core.GroupVersionKind) newObjectFunc {
-	return func() (core.Object, error) {
+	return func() (Object, error) {
 		obj := &unstructured.Unstructured{}
 		obj.SetGroupVersionKind(gvk)
 		return obj, nil
 	}
 }
 
-func (c *Generic) processKeys(ctx context.Context, ids core.UnversionedObjectIDSet, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
+func (c *Generic) processKeys(ctx context.Context, ids core.UnversionedObjectIDSet, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan Object) error {
 	goroutines := []func() error{}
 	for _, id := range ids.List() {
 		goroutines = append(goroutines, c.processKey(ctx, id, filterOpts, fn, output))
@@ -289,7 +259,7 @@ func (c *Generic) processKeys(ctx context.Context, ids core.UnversionedObjectIDS
 	return utilerrs.AggregateGoroutines(goroutines...)
 }
 
-func (c *Generic) processKey(ctx context.Context, id core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) func() error {
+func (c *Generic) processKey(ctx context.Context, id core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan Object) func() error {
 	return func() error {
 		// Create a new object, and decode into it using Get
 		obj, err := fn()

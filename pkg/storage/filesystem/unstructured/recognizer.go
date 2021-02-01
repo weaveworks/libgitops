@@ -65,7 +65,7 @@ func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr serializer.FrameRe
 		}
 
 		// Create the ObjectID
-		id := core.NewObjectID(metaObj.GroupVersionKind(), core.ObjectKeyFromObject(metaObj))
+		id := core.NewObjectID(metaObj.GroupVersionKind(), core.ObjectKeyFromMetav1Object(metaObj))
 		// Insert it into the set; but error if AllowDuplicates==false and it already existed.
 		// Important: As InsertUnique mutates ids, it must be the first if case
 		if !ids.InsertUnique(id) && !r.AllowDuplicates {
