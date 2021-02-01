@@ -120,18 +120,18 @@ func (c *Generic) List(ctx context.Context, list core.ObjectList, opts ...client
 		return errors.New("invalid namespace option: cannot filter namespace for root-spaced object")
 	}
 
-	allIDs := []core.UnversionedObjectID{}
+	allIDs := core.NewUnversionedObjectIDSet()
 	for ns := range namespaces {
 		ids, err := c.Backend().ListObjectIDs(ctx, gk, ns)
 		if err != nil {
 			return err
 		}
-		allIDs = append(allIDs, ids...)
+		allIDs.Insert(ids.List()...)
 	}
 
 	// Populate objs through the given (non-buffered) channel
 	ch := make(chan core.Object)
-	objs := make([]kruntime.Object, 0, len(allIDs))
+	objs := make([]kruntime.Object, 0, allIDs.Len())
 
 	// How should the object be created?
 	createFunc := createObject(gvk, c.Scheme())
@@ -278,9 +278,9 @@ func createUnstructuredObject(gvk core.GroupVersionKind) newObjectFunc {
 	}
 }
 
-func (c *Generic) processKeys(ctx context.Context, ids []core.UnversionedObjectID, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
+func (c *Generic) processKeys(ctx context.Context, ids core.UnversionedObjectIDSet, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan core.Object) error {
 	goroutines := []func() error{}
-	for _, id := range ids {
+	for _, id := range ids.List() {
 		goroutines = append(goroutines, c.processKey(ctx, id, filterOpts, fn, output))
 	}
 

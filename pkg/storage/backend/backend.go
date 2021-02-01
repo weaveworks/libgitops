@@ -195,7 +195,7 @@ func (b *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.S
 // For namespaced GroupKinds, the caller must provide a namespace, and for
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
 // must only return object keys for that given namespace.
-func (b *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
+func (b *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
 	return b.storage.ListObjectIDs(ctx, gk, namespace)
 }
 

@@ -105,7 +105,7 @@ func (e GenericNamespaceEnforcer) EnforceNamespace(ctx context.Context, obj core
 		return err
 	}
 	// Loop through the IDs, and try to match it against the set ns
-	for _, id := range objIDs {
+	for _, id := range objIDs.List() {
 		if id.ObjectKey().Name == ns {
 			// Found the namespace; this is a valid setting
 			return nil

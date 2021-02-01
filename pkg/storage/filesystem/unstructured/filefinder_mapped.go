@@ -113,13 +113,13 @@ func (f *GenericFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKin
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
 // must only return object IDs for that given namespace. If any of the given
 // rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
-func (f *GenericFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
+func (f *GenericFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
 	m := f.branch.groupKind(gk).namespace(namespace).raw()
 	ids := make([]core.UnversionedObjectID, 0, len(m))
 	for name := range m {
 		ids = append(ids, core.NewUnversionedObjectID(gk, core.ObjectKey{Name: name, Namespace: namespace}))
 	}
-	return ids, nil
+	return core.NewUnversionedObjectIDSet(ids...), nil
 }
 
 // GetMapping retrieves a mapping in the system

@@ -151,7 +151,7 @@ func (r *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.S
 // For namespaced GroupKinds, the caller must provide a namespace, and for
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
 // must only return object IDs for that given namespace.
-func (r *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
+func (r *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
 	// Validate the namespace parameter
 	if err := storage.VerifyNamespaced(r.Namespacer(), gk, namespace); err != nil {
 		return nil, err

@@ -179,7 +179,7 @@ func (f *SimpleFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKind
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
 // must only return object IDs for that given namespace. If any of the given
 // rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
-func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error) {
+func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
 	// If namespace is empty, the names will be in ./<kindkey>, otherwise ./<kindkey>/<ns>
 	namesDir := filepath.Join(f.kindKeyPath(gk), namespace)
 	entries, err := readDir(ctx, f.fs, namesDir)
@@ -214,7 +214,7 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 		// If we got this far, add the key to the list
 		ids = append(ids, core.NewUnversionedObjectID(gk, core.ObjectKey{Name: entry, Namespace: namespace}))
 	}
-	return ids, nil
+	return core.NewUnversionedObjectIDSet(ids...), nil
 }
 
 func readDir(ctx context.Context, fs Filesystem, dir string) ([]string, error) {

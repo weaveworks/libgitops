@@ -96,7 +96,7 @@ type Lister interface {
 	// root-spaced GroupKinds, the caller must not. When namespaced, this function
 	// must only return object IDs for that given namespace. If any of the given
 	// rules are violated, ErrNamespacedMismatch should be returned as a wrapped error.
-	ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) ([]core.UnversionedObjectID, error)
+	ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error)
 }
 
 // Reader provides the write operations for the Storage.
