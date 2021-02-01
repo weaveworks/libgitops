@@ -3,6 +3,7 @@ package unstructured
 import (
 	"context"
 
+	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
@@ -29,10 +30,11 @@ type Storage interface {
 	UnstructuredFileFinder() FileFinder
 }
 
-// TODO: Investigate if the ObjectRecognizer should return unversioned
-// or versioned ObjectID's
+// ObjectRecognizer recognizes objects stored in files.
 type ObjectRecognizer interface {
-	ResolveObjectID(ctx context.Context, fileName string, content []byte) (core.ObjectID, error)
+	// RecognizeObjectIDs returns the ObjectIDs present in the file with the given name,
+	// content type and content (in the FrameReader).
+	RecognizeObjectIDs(fileName string, fr serializer.FrameReader) (core.ObjectIDSet, error)
 }
 
 // FileFinder is an extension to filesystem.FileFinder that allows it to have an internal

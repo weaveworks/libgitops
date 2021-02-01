@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
+	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
 
@@ -74,17 +76,16 @@ func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
 			}
 		}
 
-		// If the file is not known to the FileFinder yet, or if the checksum
-		// was empty, read the file, and recognize it.
-		content, err := s.FileFinder().Filesystem().ReadFile(ctx, filePath)
+		// Read and recognize the file
+		id, err := ReadAndRecognizeFile(
+			ctx,
+			fileFinder.Filesystem(),
+			fileFinder.ContentTyper(),
+			s.recognizer,
+			filePath,
+		)
 		if err != nil {
-			logrus.Warnf("Ignoring %q: %v", filePath, err)
-			continue
-		}
-
-		id, err := s.recognizer.ResolveObjectID(ctx, filePath, content)
-		if err != nil {
-			logrus.Warnf("Could not recognize object ID in %q: %v", filePath, err)
+			logrus.Warn(err)
 			continue
 		}
 
@@ -116,4 +117,41 @@ func (s *Generic) PathExcluder() filesystem.PathExcluder {
 // UnstructuredFileFinder returns the underlying unstructured.FileFinder used.
 func (s *Generic) UnstructuredFileFinder() FileFinder {
 	return s.fileFinder
+}
+
+// ReadAndRecognizeFile reads the given file and its content type; and then recognizes it.
+// It only supports one ObjectID per file at the moment.
+func ReadAndRecognizeFile(
+	ctx context.Context,
+	fs filesystem.Filesystem,
+	contentTyper filesystem.ContentTyper,
+	recognizer ObjectRecognizer,
+	filePath string,
+) (core.ObjectID, error) {
+	// If the file is not known to the FileFinder yet, or if the checksum
+	// was empty, read the file, and recognize it.
+	content, err := fs.ReadFile(ctx, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("Could not read file %q: %v", filePath, err)
+	}
+	// Get the content type for this file so that we can read it properly
+	ct, err := contentTyper.ContentTypeForPath(ctx, fs, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("Could not get content type for file %q: %v", filePath, err)
+	}
+	// TODO: In the future this NewFrameReader should come from an interface, not
+	// directly from the hard-coded serializer package.
+	fr := serializer.NewFrameReader(ct, serializer.FromBytes(content))
+	// Recognize all IDs in the file
+	ids, err := recognizer.RecognizeObjectIDs(filePath, fr)
+	if err != nil {
+		return nil, fmt.Errorf("Could not recognize object IDs in %q: %v", filePath, err)
+	}
+	// For now; we only support single-frame files
+	// TODO: Change this.
+	if ids.Len() != 1 {
+		return nil, fmt.Errorf("File %q contained multiple objects; for now only single-frame files are supported", filePath)
+	}
+	// Return that one ID
+	return ids.List()[0], nil
 }

@@ -278,16 +278,16 @@ func (s *Generic) handleDelete(ctx context.Context, ev *fileevents.FileEvent) er
 }
 
 func (s *Generic) handleModifyMove(ctx context.Context, ev *fileevents.FileEvent) error {
-	// Read the content of this modified, moved or created file
-	content, err := s.FileFinder().Filesystem().ReadFile(ctx, ev.Path)
+	// Read and recognize the file
+	versionedID, err := unstructured.ReadAndRecognizeFile(
+		ctx,
+		s.UnstructuredFileFinder().Filesystem(),
+		s.UnstructuredFileFinder().ContentTyper(),
+		s.ObjectRecognizer(),
+		ev.Path,
+	)
 	if err != nil {
-		return fmt.Errorf("could not read %q: %v", ev.Path, err)
-	}
-
-	// Try to recognize the object
-	versionedID, err := s.ObjectRecognizer().ResolveObjectID(ctx, ev.Path, content)
-	if err != nil {
-		return fmt.Errorf("did not recognize object at path %q: %v", ev.Path, err)
+		return err
 	}
 
 	// If the file was just moved around, just overwrite the earlier mapping
