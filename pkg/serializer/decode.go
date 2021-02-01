@@ -139,6 +139,9 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 // opts.DecodeUnknown is not applicable in this call. In case you want to decode an object into a
 // 	*runtime.Unknown, just create a runtime.Unknown object and pass the pointer as obj into DecodeInto
 // 	and it'll work.
+//
+// TODO: Support decoding all frames at once into e.g. PartialMetadataLists, UnstructuredLists, or
+// metav1.Lists.
 func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 	// Read a frame from the FrameReader.
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
