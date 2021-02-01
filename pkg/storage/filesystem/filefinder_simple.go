@@ -2,7 +2,6 @@ package filesystem
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,6 +78,8 @@ var _ FileFinder = &SimpleFileFinder{}
 // }
 //
 // <ext> is resolved by the FileExtensionResolver, for the given ContentType.
+// If <group> is an empty string (as when "apiVersion: v1" is used); <group> will
+// be set to "core".
 //
 // This FileFinder does not support the ObjectAt method.
 type SimpleFileFinder struct {
@@ -98,8 +99,6 @@ type SimpleFileFinderOptions struct {
 	// Default: DefaultFileExtensionResolver
 	FileExtensionResolver FileExtensionResolver
 }
-
-// TODO: Use group name "core" if group is "" to support core k8s objects.
 
 func (f *SimpleFileFinder) Filesystem() Filesystem {
 	return f.fs
@@ -138,14 +137,19 @@ func (f *SimpleFileFinder) kindKeyPath(gk core.GroupKind) string {
 		// ./<kind>/
 		return filepath.Join(gk.Kind)
 	}
+	// Fall back to the "core/v1" storage path for "apiVersion: v1"
+	group := gk.Group
+	if len(group) == 0 {
+		group = "core"
+	}
 	// ./<group>/<kind>/
-	return filepath.Join(gk.Group, gk.Kind)
+	return filepath.Join(group, gk.Kind)
 }
 
 // ObjectAt retrieves the ID containing the virtual path based
 // on the given physical file path.
 func (f *SimpleFileFinder) ObjectAt(ctx context.Context, path string) (core.UnversionedObjectID, error) {
-	return nil, errors.New("not implemented")
+	return nil, core.ErrNotImplemented
 }
 
 func (f *SimpleFileFinder) ext() (string, error) {
