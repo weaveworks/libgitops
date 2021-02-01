@@ -28,7 +28,7 @@ type Storage interface {
 const defaultEventsBufferSize = 4096
 
 // NewManifest is a high-level constructor for a generic
-// MappedFileFinder and filesystem.Storage, together with a
+// unstructured.FileFinder and filesystem.Storage, together with a
 // inotify FileWatcher; all combined into an unstructuredevent.Storage.
 func NewManifest(
 	dir string,
@@ -38,7 +38,7 @@ func NewManifest(
 	pathExcluder filesystem.PathExcluder,
 ) (Storage, error) {
 	fs := filesystem.NewOSFilesystem(dir)
-	fileFinder := unstructured.NewGenericMappedFileFinder(contentTyper, fs)
+	fileFinder := unstructured.NewGenericFileFinder(contentTyper, fs)
 	fsRaw, err := filesystem.NewGeneric(fileFinder, namespacer)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func NewManifest(
 
 // NewGeneric is an extended Storage implementation, which
 // together with the provided ObjectRecognizer and FileEventsEmitter listens for
-// file events, keeps the mappings of the filesystem.Storage's MappedFileFinder
+// file events, keeps the mappings of the unstructured.Storage's unstructured.FileFinder
 // in sync (s must use the mapped variant), and sends high-level ObjectEvents
 // upstream.
 //
@@ -265,7 +265,7 @@ func (s *Generic) handleDelete(ctx context.Context, ev *fileevents.FileEvent) er
 	// the known objects in such a way that it is able to do the reverse-lookup. For
 	// mapped FileFinders, by this point the path should still be in the local cache,
 	// which should make us able to get the ID before deleted from the cache.
-	objectID, err := s.MappedFileFinder().ObjectAt(ctx, ev.Path)
+	objectID, err := s.UnstructuredFileFinder().ObjectAt(ctx, ev.Path)
 	if err != nil {
 		return fmt.Errorf("failed to reverse lookup ID for deleted file %q: %v", ev.Path, err)
 	}
@@ -307,7 +307,7 @@ func (s *Generic) handleModifyMove(ctx context.Context, ev *fileevents.FileEvent
 	// changes the underlying ObjectID.
 	objectEvent := event.ObjectEventUpdate
 	// Set the mapping if it didn't exist before; assume this is a Create event
-	if _, ok := s.MappedFileFinder().GetMapping(ctx, versionedID); !ok {
+	if _, ok := s.UnstructuredFileFinder().GetMapping(ctx, versionedID); !ok {
 		// This is what actually determines if an Object is created,
 		// so update the event to update.ObjectEventCreate here
 		objectEvent = event.ObjectEventCreate
@@ -333,13 +333,13 @@ func (s *Generic) sendEvent(eventType event.ObjectEventType, id core.Unversioned
 // will be overridden with the specified new path
 func (s *Generic) setMapping(ctx context.Context, id core.UnversionedObjectID, path string) {
 	// Get the current checksum of the new file
-	checksum, err := s.MappedFileFinder().Filesystem().Checksum(ctx, path)
+	checksum, err := s.UnstructuredFileFinder().Filesystem().Checksum(ctx, path)
 	if err != nil {
 		logrus.Errorf("Unexpected error when getting checksum of file %q: %v", path, err)
 		return
 	}
 	// Register the current state in the cache
-	s.MappedFileFinder().SetMapping(ctx, id, unstructured.ChecksumPath{
+	s.UnstructuredFileFinder().SetMapping(ctx, id, unstructured.ChecksumPath{
 		Path:     path,
 		Checksum: checksum,
 	})
@@ -347,5 +347,5 @@ func (s *Generic) setMapping(ctx context.Context, id core.UnversionedObjectID, p
 
 // deleteMapping removes a mapping a file that doesn't exist
 func (s *Generic) deleteMapping(ctx context.Context, id core.UnversionedObjectID) {
-	s.MappedFileFinder().DeleteMapping(ctx, id)
+	s.UnstructuredFileFinder().DeleteMapping(ctx, id)
 }

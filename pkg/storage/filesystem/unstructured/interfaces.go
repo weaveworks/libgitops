@@ -10,7 +10,7 @@ import (
 // Storage is a raw Storage interface that builds on top
 // of Storage. It uses an ObjectRecognizer to recognize
 // otherwise unknown objects in unstructured files.
-// The Storage must use a MappedFileFinder underneath.
+// The Storage must use a unstructured.FileFinder underneath.
 //
 // Multiple Objects in the same file, or multiple Objects with the
 // same ID in multiple files are not supported.
@@ -18,15 +18,15 @@ type Storage interface {
 	filesystem.Storage
 
 	// Sync synchronizes the current state of the filesystem with the
-	// cached mappings in the MappedFileFinder.
+	// cached mappings in the unstructured.FileFinder.
 	Sync(ctx context.Context) ([]ChecksumPathID, error)
 
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
 	ObjectRecognizer() ObjectRecognizer
 	// PathExcluder specifies what paths to not sync
 	PathExcluder() filesystem.PathExcluder
-	// MappedFileFinder returns the underlying MappedFileFinder used.
-	MappedFileFinder() MappedFileFinder
+	// UnstructuredFileFinder returns the underlying unstructured.FileFinder used.
+	UnstructuredFileFinder() FileFinder
 }
 
 // TODO: Investigate if the ObjectRecognizer should return unversioned
@@ -35,14 +35,14 @@ type ObjectRecognizer interface {
 	ResolveObjectID(ctx context.Context, fileName string, content []byte) (core.ObjectID, error)
 }
 
-// MappedFileFinder is an extension to FileFinder that allows it to have an internal
+// FileFinder is an extension to filesystem.FileFinder that allows it to have an internal
 // cache with mappings between UnversionedObjectID and a ChecksumPath. This allows
 // higher-order interfaces to manage Objects in files in an unorganized directory
 // (e.g. a Git repo).
 //
 // Multiple Objects in the same file, or multiple Objects with the
 // same ID in multiple files are not supported.
-type MappedFileFinder interface {
+type FileFinder interface {
 	filesystem.FileFinder
 
 	// GetMapping retrieves a mapping in the system.
@@ -57,7 +57,7 @@ type MappedFileFinder interface {
 }
 
 // ChecksumPath is a tuple of a given Checksum and relative file Path,
-// for use in MappedFileFinder.
+// for use in unstructured.FileFinder.
 type ChecksumPath struct {
 	// Checksum is the checksum of the file at the given path.
 	//

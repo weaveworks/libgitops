@@ -16,29 +16,29 @@ func NewGeneric(storage filesystem.Storage, recognizer ObjectRecognizer, pathExc
 	if recognizer == nil {
 		return nil, fmt.Errorf("recognizer is mandatory")
 	}
-	mappedFileFinder, ok := storage.FileFinder().(MappedFileFinder)
+	fileFinder, ok := storage.FileFinder().(FileFinder)
 	if !ok {
-		return nil, errors.New("the given filesystem.Storage must use a MappedFileFinder")
+		return nil, errors.New("the given filesystem.Storage must use a unstructured.FileFinder")
 	}
 	return &Generic{
-		Storage:          storage,
-		recognizer:       recognizer,
-		mappedFileFinder: mappedFileFinder,
-		pathExcluder:     pathExcluder,
+		Storage:      storage,
+		recognizer:   recognizer,
+		fileFinder:   fileFinder,
+		pathExcluder: pathExcluder,
 	}, nil
 }
 
 type Generic struct {
 	filesystem.Storage
-	recognizer       ObjectRecognizer
-	mappedFileFinder MappedFileFinder
-	pathExcluder     filesystem.PathExcluder
+	recognizer   ObjectRecognizer
+	fileFinder   FileFinder
+	pathExcluder filesystem.PathExcluder
 }
 
 // Sync synchronizes the current state of the filesystem with the
-// cached mappings in the MappedFileFinder.
+// cached mappings in the underlying unstructured.FileFinder.
 func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
-	fileFinder := s.MappedFileFinder()
+	fileFinder := s.UnstructuredFileFinder()
 
 	// List all valid files in the fs
 	files, err := filesystem.ListValidFilesInFilesystem(
@@ -52,7 +52,7 @@ func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
 	}
 
 	// Send SYNC events for all files (and fill the mappings
-	// of the MappedFileFinder) before starting to monitor changes
+	// of the unstructured.FileFinder) before starting to monitor changes
 	updatedFiles := make([]ChecksumPathID, 0, len(files))
 	for _, filePath := range files {
 		// Get the current checksum of the file
@@ -93,7 +93,7 @@ func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
 			Checksum: currentChecksum,
 			Path:     filePath,
 		}
-		s.MappedFileFinder().SetMapping(ctx, id, cp)
+		fileFinder.SetMapping(ctx, id, cp)
 		// Add to the slice which we'll return
 		updatedFiles = append(updatedFiles, ChecksumPathID{
 			ChecksumPath: cp,
@@ -113,7 +113,7 @@ func (s *Generic) PathExcluder() filesystem.PathExcluder {
 	return s.pathExcluder
 }
 
-// MappedFileFinder returns the underlying MappedFileFinder used.
-func (s *Generic) MappedFileFinder() MappedFileFinder {
-	return s.mappedFileFinder
+// UnstructuredFileFinder returns the underlying unstructured.FileFinder used.
+func (s *Generic) UnstructuredFileFinder() FileFinder {
+	return s.fileFinder
 }
