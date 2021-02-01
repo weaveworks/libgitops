@@ -41,6 +41,7 @@ type UnversionedObjectID interface {
 	ObjectKey() ObjectKey
 
 	WithVersion(version string) ObjectID
+	String() string // Implements fmt.Stringer
 }
 
 // ObjectID is a superset of UnversionedObjectID, that also specifies an exact version.
