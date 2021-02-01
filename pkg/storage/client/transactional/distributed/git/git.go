@@ -307,6 +307,8 @@ func (d *LocalClone) ResetToCleanBranch(_ context.Context, branch string) error 
 		Dir: true,
 	})
 	// Force-checkout the main branch
+	// TODO: If a transaction (non-branched) was able to commit, and failed after that
+	// we need to roll back that commit.
 	return d.wt.Checkout(&git.CheckoutOptions{
 		Branch: plumbing.NewBranchReferenceName(branch),
 		Force:  true,

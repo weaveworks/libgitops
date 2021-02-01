@@ -11,15 +11,26 @@ type Client interface {
 	client.Reader
 
 	BranchManager() BranchManager
+	// BranchMerger is optional.
 	BranchMerger() BranchMerger
 
+	// Transaction creates a new transaction on the branch stored in the context, so that
+	// no other writes to that branch can take place meanwhile.
 	Transaction(ctx context.Context, opts ...TxOption) Tx
+	// BranchTransaction creates a new "head" branch with the given {branchName} name, based
+	// on the "base" branch in the context. The "base" branch is not locked for writing while
+	// the transaction is running, but the head branch is.
 	BranchTransaction(ctx context.Context, branchName string, opts ...TxOption) BranchTx
 }
 
 type BranchManager interface {
+	// CreateBranch creates a new branch with the given target branch name. It forks out
+	// of the branch specified in the context.
 	CreateBranch(ctx context.Context, branch string) error
+	// ResetToCleanBranch switches back to the given branch; but first discards all non-committed
+	// changes.
 	ResetToCleanBranch(ctx context.Context, branch string) error
+	// Commit creates a new commit for the branch stored in the context.
 	Commit(ctx context.Context, commit Commit) error
 
 	// CommitHookChain must be non-nil, but can be a no-op

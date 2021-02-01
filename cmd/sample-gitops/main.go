@@ -184,6 +184,7 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		return err
 	}
 
+	// Note: This will add itself to the Commit/TxHook chains on the localClone.
 	txClient, err := distributed.NewClient(txGeneralClient, localClone)
 	if err != nil {
 		return err
@@ -235,22 +236,27 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 			return echo.NewHTTPError(http.StatusBadRequest, "Please set name")
 		}
 
+		// Create an empty typed object, the data from the client will be written into it
+		// at .Get-time below.
 		car := v1alpha1.Car{}
 		carKey := core.ObjectKey{Name: name}
-
+		// Specify what our "base" branch is in the context; make it match the main branch
+		// of the Git clone.
 		branchCtx := core.WithVersionRef(ctx, core.NewBranchRef(localClone.MainBranch()))
-
+		// Our head branch is the name of the Car, and it ends in a "-", which makes the
+		// TxClient add a random sha suffix.
 		headBranch := fmt.Sprintf("%s-update-", name)
+
 		err := txClient.
-			BranchTransaction(branchCtx, headBranch).
-			Get(carKey, &car).
-			Custom(func(ctx context.Context) error {
+			BranchTransaction(branchCtx, headBranch). // Start a transaction of the base branch to the head
+			Get(carKey, &car).                        // Load the latest data of the Car into &car.
+			Custom(func(ctx context.Context) error {  // Mutate (update) status of the Car
 				car.Status.Distance = rand.Uint64()
 				car.Status.Speed = rand.Float64() * 100
 				return nil
 			}).
-			Update(&car).
-			CreateTx(githubpr.GenericPullRequest{
+			Update(&car).                         // Store the changed car in the Storage
+			CreateTx(githubpr.GenericPullRequest{ // Create a commit for the tx; return the super-set PR commit
 				Commit: transactional.GenericCommit{
 					Author: transactional.GenericCommitAuthor{
 						Name:  authorName,

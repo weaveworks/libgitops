@@ -37,7 +37,9 @@ func NewGeneric(c client.Client, manager BranchManager, merger BranchMerger) (Cl
 type Generic struct {
 	c client.Client
 
-	txs   map[string]*txLock
+	// txs maps branches to their tx locks
+	txs map[string]*txLock
+	// txsMu guards reads and writes of txs
 	txsMu *sync.Mutex
 
 	// +optional
@@ -47,7 +49,10 @@ type Generic struct {
 }
 
 type txLock struct {
-	mu   *sync.RWMutex
+	// mu is locked for writing while the transaction is executing, and locked
+	// for reading, while a read operation is active.
+	mu *sync.RWMutex
+	// mode specifies what transaction mode is used; Atomic or AllowReading.
 	mode TxMode
 	// active == 1 means "transaction active, mu is locked for writing"
 	// active == 0 means "transaction has stopped, mu has been unlocked"
