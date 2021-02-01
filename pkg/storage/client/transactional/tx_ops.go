@@ -6,6 +6,9 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 )
 
+// Implement the required "fluent/functional" methods on BranchTx.
+// Go doesn't have generics; hence we need to do this twice.
+
 func (tx *txImpl) Get(key core.ObjectKey, obj core.Object) Tx {
 	return tx.Custom(func(ctx context.Context) error {
 		return tx.c.Get(ctx, key, obj)
@@ -54,7 +57,8 @@ func (tx *txImpl) PatchStatus(obj core.Object, patch core.Patch, opts ...core.Pa
 	})
 }
 
-// TODO
+// Implement the required "fluent/functional" methods on BranchTx.
+// Go doesn't have generics; hence we need to do this twice.
 
 func (tx *txBranchImpl) Get(key core.ObjectKey, obj core.Object) BranchTx {
 	return tx.Custom(func(ctx context.Context) error {
