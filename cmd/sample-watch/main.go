@@ -21,6 +21,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/event"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 	unstructuredevent "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured/event"
 	"github.com/weaveworks/libgitops/pkg/storage/kube"
 )
@@ -57,7 +58,7 @@ func run(watchDir string) error {
 		watchDir,
 		filesystem.DefaultContentTyper,
 		storage.StaticNamespacer{NamespacedIsDefaultPolicy: false}, // all objects root-spaced
-		&core.KubeObjectRecognizer{Decoder: decoder},
+		unstructured.KubeObjectRecognizer{Decoder: decoder},
 		filesystem.DefaultPathExcluders(),
 	)
 	if err != nil {

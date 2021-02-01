@@ -22,11 +22,17 @@ type Storage interface {
 	Sync(ctx context.Context) ([]ChecksumPathID, error)
 
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
-	ObjectRecognizer() core.ObjectRecognizer
+	ObjectRecognizer() ObjectRecognizer
 	// PathExcluder specifies what paths to not sync
 	PathExcluder() filesystem.PathExcluder
 	// MappedFileFinder returns the underlying MappedFileFinder used.
 	MappedFileFinder() MappedFileFinder
+}
+
+// TODO: Investigate if the ObjectRecognizer should return unversioned
+// or versioned ObjectID's
+type ObjectRecognizer interface {
+	ResolveObjectID(ctx context.Context, fileName string, content []byte) (core.ObjectID, error)
 }
 
 // MappedFileFinder is an extension to FileFinder that allows it to have an internal

@@ -6,11 +6,10 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
 
-func NewGeneric(storage filesystem.Storage, recognizer core.ObjectRecognizer, pathExcluder filesystem.PathExcluder) (Storage, error) {
+func NewGeneric(storage filesystem.Storage, recognizer ObjectRecognizer, pathExcluder filesystem.PathExcluder) (Storage, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
 	}
@@ -31,7 +30,7 @@ func NewGeneric(storage filesystem.Storage, recognizer core.ObjectRecognizer, pa
 
 type Generic struct {
 	filesystem.Storage
-	recognizer       core.ObjectRecognizer
+	recognizer       ObjectRecognizer
 	mappedFileFinder MappedFileFinder
 	pathExcluder     filesystem.PathExcluder
 }
@@ -105,7 +104,7 @@ func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
 }
 
 // ObjectRecognizer returns the underlying ObjectRecognizer used.
-func (s *Generic) ObjectRecognizer() core.ObjectRecognizer {
+func (s *Generic) ObjectRecognizer() ObjectRecognizer {
 	return s.recognizer
 }
 

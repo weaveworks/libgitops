@@ -31,6 +31,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/event"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	unstructuredfs "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 	unstructuredevent "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured/event"
 	"github.com/weaveworks/libgitops/pkg/storage/kube"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -152,7 +153,7 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		localClone.Dir(),
 		filesystem.DefaultContentTyper,
 		storage.StaticNamespacer{NamespacedIsDefaultPolicy: false}, // all objects root-spaced
-		&core.KubeObjectRecognizer{Decoder: decoder},
+		unstructuredfs.KubeObjectRecognizer{Decoder: decoder},
 		filesystem.DefaultPathExcluders(),
 	)
 	if err != nil {

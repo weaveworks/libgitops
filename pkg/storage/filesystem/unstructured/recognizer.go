@@ -1,4 +1,4 @@
-package core
+package unstructured
 
 import (
 	"context"
@@ -6,11 +6,12 @@ import (
 	"fmt"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // KubeObjectRecognizer implements ObjectRecognizer.
-var _ ObjectRecognizer = &KubeObjectRecognizer{}
+var _ ObjectRecognizer = KubeObjectRecognizer{}
 
 // KubeObjectRecognizer is a simple implementation of ObjectRecognizer, that
 // decodes the given byte content with the assumption that it is YAML (which covers
@@ -27,7 +28,7 @@ type KubeObjectRecognizer struct {
 	AllowUnrecognized bool
 }
 
-func (r *KubeObjectRecognizer) ResolveObjectID(_ context.Context, _ string, content []byte) (ObjectID, error) {
+func (r KubeObjectRecognizer) ResolveObjectID(_ context.Context, _ string, content []byte) (core.ObjectID, error) {
 	if r.Decoder == nil {
 		return nil, errors.New("programmer error: KubeObjectRecognizer.Decoder is nil")
 	}
@@ -54,5 +55,5 @@ func (r *KubeObjectRecognizer) ResolveObjectID(_ context.Context, _ string, cont
 		return nil, fmt.Errorf("GroupVersionKind %v not recognized by the scheme", gvk)
 	}
 
-	return NewObjectID(metaObj.GroupVersionKind(), ObjectKeyFromObject(metaObj)), nil
+	return core.NewObjectID(metaObj.GroupVersionKind(), core.ObjectKeyFromObject(metaObj)), nil
 }

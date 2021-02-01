@@ -34,7 +34,7 @@ func NewManifest(
 	dir string,
 	contentTyper filesystem.ContentTyper,
 	namespacer storage.Namespacer,
-	recognizer core.ObjectRecognizer,
+	recognizer unstructured.ObjectRecognizer,
 	pathExcluder filesystem.PathExcluder,
 ) (Storage, error) {
 	fs := filesystem.NewOSFilesystem(dir)

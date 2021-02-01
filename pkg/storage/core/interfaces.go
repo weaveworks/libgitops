@@ -1,8 +1,6 @@
 package core
 
 import (
-	"context"
-
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,12 +32,6 @@ type DeleteAllOfOption = client.DeleteAllOfOption
 
 // Helper functions from client.
 var ObjectKeyFromObject = client.ObjectKeyFromObject
-
-// TODO: Investigate if the ObjectRecognizer should return unversioned
-// or versioned ObjectID's
-type ObjectRecognizer interface {
-	ResolveObjectID(ctx context.Context, fileName string, content []byte) (ObjectID, error)
-}
 
 // UnversionedObjectID represents an ID for an Object whose version is not known.
 // However, the Group, Kind, Name and optionally, Namespace is known and should
