@@ -35,15 +35,6 @@ type DeleteAllOfOption = client.DeleteAllOfOption
 // Helper functions from client.
 var ObjectKeyFromObject = client.ObjectKeyFromObject
 
-// Namespacer is an interface that lets the caller know if a GroupKind is namespaced
-// or not. There are two ready-made implementations:
-// 1. RESTMapperToNamespacer
-// 2. NewStaticNamespacer
-type Namespacer interface {
-	// IsNamespaced returns true if the GroupKind is a namespaced type
-	IsNamespaced(gk schema.GroupKind) (bool, error)
-}
-
 // TODO: Investigate if the ObjectRecognizer should return unversioned
 // or versioned ObjectID's
 type ObjectRecognizer interface {

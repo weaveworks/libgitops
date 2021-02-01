@@ -15,6 +15,7 @@ import (
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/client"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
@@ -55,7 +56,7 @@ func run(watchDir string) error {
 	rawManifest, err := unstructuredevent.NewManifest(
 		watchDir,
 		filesystem.DefaultContentTyper,
-		core.StaticNamespacer{NamespacedIsDefaultPolicy: false}, // all objects root-spaced
+		storage.StaticNamespacer{NamespacedIsDefaultPolicy: false}, // all objects root-spaced
 		&core.KubeObjectRecognizer{Decoder: decoder},
 		filesystem.DefaultPathExcluders(),
 	)

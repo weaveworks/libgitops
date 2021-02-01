@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -17,7 +18,7 @@ import (
 // using SimpleFileFinder as the FileFinder, and the local disk as target.
 // If you need more advanced customizablility than provided here, you can compose
 // the call to filesystem.NewGeneric yourself.
-func NewSimpleStorage(dir string, namespacer core.Namespacer, opts SimpleFileFinderOptions) (Storage, error) {
+func NewSimpleStorage(dir string, namespacer storage.Namespacer, opts SimpleFileFinderOptions) (Storage, error) {
 	fs := NewOSFilesystem(dir)
 	fileFinder, err := NewSimpleFileFinder(fs, opts)
 	if err != nil {

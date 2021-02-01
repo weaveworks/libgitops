@@ -14,7 +14,7 @@ import (
 
 // NewGeneric creates a new Generic using the given lower-level
 // FileFinder and Namespacer.
-func NewGeneric(fileFinder FileFinder, namespacer core.Namespacer) (Storage, error) {
+func NewGeneric(fileFinder FileFinder, namespacer storage.Namespacer) (Storage, error) {
 	if fileFinder == nil {
 		return nil, fmt.Errorf("NewGeneric: fileFinder is mandatory")
 	}
@@ -33,10 +33,10 @@ func NewGeneric(fileFinder FileFinder, namespacer core.Namespacer) (Storage, err
 // in a generic manner.
 type Generic struct {
 	fileFinder FileFinder
-	namespacer core.Namespacer
+	namespacer storage.Namespacer
 }
 
-func (r *Generic) Namespacer() core.Namespacer {
+func (r *Generic) Namespacer() storage.Namespacer {
 	return r.namespacer
 }
 

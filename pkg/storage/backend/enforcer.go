@@ -30,7 +30,7 @@ type NamespaceEnforcer interface {
 	//
 	// See GenericNamespaceEnforcer for an example implementation, or
 	// pkg/storage/kube.NewNamespaceEnforcer() for a sample application.
-	EnforceNamespace(ctx context.Context, obj core.Object, gvk core.GroupVersionKind, namespacer core.Namespacer, lister storage.Lister) error
+	EnforceNamespace(ctx context.Context, obj core.Object, gvk core.GroupVersionKind, namespacer storage.Namespacer, lister storage.Lister) error
 }
 
 // GenericNamespaceEnforcer is a NamespaceEnforcer that:
@@ -61,7 +61,7 @@ type GenericNamespaceEnforcer struct {
 	NamespaceGroupKind *core.GroupKind
 }
 
-func (e GenericNamespaceEnforcer) EnforceNamespace(ctx context.Context, obj core.Object, gvk core.GroupVersionKind, namespacer core.Namespacer, lister storage.Lister) error {
+func (e GenericNamespaceEnforcer) EnforceNamespace(ctx context.Context, obj core.Object, gvk core.GroupVersionKind, namespacer storage.Namespacer, lister storage.Lister) error {
 	// Get namespacing info
 	namespaced, err := namespacer.IsNamespaced(gvk.GroupKind())
 	if err != nil {

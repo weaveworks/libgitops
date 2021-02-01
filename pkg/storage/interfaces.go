@@ -35,9 +35,18 @@ type Storage interface {
 // by Reader and Writer.
 type StorageCommon interface {
 	// Namespacer gives access to the namespacer that is used
-	Namespacer() core.Namespacer
+	Namespacer() Namespacer
 	// Exists checks if the resource indicated by the ID exists.
 	Exists(ctx context.Context, id core.UnversionedObjectID) bool
+}
+
+// Namespacer is an interface that lets the caller know if a GroupKind is namespaced
+// or not. There are two ready-made implementations:
+// 1. kube.RESTMapperToNamespacer
+// 2. NewStaticNamespacer
+type Namespacer interface {
+	// IsNamespaced returns true if the GroupKind is a namespaced type
+	IsNamespaced(gk core.GroupKind) (bool, error)
 }
 
 // Reader provides the read operations for the Storage.

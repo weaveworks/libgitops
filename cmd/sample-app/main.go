@@ -17,6 +17,7 @@ import (
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/client"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
@@ -53,7 +54,7 @@ func run(manifestDir string) error {
 
 	s, err := filesystem.NewSimpleStorage(
 		manifestDir,
-		core.StaticNamespacer{NamespacedIsDefaultPolicy: false},
+		storage.StaticNamespacer{NamespacedIsDefaultPolicy: false},
 		filesystem.SimpleFileFinderOptions{
 			DisableGroupDirectory: true,
 			ContentType:           serializer.ContentTypeYAML,

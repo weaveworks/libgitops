@@ -8,7 +8,7 @@ import (
 
 // VerifyNamespaced verifies that the given GroupKind and namespace parameter follows
 // the rule of the Namespacer.
-func VerifyNamespaced(namespacer core.Namespacer, gk core.GroupKind, ns string) error {
+func VerifyNamespaced(namespacer Namespacer, gk core.GroupKind, ns string) error {
 	// Get namespacing info
 	namespaced, err := namespacer.IsNamespaced(gk)
 	if err != nil {

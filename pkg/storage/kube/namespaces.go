@@ -3,6 +3,7 @@ package kube
 import (
 	"sync"
 
+	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -61,7 +62,7 @@ type SimpleRESTMapper interface {
 // k8s.io/client-go/restmapper.NewDiscoveryRESTMapper(groups []*restmapper.APIGroupResources)
 // in order to look up namespacing information from either a running API server, or statically, from
 // the list of restmapper.APIGroupResources.
-func RESTMapperToNamespacer(mapper SimpleRESTMapper) core.Namespacer {
+func RESTMapperToNamespacer(mapper SimpleRESTMapper) storage.Namespacer {
 	return &restNamespacer{
 		mapper:        mapper,
 		mappingByType: make(map[schema.GroupKind]*meta.RESTMapping),
@@ -69,7 +70,7 @@ func RESTMapperToNamespacer(mapper SimpleRESTMapper) core.Namespacer {
 	}
 }
 
-var _ core.Namespacer = &restNamespacer{}
+var _ storage.Namespacer = &restNamespacer{}
 
 type restNamespacer struct {
 	mapper SimpleRESTMapper

@@ -33,7 +33,7 @@ const defaultEventsBufferSize = 4096
 func NewManifest(
 	dir string,
 	contentTyper filesystem.ContentTyper,
-	namespacer core.Namespacer,
+	namespacer storage.Namespacer,
 	recognizer core.ObjectRecognizer,
 	pathExcluder filesystem.PathExcluder,
 ) (Storage, error) {
