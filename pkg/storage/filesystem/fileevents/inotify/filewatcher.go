@@ -30,6 +30,10 @@ var combinedEvents = []combinedEvent{
 	{[]notify.Event{notify.InDelete, notify.InCloseWrite}, 1},
 	// MODIFY + DELETE => NONE
 	{[]notify.Event{notify.InCloseWrite, notify.InDelete}, -1},
+	// MOVE + MODIFY => MOVE
+	{[]notify.Event{notify.InMovedTo, notify.InCloseWrite}, 0},
+	// MODIFY + MOVE => MOVE
+	{[]notify.Event{notify.InCloseWrite, notify.InMovedTo}, 1},
 }
 
 type notifyEvents []notify.EventInfo
@@ -193,12 +197,27 @@ func (w *FileWatcher) sendUpdate(event *fileevents.FileEvent) {
 	// Replace the full path with the relative path for the signaling upstream
 	event.Path = relativePath
 
+	if len(event.OldPath) != 0 {
+		// Do the same for event.OldPath
+		relativePath, err = filepath.Rel(w.dir, event.OldPath)
+		if err != nil {
+			logrus.Errorf("FileWatcher: Error occurred when computing relative path between: %s and %s: %v", w.dir, event.OldPath, err)
+			return
+		}
+		// Replace the full path with the relative path for the signaling upstream
+		event.OldPath = relativePath
+	}
+
 	if w.shouldSuspendEvent(event.Path) {
 		log.Debugf("FileWatcher: Skipping suspended event %s for path: %q", event.Type, event.Path)
 		return // Skip the suspended event
 	}
+	if event.Type == fileevents.FileEventMove {
+		log.Debugf("FileWatcher: Sending update: %s: %q -> %q", event.Type, event.OldPath, event.Path)
+	} else {
+		log.Debugf("FileWatcher: Sending update: %s -> %q", event.Type, event.Path)
+	}
 
-	log.Debugf("FileWatcher: Sending update: %s -> %q", event.Type, event.Path)
 	w.outbound <- event
 }
 
@@ -342,8 +361,8 @@ func (w *FileWatcher) move(event notify.EventInfo) (moveUpdate *fileevents.FileE
 		sourcePath, destPath = destPath, sourcePath
 		fallthrough
 	case notify.InMovedTo:
-		cache.cancel()                                                                     // Cancel dispatching the cache's incomplete move
-		moveUpdate = &fileevents.FileEvent{Path: destPath, Type: fileevents.FileEventMove} // Register an internal, complete move instead
+		cache.cancel()                                                                                          // Cancel dispatching the cache's incomplete move
+		moveUpdate = &fileevents.FileEvent{Path: destPath, OldPath: sourcePath, Type: fileevents.FileEventMove} // Register an internal, complete move instead
 		log.Tracef("FileWatcher: Detected move: %q -> %q", sourcePath, destPath)
 	}
 
@@ -407,7 +426,7 @@ func (c *combinedEvent) match(events notifyEvents) (notify.EventInfo, bool) {
 		}
 	}
 
-	if c.output > 0 {
+	if c.output >= 0 {
 		return events[c.output], true
 	}
 

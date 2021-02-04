@@ -30,6 +30,9 @@ func (e FileEventType) String() string {
 type FileEvent struct {
 	Path string
 	Type FileEventType
+
+	// OldPath is non-empty only when Type == FileEventMove.
+	OldPath string
 }
 
 // FileEventStream is a channel of FileEvents
