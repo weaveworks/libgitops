@@ -16,7 +16,7 @@ type defaulter struct {
 	LockedScheme
 }
 
-func (d *defaulter) SchemeLock() LockedScheme {
+func (d *defaulter) GetLockedScheme() LockedScheme {
 	return d.LockedScheme
 }
 

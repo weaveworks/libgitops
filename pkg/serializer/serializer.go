@@ -63,7 +63,7 @@ type Serializer interface {
 	// SchemeLock exposes the underlying LockedScheme.
 	// A Scheme provides access to the underlying runtime.Scheme, may be used for low-level access to
 	// the "type universe" and advanced conversion/defaulting features.
-	SchemeLock() LockedScheme
+	GetLockedScheme() LockedScheme
 
 	// CodecFactory provides access to the underlying CodecFactory, may be used if low-level access
 	// is needed for encoding and decoding.
@@ -85,7 +85,7 @@ type Encoder interface {
 	EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv schema.GroupVersion) error
 
 	// SchemeLock exposes the underlying LockedScheme
-	SchemeLock() LockedScheme
+	GetLockedScheme() LockedScheme
 
 	// CodecFactory exposes the underlying CodecFactory
 	CodecFactory() *k8sserializer.CodecFactory
@@ -149,7 +149,7 @@ type Decoder interface {
 	DecodeAll(fr FrameReader) ([]runtime.Object, error)
 
 	// SchemeLock exposes the underlying LockedScheme
-	SchemeLock() LockedScheme
+	GetLockedScheme() LockedScheme
 }
 
 // Converter is an interface that allows access to object conversion capabilities
@@ -171,7 +171,7 @@ type Converter interface {
 	ConvertToHub(in runtime.Object) (runtime.Object, error)
 
 	// SchemeLock exposes the underlying LockedScheme
-	SchemeLock() LockedScheme
+	GetLockedScheme() LockedScheme
 }
 
 // Defaulter is a high-level interface for accessing defaulting functions in a scheme
@@ -189,7 +189,7 @@ type Defaulter interface {
 	NewDefaultedObject(gvk schema.GroupVersionKind) (runtime.Object, error)
 
 	// SchemeLock exposes the underlying LockedScheme
-	SchemeLock() LockedScheme
+	GetLockedScheme() LockedScheme
 }
 
 // NewSerializer constructs a new serializer based on a scheme, and optionally a codecfactory
@@ -226,7 +226,7 @@ type serializer struct {
 	patcher   Patcher
 }
 
-func (s *serializer) SchemeLock() LockedScheme {
+func (s *serializer) GetLockedScheme() LockedScheme {
 	return s.LockedScheme
 }
 

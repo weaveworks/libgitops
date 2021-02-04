@@ -117,7 +117,7 @@ func NewGeneric(
 	}
 	return &Generic{
 		// It shouldn't matter if we use the encoder's or decoder's SchemeLock
-		LockedScheme: encoder.SchemeLock(),
+		LockedScheme: encoder.GetLockedScheme(),
 		encoder:      encoder,
 		decoder:      decoder,
 

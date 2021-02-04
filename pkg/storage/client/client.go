@@ -216,7 +216,7 @@ func (c *Generic) DeleteAllOf(ctx context.Context, obj Object, opts ...DeleteAll
 
 // Scheme returns the scheme this client is using.
 func (c *Generic) Scheme() *kruntime.Scheme {
-	return c.Backend().Encoder().SchemeLock().Scheme()
+	return c.Backend().Encoder().GetLockedScheme().Scheme()
 }
 
 // RESTMapper returns the rest this client is using. For now, this returns nil, so don't use.

@@ -42,7 +42,7 @@ type decoder struct {
 	opts    DecodeOptions
 }
 
-func (d *decoder) SchemeLock() LockedScheme {
+func (d *decoder) GetLockedScheme() LockedScheme {
 	return d.LockedScheme
 }
 

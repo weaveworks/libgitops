@@ -25,7 +25,7 @@ type encoder struct {
 	opts EncodeOptions
 }
 
-func (e *encoder) SchemeLock() LockedScheme {
+func (e *encoder) GetLockedScheme() LockedScheme {
 	return e.LockedScheme
 }
 

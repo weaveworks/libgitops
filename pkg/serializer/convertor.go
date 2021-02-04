@@ -34,7 +34,7 @@ type converter struct {
 	convertor *objectConvertor
 }
 
-func (c *converter) SchemeLock() LockedScheme {
+func (c *converter) GetLockedScheme() LockedScheme {
 	return c.LockedScheme
 }
 

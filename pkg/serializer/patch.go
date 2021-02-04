@@ -46,7 +46,7 @@ type Patcher interface {
 func NewPatcher(encoder Encoder, decoder Decoder) Patcher {
 	// It shouldn't matter if we use the LockedScheme from the encoder or decoder
 	// TODO: Does this work with pretty encoders?
-	return &patcher{encoder.SchemeLock(), encoder, decoder}
+	return &patcher{encoder.GetLockedScheme(), encoder, decoder}
 }
 
 type patcher struct {
