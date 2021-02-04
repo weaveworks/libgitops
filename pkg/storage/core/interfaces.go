@@ -41,18 +41,11 @@ type ObjectID interface {
 	GroupVersionKind() GroupVersionKind
 }
 
-// VersionRef is an interface that describes a reference to a specific version
+// VersionRef is an interface that describes a reference to a specific version (for now; branch)
 // of Objects in a Storage or Client.
 type VersionRef interface {
-	// String returns the commit or branch name.
-	String() string
-	// IsWritable determines if the VersionRef points to such a state where it
-	// is possible to write on top of it, i.e. as in the case of a Git branch.
-	//
-	// A specific Git commit, however, isn't considered writable, as it points
-	// to a specific point in time that can't just be rewritten, (assuming this
-	// library only is additive, which it is).
-	IsWritable() bool
+	// Branch returns the branch name.
+	Branch() string
 	// IsZeroValue determines if this VersionRef is the "zero value", which means
 	// that the caller should figure out how to handle that the user did not
 	// give specific opinions of what version of the Object to get.
