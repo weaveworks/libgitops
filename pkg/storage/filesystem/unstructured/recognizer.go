@@ -60,7 +60,7 @@ func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr serializer.FrameRe
 		if metaObj.Name == "" {
 			return nil, fmt.Errorf(".metadata.name field must not be empty")
 		}
-		if !r.AllowUnrecognized && !r.Decoder.SchemeLock().Scheme().Recognizes(gvk) {
+		if !r.AllowUnrecognized && !r.Decoder.GetLockedScheme().Scheme().Recognizes(gvk) {
 			return nil, fmt.Errorf("GroupVersionKind %v not recognized by the scheme", gvk)
 		}
 
