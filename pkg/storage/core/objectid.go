@@ -36,6 +36,7 @@ type objectID struct {
 	version string
 }
 
+func (o objectID) WithoutVersion() UnversionedObjectID       { return o.unversionedObjectID }
 func (o objectID) GroupVersionKind() schema.GroupVersionKind { return o.gk.WithVersion(o.version) }
 func (o objectID) String() string {
 	if o.key.Namespace == "" {

@@ -38,6 +38,9 @@ type UnversionedObjectID interface {
 type ObjectID interface {
 	UnversionedObjectID
 
+	// WithoutVersion unwraps the underlying UnversionedObjectID; so it can
+	// be used for e.g. equality (e.g. as a map key) operations.
+	WithoutVersion() UnversionedObjectID
 	GroupVersionKind() GroupVersionKind
 }
 
