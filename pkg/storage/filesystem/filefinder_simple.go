@@ -190,8 +190,8 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 	if err != nil {
 		return nil, err
 	}
-	// Map the names to UnversionedObjectIDs
-	ids := make([]core.UnversionedObjectID, 0, len(entries))
+	// Map the names to UnversionedObjectIDs. We already know how many entries.
+	ids := core.NewUnversionedObjectIDSetSized(len(entries))
 	for _, entry := range entries {
 		// Loop through all entries, and make sure they are sanitized .metadata.name's
 		if f.opts.SubDirectoryFileName != "" {
@@ -211,9 +211,9 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 			entry = strings.TrimSuffix(entry, ext)
 		}
 		// If we got this far, add the key to the list
-		ids = append(ids, core.NewUnversionedObjectID(gk, core.ObjectKey{Name: entry, Namespace: namespace}))
+		ids.Insert(core.NewUnversionedObjectID(gk, core.ObjectKey{Name: entry, Namespace: namespace}))
 	}
-	return core.NewUnversionedObjectIDSet(ids...), nil
+	return ids, nil
 }
 
 func readDir(ctx context.Context, fs Filesystem, dir string) ([]string, error) {

@@ -33,12 +33,13 @@ type KubeObjectRecognizer struct {
 	AllowDuplicates bool
 }
 
-func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr serializer.FrameReader) (core.ObjectIDSet, error) {
+func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr serializer.FrameReader) ([]core.ObjectID, error) {
 	if r.Decoder == nil {
 		return nil, errors.New("programmer error: KubeObjectRecognizer.Decoder is nil")
 	}
-	ids := core.NewObjectIDSet()
 
+	ids := []core.ObjectID{}
+	seen := map[core.ObjectID]struct{}{}
 	for {
 		metaObj := &metav1.PartialObjectMetadata{}
 		err := r.Decoder.DecodeInto(fr, metaObj)
@@ -66,11 +67,16 @@ func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr serializer.FrameRe
 
 		// Create the ObjectID
 		id := core.NewObjectID(metaObj.GroupVersionKind(), core.ObjectKeyFromMetav1Object(metaObj))
-		// Insert it into the set; but error if AllowDuplicates==false and it already existed.
-		// Important: As InsertUnique mutates ids, it must be the first if case
-		if !ids.InsertUnique(id) && !r.AllowDuplicates {
+		// Check if this has been seen before
+		_, idSeen := seen[id]
+		// If this ID has been seen before, but duplicates are disallowed, error
+		if idSeen && !r.AllowDuplicates {
 			return nil, fmt.Errorf("invalid file: two Objects with the same ID: %s", id)
 		}
+		// Add the ID to the list
+		ids = append(ids, id)
+		// Now this ID has been seen
+		seen[id] = struct{}{}
 	}
 
 	return ids, nil

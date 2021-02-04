@@ -96,7 +96,7 @@ func (c *Generic) List(ctx context.Context, list ObjectList, opts ...ListOption)
 		if err != nil {
 			return err
 		}
-		allIDs.Insert(ids.List()...)
+		allIDs.InsertSet(ids)
 	}
 
 	// Populate objs through the given (non-buffered) channel
@@ -250,9 +250,10 @@ func createUnstructuredObject(gvk core.GroupVersionKind) newObjectFunc {
 
 func (c *Generic) processKeys(ctx context.Context, ids core.UnversionedObjectIDSet, filterOpts *filter.FilterOptions, fn newObjectFunc, output chan Object) error {
 	goroutines := []func() error{}
-	for _, id := range ids.List() {
+	_ = ids.ForEach(func(id core.UnversionedObjectID) error {
 		goroutines = append(goroutines, c.processKey(ctx, id, filterOpts, fn, output))
-	}
+		return nil
+	})
 
 	defer close(output)
 
