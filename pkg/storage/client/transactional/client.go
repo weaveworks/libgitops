@@ -78,15 +78,8 @@ func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...clie
 }
 
 func (c *Generic) lockForReading(ctx context.Context, operation func() error) error {
-	ref := core.GetVersionRef(ctx)
-	if !ref.IsWritable() {
-		// Never block reads for read-only VersionRefs. We know nobody can change
-		// them during the read operation, so they should be race condition-free.
-		return operation()
-	}
-	// If the VersionRef is writable; treat it as a branch and lock it to avoid
-	// race conditions.
-	return c.lockAndReadBranch(ref.String(), operation)
+	// Get the branch from the context, and lock it
+	return c.lockAndReadBranch(core.GetVersionRef(ctx).Branch(), operation)
 }
 
 func (c *Generic) lockAndReadBranch(branch string, callback func() error) error {
@@ -237,27 +230,12 @@ func (c *Generic) BranchTransaction(ctx context.Context, headBranch string, opts
 	return tx
 }
 
-func (c *Generic) validateCtx(ctx context.Context) (core.VersionRef, error) {
-	// Check so versionref is writable
-	ref := core.GetVersionRef(ctx)
-	if !ref.IsWritable() {
-		return nil, fmt.Errorf("must not give a writable VersionRef to (Branch)Transaction()")
-	}
-	// Just return its
-	return ref, nil
-}
-
 func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error) {
-	// Validate the versionref from the context
-	ref, err := c.validateCtx(ctx)
-	if err != nil {
-		return nil, err
-	}
 
 	// Parse options
 	o := defaultTxOptions().ApplyOptions(opts)
 
-	branch := ref.String()
+	branch := core.GetVersionRef(ctx).Branch()
 	info := TxInfo{
 		Base:    branch,
 		Head:    branch,
@@ -267,7 +245,7 @@ func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error)
 	ctxWithDeadline, cleanupFunc := c.initTx(ctx, info)
 
 	// Run pre-tx checks
-	err = c.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info)
+	err := c.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info)
 
 	return &txImpl{
 		&txCommon{
@@ -282,12 +260,7 @@ func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error)
 }
 
 func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts ...TxOption) (BranchTx, error) {
-	// Validate the versionref from the context
-	ref, err := c.validateCtx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	baseBranch := ref.String()
+	baseBranch := core.GetVersionRef(ctx).Branch()
 
 	// Append random bytes to the end of the head branch if it ends with a dash
 	if strings.HasSuffix(headBranch, "-") {
@@ -320,7 +293,7 @@ func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts
 	ctxWithDeadline, cleanupFunc := c.initTx(ctxWithHeadBranch, info)
 
 	// Run pre-tx checks and create the new branch
-	err = utilerrs.NewAggregate([]error{
+	err := utilerrs.NewAggregate([]error{
 		c.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info),
 		c.manager.CreateBranch(ctxWithDeadline, headBranch),
 	})

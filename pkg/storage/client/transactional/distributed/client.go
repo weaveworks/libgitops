@@ -71,12 +71,7 @@ func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...clie
 }
 
 func (c *Generic) readWhenPossible(ctx context.Context, operation func() error) error {
-	ref := core.GetVersionRef(ctx)
-	// If the ref is not writable, we don't have to worry about race conditions
-	if !ref.IsWritable() {
-		return operation()
-	}
-	branch := ref.String()
+	branch := c.branchFromCtx(ctx)
 
 	// Check if we need to do a pull before
 	if c.needsResync(branch, c.opts.CacheValidDuration) {
@@ -238,10 +233,8 @@ func (c *Generic) Remote() Remote {
 	return c.remote
 }
 
-// note: this must ONLY be called from such functions where it is guaranteed that the
-// ctx contains a branch versionref.
 func (c *Generic) branchFromCtx(ctx context.Context) string {
-	return core.GetVersionRef(ctx).String()
+	return core.GetVersionRef(ctx).Branch()
 }
 
 func (c *Generic) returnErr(err error) error {
