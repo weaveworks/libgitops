@@ -103,6 +103,21 @@ func (f *GenericFileFinder) ObjectsAt(ctx context.Context, path string) (core.Un
 	return ids.Copy(), nil
 }
 
+// ListGroupKinds returns all known GroupKinds by the implementation at that
+// time. The set might vary over time as data is created and deleted; and
+// should not be treated as an universal "what types could possibly exist",
+// but more generally, "what are the GroupKinds of the objects that currently
+// exist"? However, obviously, specific implementations might honor this
+// guideline differently. This might be used for introspection into the system.
+func (f *GenericFileFinder) ListGroupKinds(ctx context.Context) ([]core.GroupKind, error) {
+	m := f.versionedCache(ctx).raw()
+	gks := make([]core.GroupKind, len(m))
+	for gk := range m {
+		gks = append(gks, gk)
+	}
+	return gks, nil
+}
+
 // ListNamespaces lists the available namespaces for the given GroupKind.
 // This function shall only be called for namespaced objects, it is up to
 // the caller to make sure they do not call this method for root-spaced

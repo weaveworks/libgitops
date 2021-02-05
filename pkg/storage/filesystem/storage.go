@@ -129,6 +129,17 @@ func (r *Generic) Delete(ctx context.Context, id core.UnversionedObjectID) error
 	return r.FileFinder().Filesystem().Remove(ctx, p)
 }
 
+// ListGroupKinds returns all known GroupKinds by the implementation at that
+// time. The set might vary over time as data is created and deleted; and
+// should not be treated as an universal "what types could possibly exist",
+// but more generally, "what are the GroupKinds of the objects that currently
+// exist"? However, obviously, specific implementations might honor this
+// guideline differently. This might be used for introspection into the system.
+func (r *Generic) ListGroupKinds(ctx context.Context) ([]core.GroupKind, error) {
+	// Just use the underlying filefinder
+	return r.FileFinder().ListGroupKinds(ctx)
+}
+
 // ListNamespaces lists the available namespaces for the given GroupKind.
 // This function shall only be called for namespaced objects, it is up to
 // the caller to make sure they do not call this method for root-spaced

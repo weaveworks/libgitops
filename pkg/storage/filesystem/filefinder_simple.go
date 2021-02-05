@@ -155,6 +155,36 @@ func (f *SimpleFileFinder) ext() (string, error) {
 	return f.resolver.ExtensionForContentType(f.contentTyper.ContentType)
 }
 
+// ListGroupKinds returns all known GroupKinds by the implementation at that
+// time. The set might vary over time as data is created and deleted; and
+// should not be treated as an universal "what types could possibly exist",
+// but more generally, "what are the GroupKinds of the objects that currently
+// exist"? However, obviously, specific implementations might honor this
+// guideline differently. This might be used for introspection into the system.
+func (f *SimpleFileFinder) ListGroupKinds(ctx context.Context) ([]core.GroupKind, error) {
+	if f.opts.DisableGroupDirectory {
+		return nil, fmt.Errorf("cannot resolve GroupKinds when group directories are disabled: %w", core.ErrInvalidParameter)
+	}
+
+	// List groups at top-level
+	groups, err := readDir(ctx, f.fs, "")
+	if err != nil {
+		return nil, err
+	}
+	// For all groups; also list all kinds, and add to the following list
+	groupKinds := []core.GroupKind{}
+	for _, group := range groups {
+		kinds, err := readDir(ctx, f.fs, group)
+		if err != nil {
+			return nil, err
+		}
+		for _, kind := range kinds {
+			groupKinds = append(groupKinds, core.GroupKind{Group: group, Kind: kind})
+		}
+	}
+	return groupKinds, nil
+}
+
 // ListNamespaces lists the available namespaces for the given GroupKind.
 // This function shall only be called for namespaced objects, it is up to
 // the caller to make sure they do not call this method for root-spaced

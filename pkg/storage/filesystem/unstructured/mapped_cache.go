@@ -26,6 +26,8 @@ type objectIDCache interface {
 type versionRef interface {
 	// looks up the groupKind interface for the given key
 	groupKind(gk core.GroupKind) groupKind
+	// raw returns the underlying map used; can be used for listing
+	raw() map[core.GroupKind]groupKind
 	// shorthand to look up the interfaces all the way to the
 	// name interface all at once for the given ID
 	getID(id core.UnversionedObjectID) name
@@ -114,6 +116,13 @@ func (b *versionRefImpl) groupKind(gk core.GroupKind) groupKind {
 		b.gkToNamespace[gk] = val
 	}
 	return val
+}
+
+func (b *versionRefImpl) raw() map[core.GroupKind]groupKind {
+	if b.gkToNamespace == nil {
+		b.gkToNamespace = make(map[core.GroupKind]groupKind)
+	}
+	return b.gkToNamespace
 }
 
 func (b *versionRefImpl) getID(id core.UnversionedObjectID) name {
