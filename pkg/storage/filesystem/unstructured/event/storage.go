@@ -62,11 +62,7 @@ func NewManifest(
 // NewGeneric is an extended Storage implementation, which
 // together with the provided ObjectRecognizer and FileEventsEmitter listens for
 // file events, keeps the mappings of the unstructured.Storage's unstructured.FileFinder
-// in sync (s must use the mapped variant), and sends high-level ObjectEvents
-// upstream.
-//
-// Note: This WatchStorage only works for one-frame files (i.e. only one YAML document
-// per file is supported).
+// in sync, and sends high-level ObjectEvents upstream.
 func NewGeneric(
 	s unstructured.Storage,
 	emitter fileevents.Emitter,
@@ -98,13 +94,13 @@ type GenericStorageOptions struct {
 // Generic implements unstructuredevent.Storage.
 var _ Storage = &Generic{}
 
-// Generic is an extended raw.Storage implementation, which provides a watcher
-// for watching changes in the directory managed by the embedded Storage's RawStorage.
-// If the RawStorage is a MappedRawStorage instance, it's mappings will automatically
-// be updated by the WatchStorage. Update events are sent to the given event stream.
-// Note: This WatchStorage only works for one-frame files (i.e. only one YAML document
-// per file is supported).
-// TODO: Update description
+// Generic is an extended Storage implementation, which
+// together with the provided ObjectRecognizer and FileEventsEmitter listens for
+// file events, keeps the mappings of the unstructured.Storage's unstructured.FileFinder
+// in sync, and sends high-level ObjectEvents upstream.
+//
+// This implementation does not support different VersionRefs, but always stays on
+// the "zero value" "" branch.
 type Generic struct {
 	unstructured.Storage
 	// the filesystem events emitter
@@ -147,29 +143,38 @@ func (s *Generic) WatchForObjectEvents(ctx context.Context, into event.ObjectEve
 	// at all before events start happening, the reporting might not work as it should
 	if s.opts.SyncAtStart {
 		// Disregard the changed files at Sync.
-		if _, err := s.Sync(ctx); err != nil {
+		if _, _, err := s.Sync(ctx); err != nil {
 			return err
 		}
 	}
 	return nil // all ok
 }
 
-func (s *Generic) Sync(ctx context.Context) ([]unstructured.ChecksumPathID, error) {
+// Sync extends the underlying unstructured.Storage.Sync(), but optionally also
+// sends special "SYNC" and "ERROR" events to the returned "successful" and "duplicates"
+// sets, respectively.
+func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.UnversionedObjectIDSet, err error) {
 	// Sync the underlying UnstructuredStorage, and see what files had changed since last sync
-	changedObjects, err := s.Storage.Sync(ctx)
+	successful, duplicates, err = s.Storage.Sync(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Send special "sync" events for each of the changed objects, if configured
+	// Send special "sync" or "error" events for each of the changed objects, if configured
 	if s.opts.EmitSyncEvent {
-		for _, changedObject := range changedObjects {
+		_ = successful.ForEach(func(id core.UnversionedObjectID) error {
 			// Send a special "sync" event for this ObjectID to the events channel
-			s.sendEvent(event.ObjectEventSync, changedObject.ID)
-		}
+			s.sendEvent(event.ObjectEventSync, id)
+			return nil
+		})
+		_ = duplicates.ForEach(func(id core.UnversionedObjectID) error {
+			// Send an error upstream for the duplicate
+			s.sendError(id, fmt.Errorf("%w: %s", unstructured.ErrTrackingDuplicate, id))
+			return nil
+		})
 	}
 
-	return changedObjects, nil
+	return
 }
 
 // Write writes the given content to the resource indicated by the ID.
@@ -260,63 +265,67 @@ func (s *Generic) monitorFunc() error {
 }
 
 func (s *Generic) handleDelete(ctx context.Context, ev *fileevents.FileEvent) error {
-	// The object is deleted, so we need to do a reverse-lookup of what kind of object
-	// was there earlier, based on the path. This assumes that the filefinder organizes
-	// the known objects in such a way that it is able to do the reverse-lookup. For
-	// mapped FileFinders, by this point the path should still be in the local cache,
-	// which should make us able to get the ID before deleted from the cache.
-	objectID, err := unstructured.SingleObjectAt(ctx, s.UnstructuredFileFinder(), ev.Path)
-	if err != nil {
-		return fmt.Errorf("failed to reverse lookup ID for deleted file %q: %w", ev.Path, err)
-	}
-
-	// Remove the mapping from the FileFinder cache for this ID as it's now deleted
-	s.deleteMapping(ctx, objectID)
-	// Send the delete event to the channel
-	s.sendEvent(event.ObjectEventDelete, objectID)
-	return nil
+	// Delete the given path from the FileFinder; loop through the deleted objects
+	return s.UnstructuredFileFinder().DeleteMapping(ctx, ev.Path).ForEach(func(id core.UnversionedObjectID) error {
+		// Send the delete event to the channel
+		s.sendEvent(event.ObjectEventDelete, id)
+		return nil
+	})
 }
 
 func (s *Generic) handleModifyMove(ctx context.Context, ev *fileevents.FileEvent) error {
-	// Read and recognize the file
-	versionedID, err := unstructured.ReadAndRecognizeFile(
-		ctx,
-		s.UnstructuredFileFinder().Filesystem(),
-		s.UnstructuredFileFinder().ContentTyper(),
-		s.ObjectRecognizer(),
-		ev.Path,
-	)
+	fileFinder := s.UnstructuredFileFinder()
+
+	// If the file was moved, move the cached mapping(s) too
+	if ev.Type == fileevents.FileEventMove {
+		// There's no need to check if this move actually was performed; as
+		// if OldPath did not exist previously, the code below will just treat
+		// it as a Create.
+		_ = fileFinder.MoveFile(ctx, ev.OldPath, ev.Path)
+	}
+
+	// Recognize the contents of the file
+	idSet, cp, alreadyCached, err := unstructured.RecognizeIDsInFile(ctx, fileFinder, s.ObjectRecognizer(), ev.Path)
 	if err != nil {
 		return err
 	}
-
-	// If the file was just moved around, just overwrite the earlier mapping
-	if ev.Type == fileevents.FileEventMove {
-		// This assumes that the file content does not change in the move
-		// operation. TODO: document this as a requirement for the Emitter.
-		s.setMapping(ctx, versionedID, ev.Path)
-
-		// Internal move events are a no-op
+	// If the file is already up-to-date as per the checksum, we're all fine
+	if alreadyCached {
 		return nil
 	}
 
-	// Determine if this object already existed in the fileFinder's cache,
-	// in order to find out if the object was created or modified (default).
-	// TODO: In the future, maybe support multiple files pointing to the same
-	// ObjectID? Case in point here is e.g. a Modify event for a known path that
-	// changes the underlying ObjectID.
-	objectEvent := event.ObjectEventUpdate
-	// Set the mapping if it didn't exist before; assume this is a Create event
-	if _, ok := s.UnstructuredFileFinder().GetMapping(ctx, versionedID); !ok {
-		// This is what actually determines if an Object is created,
-		// so update the event to update.ObjectEventCreate here
-		objectEvent = event.ObjectEventCreate
-	}
-	// Update the mapping between this object and path (this updates
-	// the checksum underneath too).
-	s.setMapping(ctx, versionedID, ev.Path)
-	// Send the event to the channel
-	s.sendEvent(objectEvent, versionedID)
+	// Store this new mapping in the cache
+	added, duplicates, removed := fileFinder.SetMapping(ctx, *cp, idSet)
+
+	// Send added events
+	_ = added.ForEach(func(id core.UnversionedObjectID) error {
+		// Send a create event to the channel
+		s.sendEvent(event.ObjectEventCreate, id)
+		return nil
+	})
+	// Send modify events. Do not mutate idSet unnecessarily.
+	_ = idSet.Copy().
+		DeleteSet(added).
+		DeleteSet(removed).
+		DeleteSet(duplicates).
+		ForEach(func(id core.UnversionedObjectID) error {
+			// Send a update event to the channel
+			s.sendEvent(event.ObjectEventUpdate, id)
+			return nil
+		})
+	// Send removed events
+	_ = removed.ForEach(func(id core.UnversionedObjectID) error {
+		// Send a delete event to the channel
+		s.sendEvent(event.ObjectEventDelete, id)
+		return nil
+	})
+	// Send duplicate error events
+	_ = duplicates.ForEach(func(id core.UnversionedObjectID) error {
+		// Send an error event to the channel
+		s.sendError(id, fmt.Errorf("%w: %q, %s", unstructured.ErrTrackingDuplicate, ev.Path, id))
+		return nil
+	})
+
 	return nil
 }
 
@@ -328,24 +337,11 @@ func (s *Generic) sendEvent(eventType event.ObjectEventType, id core.Unversioned
 	}
 }
 
-// setMapping registers a mapping between the given object and the specified path, if raw is a
-// MappedRawStorage. If a given mapping already exists between this object and some path, it
-// will be overridden with the specified new path
-func (s *Generic) setMapping(ctx context.Context, id core.UnversionedObjectID, path string) {
-	// Get the current checksum of the new file
-	checksum, err := s.UnstructuredFileFinder().Filesystem().Checksum(ctx, path)
-	if err != nil {
-		logrus.Errorf("Unexpected error when getting checksum of file %q: %v", path, err)
-		return
+func (s *Generic) sendError(id core.UnversionedObjectID, err error) {
+	logrus.Tracef("Generic: Sending error event for %s: %v", id, err)
+	s.outbound <- &event.ObjectEvent{
+		ID:    id,
+		Type:  event.ObjectEventError,
+		Error: err,
 	}
-	// Register the current state in the cache
-	s.UnstructuredFileFinder().SetMapping(ctx, id, unstructured.ChecksumPath{
-		Path:     path,
-		Checksum: checksum,
-	})
-}
-
-// deleteMapping removes a mapping a file that doesn't exist
-func (s *Generic) deleteMapping(ctx context.Context, id core.UnversionedObjectID) {
-	s.UnstructuredFileFinder().DeleteMapping(ctx, id)
 }

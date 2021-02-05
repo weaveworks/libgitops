@@ -12,15 +12,14 @@ import (
 // of Storage. It uses an ObjectRecognizer to recognize
 // otherwise unknown objects in unstructured files.
 // The Storage must use a unstructured.FileFinder underneath.
-//
-// Multiple Objects in the same file, or multiple Objects with the
-// same ID in multiple files are not supported.
 type Storage interface {
 	filesystem.Storage
 
-	// Sync synchronizes the current state of the filesystem with the
-	// cached mappings in the unstructured.FileFinder.
-	Sync(ctx context.Context) ([]ChecksumPathID, error)
+	// Sync synchronizes the current state of the filesystem, and overwrites all
+	// previously cached mappings in the unstructured.FileFinder. "successful"
+	// mappings returned are those that are observed to be distinct. "duplicates"
+	// contains such IDs that weren't distinct; but existed in multiple files.
+	Sync(ctx context.Context) (successful, duplicates core.UnversionedObjectIDSet, err error)
 
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
 	ObjectRecognizer() ObjectRecognizer
@@ -34,28 +33,50 @@ type Storage interface {
 type ObjectRecognizer interface {
 	// RecognizeObjectIDs returns the ObjectIDs present in the file with the given name,
 	// content type and content (in the FrameReader).
-	RecognizeObjectIDs(fileName string, fr serializer.FrameReader) (core.ObjectIDSet, error)
+	RecognizeObjectIDs(fileName string, fr serializer.FrameReader) ([]core.ObjectID, error)
 }
 
 // FileFinder is an extension to filesystem.FileFinder that allows it to have an internal
-// cache with mappings between UnversionedObjectID and a ChecksumPath. This allows
+// cache with mappings between an UnversionedObjectID and a ChecksumPath. This allows
 // higher-order interfaces to manage Objects in files in an unorganized directory
 // (e.g. a Git repo).
 //
-// Multiple Objects in the same file, or multiple Objects with the
-// same ID in multiple files are not supported.
+// This implementation supports multiple IDs per file, and can deal with duplicate IDs across
+// distinct file paths. This implementation supports looking at the context for VersionRef info.
 type FileFinder interface {
 	filesystem.FileFinder
 
-	// GetMapping retrieves a mapping in the system.
-	GetMapping(ctx context.Context, id core.UnversionedObjectID) (ChecksumPath, bool)
-	// SetMapping binds an ID to a physical file path. This operation overwrites
-	// any previous mapping for id.
-	SetMapping(ctx context.Context, id core.UnversionedObjectID, checksumPath ChecksumPath)
-	// ResetMappings replaces all mappings at once to the ones in m.
-	ResetMappings(ctx context.Context, m map[core.UnversionedObjectID]ChecksumPath)
-	// DeleteMapping removes the mapping for the given id.
-	DeleteMapping(ctx context.Context, id core.UnversionedObjectID)
+	// SetMapping sets all the IDs that are stored in this path, for the given, updated checksum.
+	// ids must be the exact set of ObjectIDs that are observed at the given path; the previously-stored
+	// list will be overwritten. The new checksum will be recorded in the system for this path.
+	// The "added" set will record what IDs didn't exist before and were added. "duplicates" are IDs that
+	// were technically added, but already existed, mapped to other files in the system. Other files'
+	// mappings aren't removed in this function, but no new duplicates are added to this path.
+	// Instead such duplicates are returned instead. "removed" contains the set of IDs that existed
+	// previously, but were now removed.
+	// If ids is an empty set; all mappings to the given path will be removed, and "removed" will contain
+	// all prior mappings. (In fact, this is what DeleteMapping does.)
+	//
+	// ID sets are computed as follows (none of the sets overlap with each other):
+	//
+	// {ids} => {added} + {duplicates} + {removed} + {modified}
+	//
+	// {oldIDs} - {removed} + {added} => {newIDs}
+	SetMapping(ctx context.Context, state ChecksumPath, ids core.UnversionedObjectIDSet) (added, duplicates, removed core.UnversionedObjectIDSet)
+
+	// ResetMappings removes all prior data and sets all given mappings at once.
+	// Duplicates are NOT stored in the cache at all for this operation, instead they are returned.
+	ResetMappings(ctx context.Context, mappings map[ChecksumPath]core.UnversionedObjectIDSet) (duplicates core.UnversionedObjectIDSet)
+
+	// DeleteMapping removes a mapping for a given path to a file. Previously-stored IDs are returned.
+	DeleteMapping(ctx context.Context, path string) (removed core.UnversionedObjectIDSet)
+
+	// ChecksumForPath retrieves the latest known checksum for the given path.
+	ChecksumForPath(ctx context.Context, path string) (string, bool)
+
+	// MoveFile moves an internal mapping from oldPath to newPath. moved == true if the oldPath
+	// existed and hence the move was performed.
+	MoveFile(ctx context.Context, oldPath, newPath string) (moved bool)
 }
 
 // ChecksumPath is a tuple of a given Checksum and relative file Path,
@@ -75,9 +96,4 @@ type ChecksumPath struct {
 	Checksum string
 	// Path to the file, relative to filesystem.Filesystem.RootDirectory().
 	Path string
-}
-
-type ChecksumPathID struct {
-	ChecksumPath
-	ID core.ObjectID
 }

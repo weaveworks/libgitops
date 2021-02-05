@@ -17,6 +17,7 @@ const (
 	ObjectEventUpdate                        // 2
 	ObjectEventDelete                        // 3
 	ObjectEventSync                          // 4
+	ObjectEventError                         // 5
 )
 
 func (o ObjectEventType) String() string {
@@ -31,6 +32,8 @@ func (o ObjectEventType) String() string {
 		return "DELETE"
 	case 4:
 		return "SYNC"
+	case 5:
+		return "ERROR"
 	}
 
 	// Should never happen
@@ -42,6 +45,9 @@ func (o ObjectEventType) String() string {
 type ObjectEvent struct {
 	ID   core.UnversionedObjectID
 	Type ObjectEventType
+	// Error is only non-nil if Type == ObjectEventError. The receiver
+	// must check/respect the error if set.
+	Error error
 }
 
 // ObjectEventStream is a channel of ObjectEvents

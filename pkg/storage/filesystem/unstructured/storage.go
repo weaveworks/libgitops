@@ -11,9 +11,6 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
 
-// ErrOnlySingleFrameSupported tells that only single frame-files are supported so far for the unstructured Storage.
-var ErrOnlySingleFrameSupported = errors.New("file contains multiple Objects; for now only single-frame files are supported")
-
 func NewGeneric(storage filesystem.Storage, recognizer ObjectRecognizer, pathExcluder filesystem.PathExcluder) (Storage, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
@@ -40,71 +37,54 @@ type Generic struct {
 	pathExcluder filesystem.PathExcluder
 }
 
-// Sync synchronizes the current state of the filesystem with the
-// cached mappings in the underlying unstructured.FileFinder.
-func (s *Generic) Sync(ctx context.Context) ([]ChecksumPathID, error) {
+// Sync synchronizes the current state of the filesystem, and overwrites all
+// previously cached mappings in the unstructured.FileFinder. "successful"
+// mappings returned are those that are observed to be distinct. "duplicates"
+// contains such IDs that weren't distinct; but existed in multiple files.
+func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.UnversionedObjectIDSet, err error) {
 	fileFinder := s.UnstructuredFileFinder()
+	fs := fileFinder.Filesystem()
+	contentTyper := fileFinder.ContentTyper()
 
 	// List all valid files in the fs
 	files, err := filesystem.ListValidFilesInFilesystem(
 		ctx,
-		fileFinder.Filesystem(),
-		fileFinder.ContentTyper(),
+		fs,
+		contentTyper,
 		s.PathExcluder(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Send SYNC events for all files (and fill the mappings
-	// of the unstructured.FileFinder) before starting to monitor changes
-	updatedFiles := make([]ChecksumPathID, 0, len(files))
+	// Walk all files and fill the mappings of the unstructured.FileFinder.
+	allMappings := make(map[ChecksumPath]core.UnversionedObjectIDSet)
+	objectCount := 0
+
 	for _, filePath := range files {
-		// Get the current checksum of the file
-		currentChecksum, err := fileFinder.Filesystem().Checksum(ctx, filePath)
+		// Recognize the IDs in all the given file
+		idSet, cp, _, err := RecognizeIDsInFile(ctx, fileFinder, s.ObjectRecognizer(), filePath)
 		if err != nil {
-			logrus.Errorf("Could not get checksum for file %q: %v", filePath, err)
+			logrus.Error(err)
 			continue
 		}
-
-		// If the given file already is tracked; i.e. has a mapping with a
-		// non-empty checksum, and the current checksum matches, we do not
-		// need to do anything.
-		if id, err := SingleObjectAt(ctx, fileFinder, filePath); err == nil {
-			if cp, ok := fileFinder.GetMapping(ctx, id); ok && len(cp.Checksum) != 0 {
-				if cp.Checksum == currentChecksum {
-					logrus.Tracef("Checksum for file %q is up-to-date: %q, skipping...", filePath, cp.Checksum)
-					continue
-				}
-			}
-		}
-
-		// Read and recognize the file
-		id, err := ReadAndRecognizeFile(
-			ctx,
-			fileFinder.Filesystem(),
-			fileFinder.ContentTyper(),
-			s.recognizer,
-			filePath,
-		)
-		if err != nil {
-			logrus.Warn(err)
-			continue
-		}
-
-		// Add a mapping between this object and path
-		cp := ChecksumPath{
-			Checksum: currentChecksum,
-			Path:     filePath,
-		}
-		fileFinder.SetMapping(ctx, id, cp)
-		// Add to the slice which we'll return
-		updatedFiles = append(updatedFiles, ChecksumPathID{
-			ChecksumPath: cp,
-			ID:           id,
-		})
+		objectCount += idSet.Len()
+		allMappings[*cp] = idSet
 	}
-	return updatedFiles, nil
+
+	// ResetMappings overwrites all data at once; so these
+	// mappings are now the "truth" about what's on disk
+	// Duplicate mappings are returned from ResetMappings
+	duplicates = fileFinder.ResetMappings(ctx, allMappings)
+	// Create an empty set for the "successful" IDs
+	successful = core.NewUnversionedObjectIDSet()
+	// For each set of IDs; add them to the "successful" batch
+	for _, set := range allMappings {
+		successful.InsertSet(set)
+	}
+	// Remove the duplicates from the successful bucket
+	successful.DeleteSet(duplicates)
+	return
 }
 
 // ObjectRecognizer returns the underlying ObjectRecognizer used.
@@ -122,53 +102,58 @@ func (s *Generic) UnstructuredFileFinder() FileFinder {
 	return s.fileFinder
 }
 
-// ReadAndRecognizeFile reads the given file and its content type; and then recognizes it.
-// It only supports one ObjectID per file at the moment.
-func ReadAndRecognizeFile(
+// RecognizeIDsInFile reads the given file and its content type; and then recognizes it.
+// However, if the checksum is already up-to-date, the function returns directly, without
+// reading the file. In that case, the bool is true (in all other cases, false). The
+// ObjectIDSet and ChecksumPath are returned when err == nil.
+func RecognizeIDsInFile(
 	ctx context.Context,
-	fs filesystem.Filesystem,
-	contentTyper filesystem.ContentTyper,
+	fileFinder FileFinder,
 	recognizer ObjectRecognizer,
 	filePath string,
-) (core.ObjectID, error) {
+) (core.UnversionedObjectIDSet, *ChecksumPath, bool, error) {
+	fs := fileFinder.Filesystem()
+	contentTyper := fileFinder.ContentTyper()
+
+	// Get the current checksum of the file
+	currentChecksum, err := fs.Checksum(ctx, filePath)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("Could not get checksum for file %q: %v", filePath, err)
+	}
+	cp := &ChecksumPath{Path: filePath, Checksum: currentChecksum}
+
+	// Check the cached checksum
+	cachedChecksum, ok := fileFinder.ChecksumForPath(ctx, filePath)
+	if ok && cachedChecksum == currentChecksum {
+		// If the cache is up-to-date, we don't need to do anything
+		logrus.Tracef("Checksum for file %q is up-to-date: %q, skipping...", filePath, currentChecksum)
+		// Just get the IDs that are cached, and done.
+		idSet, err := fileFinder.ObjectsAt(ctx, filePath)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return idSet, cp, true, nil
+	}
+
 	// If the file is not known to the FileFinder yet, or if the checksum
 	// was empty, read the file, and recognize it.
 	content, err := fs.ReadFile(ctx, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("Could not read file %q: %v", filePath, err)
+		return nil, nil, false, fmt.Errorf("Could not read file %q: %v", filePath, err)
 	}
 	// Get the content type for this file so that we can read it properly
 	ct, err := contentTyper.ContentTypeForPath(ctx, fs, filePath)
 	if err != nil {
-		return nil, fmt.Errorf("Could not get content type for file %q: %v", filePath, err)
+		return nil, nil, false, fmt.Errorf("Could not get content type for file %q: %v", filePath, err)
 	}
 	// TODO: In the future this NewFrameReader should come from an interface, not
 	// directly from the hard-coded serializer package.
 	fr := serializer.NewFrameReader(ct, serializer.FromBytes(content))
 	// Recognize all IDs in the file
-	ids, err := recognizer.RecognizeObjectIDs(filePath, fr)
+	versionedIDs, err := recognizer.RecognizeObjectIDs(filePath, fr)
 	if err != nil {
-		return nil, fmt.Errorf("Could not recognize object IDs in %q: %v", filePath, err)
+		return nil, nil, false, fmt.Errorf("Could not recognize object IDs in %q: %v", filePath, err)
 	}
-	// For now; we only support single-frame files
-	// TODO: Change this.
-	if ids.Len() != 1 {
-		return nil, fmt.Errorf("%w: %q", ErrOnlySingleFrameSupported, filePath)
-	}
-	// Return that one ID
-	return ids.List()[0], nil
-}
-
-func SingleObjectAt(ctx context.Context, fileFinder filesystem.FileFinder, filePath string) (core.UnversionedObjectID, error) {
-	idSet, err := fileFinder.ObjectsAt(ctx, filePath)
-	if err != nil {
-		return nil, err
-	}
-	// For now; we only support single-frame files
-	// TODO: Change this.
-	if idSet.Len() != 1 {
-		return nil, fmt.Errorf("%w: %q", ErrOnlySingleFrameSupported, filePath)
-	}
-	// Return that one ID
-	return idSet.List()[0], nil
+	// Convert to an unversioned set
+	return core.UnversionedObjectIDSetFromVersionedSlice(versionedIDs), cp, false, nil
 }
