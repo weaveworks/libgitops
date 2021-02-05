@@ -320,10 +320,10 @@ func (b *Generic) write(ctx context.Context, id core.ObjectID, obj Object) error
 	}
 
 	var objBytes bytes.Buffer
-	// TODO: Work with any ContentType, not just JSON/YAML. Make a SingleFrameWriter
-	// that works for any ContentType, and just ever writes one doc (which is what we need)
-	err = b.encoder.EncodeForGroupVersion(serializer.NewFrameWriter(ct, &objBytes), obj, gv)
-	if err != nil {
+	// This FrameWriter works for any content type; and transparently writes to objBytes
+	fw := serializer.NewSingleFrameWriter(&objBytes, ct)
+	// The encoder is set to use the given ContentType through fw; and encodes obj.
+	if err := b.encoder.EncodeForGroupVersion(fw, obj, gv); err != nil {
 		return err
 	}
 
