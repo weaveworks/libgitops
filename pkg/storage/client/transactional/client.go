@@ -66,35 +66,38 @@ type txLock struct {
 }
 
 func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
-	return c.lockForReading(ctx, func() error {
+	return c.lockAndReadBranch(ctx, func() error {
 		return c.c.Get(ctx, key, obj)
 	})
 }
 
 func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	return c.lockForReading(ctx, func() error {
+	return c.lockAndReadBranch(ctx, func() error {
 		return c.c.List(ctx, list, opts...)
 	})
 }
 
-func (c *Generic) lockForReading(ctx context.Context, operation func() error) error {
-	// Get the branch from the context, and lock it
-	return c.lockAndReadBranch(core.GetVersionRef(ctx).Branch(), operation)
-}
-
-func (c *Generic) lockAndReadBranch(branch string, callback func() error) error {
-	// Use c.txsMu to guard reads and writes to the c.txs map
+func (c *Generic) getBranchLockInfo(branch string) *txLock {
+	// c.txsMu guards reads and writes to the c.txs map
 	c.txsMu.Lock()
+	defer c.txsMu.Unlock()
+
 	// Check if information about a transaction on this branch exists.
 	txState, ok := c.txs[branch]
-	if !ok {
-		// grow the txs map by one
-		c.txs[branch] = &txLock{
-			mu: &sync.RWMutex{},
-		}
-		txState = c.txs[branch]
+	if ok {
+		return txState
 	}
-	c.txsMu.Unlock()
+	// if not, grow the txs map by one and return it
+	c.txs[branch] = &txLock{
+		mu: &sync.RWMutex{},
+	}
+	return c.txs[branch]
+}
+
+func (c *Generic) lockAndReadBranch(ctx context.Context, callback func() error) error {
+	// Aquire the branch-specific lock
+	branch := core.GetVersionRef(ctx).Branch()
+	txState := c.getBranchLockInfo(branch)
 
 	// In the atomic mode, we lock the txLock during the read,
 	// so no new transactions can be started while the read
@@ -112,18 +115,8 @@ func (c *Generic) lockAndReadBranch(branch string, callback func() error) error 
 }
 
 func (c *Generic) initTx(ctx context.Context, info TxInfo) (context.Context, txFunc) {
-	// Aquire the tx-specific lock
-	c.txsMu.Lock()
-	txState, ok := c.txs[info.Head]
-	if !ok {
-		// grow the txs map by one
-		c.txs[info.Head] = &txLock{
-			mu: &sync.RWMutex{},
-		}
-		txState = c.txs[info.Head]
-	}
-	txState.mode = info.Options.Mode
-	c.txsMu.Unlock()
+	// Aquire the branch-specific lock
+	txState := c.getBranchLockInfo(info.Head)
 
 	// Wait for all reads to complete (in the case of the atomic more),
 	// and then lock for writing. For non-atomic mode this uses the mutex
@@ -135,7 +128,8 @@ func (c *Generic) initTx(ctx context.Context, info TxInfo) (context.Context, txF
 	// on any reads happening at this moment. For all modes, this ensures
 	// transactions happen in order.
 	txState.mu.Lock()
-	txState.active = 1 // set tx state to "active"
+	txState.active = 1               // set tx state to "active"
+	txState.mode = info.Options.Mode // declare what transaction mode is used
 
 	// Create a child context with a timeout
 	dlCtx, cleanupTimeout := context.WithTimeout(ctx, info.Options.Timeout)
