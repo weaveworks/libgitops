@@ -6,6 +6,7 @@ import (
 	gosync "sync"
 
 	"github.com/sirupsen/logrus"
+	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/event"
@@ -49,7 +50,7 @@ func NewManifest(
 	if err != nil {
 		return nil, err
 	}
-	unstructuredRaw, err := unstructured.NewGeneric(fsRaw, recognizer, pathExcluder)
+	unstructuredRaw, err := unstructured.NewGeneric(fsRaw, recognizer, pathExcluder, serializer.NewFrameReaderFactory())
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +286,13 @@ func (s *Generic) handleModifyMove(ctx context.Context, ev *fileevents.FileEvent
 	}
 
 	// Recognize the contents of the file
-	idSet, cp, alreadyCached, err := unstructured.RecognizeIDsInFile(ctx, fileFinder, s.ObjectRecognizer(), ev.Path)
+	idSet, cp, alreadyCached, err := unstructured.RecognizeIDsInFile(
+		ctx,
+		fileFinder,
+		s.ObjectRecognizer(),
+		s.FrameReaderFactory(),
+		ev.Path,
+	)
 	if err != nil {
 		return err
 	}

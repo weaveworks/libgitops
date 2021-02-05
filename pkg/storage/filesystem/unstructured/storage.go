@@ -11,30 +11,44 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
 
-func NewGeneric(storage filesystem.Storage, recognizer ObjectRecognizer, pathExcluder filesystem.PathExcluder) (Storage, error) {
+// NewGeneric creates a new generic unstructured.Storage for the given underlying
+// interfaces. storage and recognizer are mandatory, pathExcluder and framingFactory
+// are optional (can be nil). framingFactory defaults to serializer.NewFrameReaderFactory().
+func NewGeneric(
+	storage filesystem.Storage,
+	recognizer ObjectRecognizer,
+	pathExcluder filesystem.PathExcluder,
+	framingFactory serializer.FrameReaderFactory,
+) (Storage, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
 	}
 	if recognizer == nil {
 		return nil, fmt.Errorf("recognizer is mandatory")
 	}
+	// optional: use YAML/JSON by default.
+	if framingFactory == nil {
+		framingFactory = serializer.NewFrameReaderFactory()
+	}
 	fileFinder, ok := storage.FileFinder().(FileFinder)
 	if !ok {
 		return nil, errors.New("the given filesystem.Storage must use a unstructured.FileFinder")
 	}
 	return &Generic{
-		Storage:      storage,
-		recognizer:   recognizer,
-		fileFinder:   fileFinder,
-		pathExcluder: pathExcluder,
+		Storage:        storage,
+		recognizer:     recognizer,
+		fileFinder:     fileFinder,
+		pathExcluder:   pathExcluder,
+		framingFactory: framingFactory,
 	}, nil
 }
 
 type Generic struct {
 	filesystem.Storage
-	recognizer   ObjectRecognizer
-	fileFinder   FileFinder
-	pathExcluder filesystem.PathExcluder
+	recognizer     ObjectRecognizer
+	fileFinder     FileFinder
+	pathExcluder   filesystem.PathExcluder
+	framingFactory serializer.FrameReaderFactory
 }
 
 // Sync synchronizes the current state of the filesystem, and overwrites all
@@ -63,7 +77,13 @@ func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.Unversi
 
 	for _, filePath := range files {
 		// Recognize the IDs in all the given file
-		idSet, cp, _, err := RecognizeIDsInFile(ctx, fileFinder, s.ObjectRecognizer(), filePath)
+		idSet, cp, _, err := RecognizeIDsInFile(
+			ctx,
+			fileFinder,
+			s.ObjectRecognizer(),
+			s.FrameReaderFactory(),
+			filePath,
+		)
 		if err != nil {
 			logrus.Error(err)
 			continue
@@ -92,6 +112,11 @@ func (s *Generic) ObjectRecognizer() ObjectRecognizer {
 	return s.recognizer
 }
 
+// FrameReaderFactory returns the underlying FrameReaderFactory used.
+func (s *Generic) FrameReaderFactory() serializer.FrameReaderFactory {
+	return s.framingFactory
+}
+
 // PathExcluder specifies what paths to not sync
 func (s *Generic) PathExcluder() filesystem.PathExcluder {
 	return s.pathExcluder
@@ -110,6 +135,7 @@ func RecognizeIDsInFile(
 	ctx context.Context,
 	fileFinder FileFinder,
 	recognizer ObjectRecognizer,
+	framingFactory serializer.FrameReaderFactory,
 	filePath string,
 ) (core.UnversionedObjectIDSet, *ChecksumPath, bool, error) {
 	fs := fileFinder.Filesystem()
@@ -146,9 +172,8 @@ func RecognizeIDsInFile(
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("Could not get content type for file %q: %v", filePath, err)
 	}
-	// TODO: In the future this NewFrameReader should come from an interface, not
-	// directly from the hard-coded serializer package.
-	fr := serializer.NewFrameReader(ct, serializer.FromBytes(content))
+	// Create a new FrameReader for the given ContentType and ReadCloser
+	fr := framingFactory.NewFrameReader(ct, serializer.FromBytes(content))
 	// Recognize all IDs in the file
 	versionedIDs, err := recognizer.RecognizeObjectIDs(filePath, fr)
 	if err != nil {

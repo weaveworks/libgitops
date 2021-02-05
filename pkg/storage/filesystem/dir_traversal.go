@@ -27,7 +27,8 @@ func ListValidFilesInFilesystem(ctx context.Context, fs Filesystem, contentTyper
 // that contentTyper recognizes, and is not a path that is excluded by pathExcluder.
 func IsValidFileInFilesystem(ctx context.Context, fs Filesystem, contentTyper ContentTyper, pathExcluder PathExcluder, file string) bool {
 	// return false if this path should be excluded
-	if pathExcluder.ShouldExcludePath(file) {
+	// pathExcluder can be nil; watch out for that
+	if pathExcluder != nil && pathExcluder.ShouldExcludePath(file) {
 		return false
 	}
 

@@ -23,7 +23,9 @@ type Storage interface {
 
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
 	ObjectRecognizer() ObjectRecognizer
-	// PathExcluder specifies what paths to not sync
+	// FrameReaderFactory returns the underlying FrameReaderFactory used.
+	FrameReaderFactory() serializer.FrameReaderFactory
+	// PathExcluder specifies what paths to not sync. Can possibly be nil.
 	PathExcluder() filesystem.PathExcluder
 	// UnstructuredFileFinder returns the underlying unstructured.FileFinder used.
 	UnstructuredFileFinder() FileFinder

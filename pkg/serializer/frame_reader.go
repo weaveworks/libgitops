@@ -38,11 +38,22 @@ type FrameReader interface {
 	ReadFrame() ([]byte, error)
 }
 
-// NewFrameReader returns a FrameReader for the given ContentType and data in the
-// ReadCloser. The Reader is automatically closed in io.EOF. ReadFrame is called
-// once each Decoder.Decode() or Decoder.DecodeInto() call. When Decoder.DecodeAll() is
-// called, the FrameReader is read until io.EOF, upon where it is closed.
-func NewFrameReader(contentType ContentType, rc ReadCloser) FrameReader {
+// FrameReaderFactory knows how to create various different FrameReaders for
+// given ContentTypes.
+type FrameReaderFactory interface {
+	// NewFrameReader returns a new FrameReader for the given ContentType,
+	// and ReadCloser that contains the underlying data that should be read.
+	NewFrameReader(contentType ContentType, rc ReadCloser) FrameReader
+}
+
+// defaultFrameReaderFactory is the variable used in public methods.
+var defaultFrameReaderFactory FrameReaderFactory = frameReaderFactory{}
+
+// frameReaderFactory is the default implementation of FrameReaderFactory.
+type frameReaderFactory struct{}
+
+// Documentation below attached to NewFrameReader.
+func (frameReaderFactory) NewFrameReader(contentType ContentType, rc ReadCloser) FrameReader {
 	switch contentType {
 	case ContentTypeYAML:
 		return newFrameReader(json.YAMLFramer.NewFrameReader(rc), contentType)
@@ -51,6 +62,20 @@ func NewFrameReader(contentType ContentType, rc ReadCloser) FrameReader {
 	default:
 		return &errFrameReader{ErrUnsupportedContentType, contentType}
 	}
+}
+
+// NewFrameReaderFactory returns the default variant of FrameReaderFactory capable
+// of creating YAML- and JSON-compatible FrameReaders.
+func NewFrameReaderFactory() FrameReaderFactory {
+	return frameReaderFactory{}
+}
+
+// NewFrameReader returns a FrameReader for the given ContentType and data in the
+// ReadCloser. The Reader is automatically closed in io.EOF. ReadFrame is called
+// once each Decoder.Decode() or Decoder.DecodeInto() call. When Decoder.DecodeAll() is
+// called, the FrameReader is read until io.EOF, upon where it is closed.
+func NewFrameReader(contentType ContentType, rc ReadCloser) FrameReader {
+	return defaultFrameReaderFactory.NewFrameReader(contentType, rc)
 }
 
 // NewYAMLFrameReader returns a FrameReader that supports both YAML and JSON. Frames are separated by "---\n"
