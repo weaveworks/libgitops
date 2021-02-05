@@ -68,6 +68,13 @@ type StatusWriter interface {
 	UpdateStatus(ctx context.Context, obj Object) error
 }
 
+// Backend combines the Reader and Writer interfaces for a fully-functioning backend
+// implementation; used by the Client interface. Backend can be through as the "API Server"
+// logic in between a "frontend" Client and "document" Storage. In other words, the backend
+// handles serialization, versioning, validation, and policy enforcement.
+//
+// Any callable function should immediately abort if the given context from the client
+// has expired; so an invalid context doesn't "leak down" to the Storage system.
 type Backend interface {
 	Reader
 	Writer
@@ -166,6 +173,11 @@ func (b *Generic) StorageVersioner() StorageVersioner {
 }
 
 func (b *Generic) Get(ctx context.Context, obj Object) error {
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get the versioned ID for the given obj. This might mutate obj wrt namespacing info.
 	id, err := b.idForObj(ctx, obj)
 	if err != nil {
@@ -192,6 +204,11 @@ func (b *Generic) Get(ctx context.Context, obj Object) error {
 // objects; for that the behavior is undefined (but returning an error
 // is recommended).
 func (b *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	return b.storage.ListNamespaces(ctx, gk)
 }
 
@@ -200,10 +217,20 @@ func (b *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.S
 // root-spaced GroupKinds, the caller must not. When namespaced, this function
 // must only return object keys for that given namespace.
 func (b *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	return b.storage.ListObjectIDs(ctx, gk, namespace)
 }
 
 func (b *Generic) Create(ctx context.Context, obj Object) error {
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
@@ -231,7 +258,12 @@ func (b *Generic) Create(ctx context.Context, obj Object) error {
 	// Internal, common write shared with Update()
 	return b.write(ctx, id, obj)
 }
-func (b *Generic) Update(ctx context.Context, obj Object) error {
+func (b *Generic) Update(ctx context.Context, obj Object) error { // If the context has been cancelled or timed out; directly return an error
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// We must never save metadata-only structs
 	if serializer.IsPartialObject(obj) {
 		return ErrCannotSaveMetadata
@@ -261,6 +293,11 @@ func (b *Generic) Update(ctx context.Context, obj Object) error {
 }
 
 func (b *Generic) UpdateStatus(ctx context.Context, obj Object) error {
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	return core.ErrNotImplemented // TODO
 }
 
@@ -294,6 +331,11 @@ func (b *Generic) write(ctx context.Context, id core.ObjectID, obj Object) error
 }
 
 func (b *Generic) Delete(ctx context.Context, obj Object) error {
+	// If the context has been cancelled or timed out; directly return an error
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get the versioned ID for the given obj. This might mutate obj wrt namespacing info.
 	id, err := b.idForObj(ctx, obj)
 	if err != nil {
@@ -319,6 +361,7 @@ func (b *Generic) Delete(ctx context.Context, obj Object) error {
 
 // Note: This should also work for unstructured and partial metadata objects
 func (b *Generic) idForObj(ctx context.Context, obj Object) (core.ObjectID, error) {
+	// Get the GroupVersionKind of the given object.
 	gvk, err := serializer.GVKForObject(b.Scheme(), obj)
 	if err != nil {
 		return nil, err
