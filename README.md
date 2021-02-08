@@ -266,6 +266,8 @@ If you have any questions about, feedback for or problems with `libgitops`:
 - Ask a question on the [#general](https://weave-community.slack.com/messages/general/) Slack channel.
 - [File an issue](https://github.com/weaveworks/libgitops/issues/new).
 
+We follow the [CNCF Code of Conduct](CODE_OF_CONDUCT.md).
+
 Your feedback is always welcome!
 
 ## Maintainers
