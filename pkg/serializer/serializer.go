@@ -208,6 +208,7 @@ func NewSerializer(scheme *runtime.Scheme, codecs *k8sserializer.CodecFactory) S
 
 	return &serializer{
 		LockedScheme: schemeLock,
+		codecs:       codecs,
 		converter:    NewConverter(schemeLock),
 		defaulter:    NewDefaulter(schemeLock),
 		patcher: NewPatcher(
