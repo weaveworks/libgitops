@@ -2,8 +2,6 @@ package transactional
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -246,6 +244,7 @@ func (c *Generic) transaction(ctx context.Context, opts ...TxOption) (Tx, error)
 			err:         err,
 			c:           c.c,
 			manager:     c.manager,
+			commitHook:  c.CommitHookChain(),
 			ctx:         ctxWithDeadline,
 			info:        info,
 			cleanupFunc: cleanupFunc,
@@ -297,20 +296,11 @@ func (c *Generic) branchTransaction(ctx context.Context, headBranch string, opts
 			err:         err,
 			c:           c.c,
 			manager:     c.manager,
+			commitHook:  c.CommitHookChain(),
 			ctx:         ctxWithDeadline,
 			info:        info,
 			cleanupFunc: cleanupFunc,
 		},
 		merger: c.merger,
 	}, nil
-}
-
-// randomSHA returns a hex-encoded string from {byteLen} random bytes.
-func randomSHA(byteLen int) (string, error) {
-	b := make([]byte, byteLen)
-	_, err := rand.Read(b)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

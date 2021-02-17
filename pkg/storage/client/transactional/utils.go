@@ -1,6 +1,10 @@
 package transactional
 
-import "context"
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+)
 
 // execTransactionsCtx executes the functions in order. Before each
 // function in the chain is run; the context is checked for errors
@@ -18,4 +22,14 @@ func execTransactionsCtx(ctx context.Context, funcs []txFunc) error {
 		}
 	}
 	return nil
+}
+
+// randomSHA returns a hex-encoded string from {byteLen} random bytes.
+func randomSHA(byteLen int) (string, error) {
+	b := make([]byte, byteLen)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
