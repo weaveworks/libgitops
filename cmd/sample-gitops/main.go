@@ -33,6 +33,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 	unstructuredfs "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 	unstructuredevent "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured/event"
+	unstructuredtx "github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured/tx"
 	"github.com/weaveworks/libgitops/pkg/storage/kube"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -145,6 +146,8 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		return err
 	}
 
+	ctx = core.WithVersionRef(ctx, core.NewBranchRef(localClone.MainBranch()))
+
 	// Just use default encoders and decoders
 	encoder := scheme.Serializer.Encoder()
 	decoder := scheme.Serializer.Decoder()
@@ -191,6 +194,10 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 	if err != nil {
 		return err
 	}
+
+	// Register a tx hook so that a new copy-on-write overlay is created when transactions are made
+	versionRefHook := unstructuredtx.NewUnstructuredStorageTxHandler(gitClient)
+	txClient.TransactionHookChain().Register(versionRefHook)
 
 	// Create a new CommitHook for sending PRs
 	prCommitHook, err := githubpr.NewGitHubPRCommitHandler(ghClient, localClone.RepositoryRef())
@@ -242,17 +249,14 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		// at .Get-time below.
 		car := v1alpha1.Car{}
 		carKey := core.ObjectKey{Name: name}
-		// Specify what our "base" branch is in the context; make it match the main branch
-		// of the Git clone.
-		branchCtx := core.WithVersionRef(ctx, core.NewBranchRef(localClone.MainBranch()))
 		// Our head branch is the name of the Car, and it ends in a "-", which makes the
 		// TxClient add a random sha suffix.
 		headBranch := fmt.Sprintf("%s-update-", name)
 
 		err := txClient.
-			BranchTransaction(branchCtx, headBranch). // Start a transaction of the base branch to the head
-			Get(carKey, &car).                        // Load the latest data of the Car into &car.
-			Custom(func(ctx context.Context) error {  // Mutate (update) status of the Car
+			BranchTransaction(ctx, headBranch).      // Start a transaction of the base branch to the head
+			Get(carKey, &car).                       // Load the latest data of the Car into &car.
+			Custom(func(ctx context.Context) error { // Mutate (update) status of the Car
 				car.Status.Distance = rand.Uint64()
 				car.Status.Speed = rand.Float64() * 100
 				return nil
