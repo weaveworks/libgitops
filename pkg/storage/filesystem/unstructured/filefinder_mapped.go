@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
+	"github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured/btree"
 	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -36,7 +37,7 @@ func NewGenericFileFinder(contentTyper filesystem.ContentTyper, fs filesystem.Fi
 	return &GenericFileFinder{
 		contentTyper: contentTyper,
 		fs:           fs,
-		cache:        &objectIDCacheImpl{},
+		index:        btree.NewBTreeVersionedIndex(),
 		mu:           &sync.RWMutex{},
 	}
 }
@@ -55,8 +56,8 @@ type GenericFileFinder struct {
 	contentTyper filesystem.ContentTyper
 	fs           filesystem.Filesystem
 
-	cache objectIDCache
-	// mu guards cache
+	index btree.BTreeVersionedIndex
+	// mu guards index
 	mu *sync.RWMutex
 }
 
@@ -68,8 +69,12 @@ func (f *GenericFileFinder) ContentTyper() filesystem.ContentTyper {
 	return f.contentTyper
 }
 
-func (f *GenericFileFinder) versionedCache(ctx context.Context) versionRef {
-	return f.cache.versionRef(core.GetVersionRef(ctx).Branch())
+func (f *GenericFileFinder) versionedIndex(ctx context.Context) (btree.BTreeIndex, error) {
+	i, ok := f.index.VersionedTree(core.GetVersionRef(ctx).Branch())
+	if ok {
+		return i, nil
+	}
+	return nil, fmt.Errorf("no such versionref registered")
 }
 
 // ObjectPath gets the file path relative to the root directory
@@ -78,12 +83,19 @@ func (f *GenericFileFinder) ObjectPath(ctx context.Context, id core.UnversionedO
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Get the path for the given version and ID
-	p, ok := f.versionedCache(ctx).getID(id).get()
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	// Lookup the BTree item for the given ID
+	p, ok := index.Get(newIDItem(id, ""))
 	if !ok {
 		return "", utilerrs.NewAggregate([]error{ErrNotTracked, core.NewErrNotFound(id)})
 	}
-	return p, nil
+	// Return the path
+	return p.GetValueItem().ValueString(), nil
 }
 
 // ObjectsAt retrieves the ObjectIDs in the file with the given relative file path.
@@ -92,15 +104,30 @@ func (f *GenericFileFinder) ObjectsAt(ctx context.Context, path string) (core.Un
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Get the all the IDs for the given path
-	ids, ok := f.versionedCache(ctx).getIDs(path)
-	if !ok {
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	idSet := f.objectsAt(index, path)
+	// Error if there is no such known path
+	if idSet.Len() == 0 {
 		// TODO: Support "creation" of Objects easier, in a generic way through an interface, e.g.
 		// NewObjectPlacer?
 		return nil, fmt.Errorf("%q: %w", path, ErrNotTracked)
 	}
-	// Return a deep copy of the set; don't let the caller mess with our internal state
-	return ids.Copy(), nil
+	return idSet, nil
+}
+
+func (f *GenericFileFinder) objectsAt(index btree.BTreeIndex, path string) core.UnversionedObjectIDSet {
+	// Traverse the objects belonging to the given path index
+	ids := core.NewUnversionedObjectIDSet()
+	index.List(idPathIndexField+":"+path, "", func(it btree.Item) bool {
+		// Insert each objectID belonging to that path into the set
+		ids.Insert(it.GetValueItem().Key().(core.UnversionedObjectID))
+		return true
+	})
+	return ids
 }
 
 // ListGroupKinds returns all known GroupKinds by the implementation at that
@@ -110,11 +137,26 @@ func (f *GenericFileFinder) ObjectsAt(ctx context.Context, path string) (core.Un
 // exist"? However, obviously, specific implementations might honor this
 // guideline differently. This might be used for introspection into the system.
 func (f *GenericFileFinder) ListGroupKinds(ctx context.Context) ([]core.GroupKind, error) {
-	m := f.versionedCache(ctx).raw()
-	gks := make([]core.GroupKind, len(m))
-	for gk := range m {
-		gks = append(gks, gk)
+	// Lock for reading
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	gks := []core.GroupKind{}
+	// List GroupKinds directly under "id:*"
+	prefix := idField + ":"
+	// Extract the GroupKind from the visited item, and return the groupkind exclusively, so it
+	// won't be visited again
+	btree.ListUnique(index, prefix, func(it btree.ValueItem) (string, bool) {
+		gk := it.Key().(core.UnversionedObjectID).GroupKind()
+		gks = append(gks, gk)
+		return gk.String(), true
+	})
 	return gks, nil
 }
 
@@ -133,13 +175,22 @@ func (f *GenericFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKin
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Get the versioned mapping between the groupkind and its namespaces
-	m := f.versionedCache(ctx).groupKind(gk).raw()
-	// Add all the namespaces to a stringset and return
-	nsSet := sets.NewString()
-	for ns := range m {
-		nsSet.Insert(ns)
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	nsSet := sets.NewString()
+	// List namespaces under "id:{groupkind}:*"
+	prefix := idField + ":" + gk.String() + ":"
+	// Extract the namespace from the visited item, and return the groupkind exclusively, so it
+	// won't be visited again
+	btree.ListUnique(index, prefix, func(it btree.ValueItem) (string, bool) {
+		ns := it.Key().(core.UnversionedObjectID).ObjectKey().Namespace
+		nsSet.Insert(ns)
+		return ns, true
+	})
 	return nsSet, nil
 }
 
@@ -153,13 +204,19 @@ func (f *GenericFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Get the versioned mapping between the groupkind & ns, and its registered names
-	m := f.versionedCache(ctx).groupKind(gk).namespace(namespace).raw()
-	// Create a sized ID set; and insert the IDs one-by-one
-	ids := core.NewUnversionedObjectIDSetSized(len(m))
-	for name := range m {
-		ids.Insert(core.NewUnversionedObjectID(gk, core.ObjectKey{Name: name, Namespace: namespace}))
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	ids := core.NewUnversionedObjectIDSet()
+	// List ObjectIDs under this "folder"
+	base := idField + ":" + gk.String() + ":" + namespace + ":"
+	index.List(base, "", func(it btree.Item) bool {
+		ids.Insert(it.GetValueItem().Key().(core.UnversionedObjectID))
+		return true
+	})
 	return ids, nil
 }
 
@@ -169,8 +226,21 @@ func (f *GenericFileFinder) ChecksumForPath(ctx context.Context, path string) (s
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return "", false
+	}
+	return f.checksumForPath(index, path)
+}
+
+func (f *GenericFileFinder) checksumForPath(index btree.BTreeIndex, path string) (string, bool) {
 	// Get the checksum for the given path at the given version
-	return f.versionedCache(ctx).getChecksum(path)
+	item, ok := index.Get(newChecksumItem(path, ""))
+	if !ok {
+		return "", false
+	}
+	return item.GetValueItem().Value().(ChecksumPath).Checksum, true
 }
 
 // MoveFile moves an internal mapping from oldPath to newPath. moved == true if the oldPath
@@ -180,37 +250,36 @@ func (f *GenericFileFinder) MoveFile(ctx context.Context, oldPath, newPath strin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Get the versioned cache
-	cache := f.versionedCache(ctx)
-
-	// Get the set of object IDs oldPath points to
-	idSet, ok := cache.getIDs(oldPath)
-	if !ok {
-		logrus.Tracef("MoveFile: oldPath %q did not have any IDs", oldPath)
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		logrus.Debugf("MoveFile %s -> %s: got error from versionedIndex: %v", oldPath, newPath, err)
 		return false
 	}
+
+	// Get all the ObjectIDs assigned to the old path
+	idSet := f.objectsAt(index, oldPath)
 	logrus.Tracef("MoveFile: idSet: %s", idSet)
 
-	// Replace the map header; assign it the new path instead
-	cache.setIDs(newPath, idSet)
-	cache.deleteIDs(oldPath)
-	logrus.Tracef("MoveFile: Moved idSet from %q to %q", oldPath, newPath)
+	// Re-assign the IDs to the new path
+	_ = idSet.ForEach(func(id core.UnversionedObjectID) error {
+		index.Put(newIDItem(id, newPath))
+		return nil
+	})
 
-	// Move the checksum info
-	checksum, ok := cache.getChecksum(oldPath)
+	// Move the checksum info over by
+	// a) getting the checksum for the old path
+	// b) assigning that checksum to the new path
+	// c) deleting the item for the old path
+	checksum, ok := f.checksumForPath(index, oldPath)
 	if !ok {
 		logrus.Error("MoveFile: Expected checksum to be available, but wasn't")
 		// if this happens; newPath won't be mapped to any checksum; but nothing worse
 	}
-	cache.setChecksum(newPath, checksum)
-	cache.setChecksum(oldPath, "")
+	index.Put(newChecksumItem(newPath, checksum))
+	index.Delete(newChecksumItem(newPath, checksum))
 	logrus.Tracef("MoveFile: Moved checksum from %q to %q", oldPath, newPath)
 
-	// Move the leveled-references of all IDs from the old to the new path
-	_ = idSet.ForEach(func(id core.UnversionedObjectID) error {
-		cache.getID(id).set(newPath)
-		return nil
-	})
 	return true
 }
 
@@ -235,20 +304,31 @@ func (f *GenericFileFinder) SetMapping(ctx context.Context, state ChecksumPath, 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return f.setIDsAtPath(f.versionedCache(ctx), state.Path, state.Checksum, newIDs)
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		// Always return an empty set, although the version ref does not exist
+		added = core.NewUnversionedObjectIDSet()
+		duplicates = core.NewUnversionedObjectIDSet()
+		removed = core.NewUnversionedObjectIDSet()
+		return
+	}
+
+	return f.setIDsAtPath(index, state.Path, state.Checksum, newIDs)
 }
 
 // internal method; not using any mutex; caller's responsibility
-func (f *GenericFileFinder) setIDsAtPath(cache versionRef, path, checksum string, newIDs core.UnversionedObjectIDSet) (added, duplicates, removed core.UnversionedObjectIDSet) {
-	// Enforce an empty checksum for an empty newIDs
+func (f *GenericFileFinder) setIDsAtPath(index btree.BTreeIndex, path, checksum string, newIDs core.UnversionedObjectIDSet) (added, duplicates, removed core.UnversionedObjectIDSet) {
+	// If there are no new ids, delete the checksum mapping
 	if newIDs.Len() == 0 {
-		checksum = ""
+		index.Delete(newChecksumItem(path, ""))
+	} else {
+		// Update the checksum.
+		index.Put(newChecksumItem(path, checksum))
 	}
-	// Update the checksum. If len(checksum) == 0 this will delete the mapping
-	cache.setChecksum(path, checksum)
 
 	// Get the old IDs; and compute the different "buckets"
-	oldIDs, _ := cache.getIDs(path)
+	oldIDs := f.objectsAt(index, path)
 	logrus.Tracef("setIDsAtPath: oldIDs: %s", oldIDs)
 	// Get newID entries that are not present in oldIDs
 	added = newIDs.Difference(oldIDs)
@@ -260,36 +340,29 @@ func (f *GenericFileFinder) setIDsAtPath(cache versionRef, path, checksum string
 	removed = oldIDs.Difference(newIDs)
 	logrus.Tracef("setIDsAtPath: removed: %s", removed)
 
-	// Register the added items in the layered cache
+	// Register the added items
 	_ = added.ForEach(func(addedID core.UnversionedObjectID) error {
-		n := cache.getID(addedID)
-		// Check if this name already exists somewhere else
-		otherPath, ok := n.get()
-		if ok && otherPath != path {
+		itemToAdd := newIDItem(addedID, path)
+		// Check if this ID already exists in some other file. TODO: Is the second check needed?
+		if otherFile := btree.GetValueString(index, itemToAdd); len(otherFile) != 0 && otherFile != path {
 			// If so; it is a duplicate; move it to duplicates
 			added.Delete(addedID)
 			duplicates.Insert(addedID)
 			return nil
 		}
 		// If it didn't exist somewhere else, add the mapping between this ID and path
-		n.set(path)
+		index.Put(itemToAdd)
 		return nil
 	})
 
 	logrus.Tracef("setIDsAtPath: added post-filter: %s", added)
 	logrus.Tracef("setIDsAtPath: duplicates post-filter: %s", duplicates)
 
-	// Remove the removed items from the layered cache
+	// Remove the removed items
 	_ = removed.ForEach(func(removedID core.UnversionedObjectID) error {
-		cache.getID(removedID).delete()
+		index.Delete(newIDItem(removedID, ""))
 		return nil
 	})
-
-	// Finally, update the map from path to a set of IDs.
-	// Do not include the duplicates. We MUST NOT mutate the calling parameter.
-	finalIDs := newIDs.Copy().DeleteSet(duplicates)
-	logrus.Tracef("setIDsAtPath: finalIDs: %s", finalIDs)
-	cache.setIDs(path, finalIDs)
 
 	// return the different buckets
 	return added, duplicates, removed
@@ -301,9 +374,17 @@ func (f *GenericFileFinder) DeleteMapping(ctx context.Context, path string) (rem
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		// Always return an empty set, although the version ref does not exist
+		removed = core.NewUnversionedObjectIDSet()
+		return
+	}
+
 	// Re-use the setMappings internal function
 	_, _, removed = f.setIDsAtPath(
-		f.versionedCache(ctx),            // Get the versioned cache
+		index,                            // Get the versioned index
 		path,                             // Delete mappings at this path
 		"",                               // No checksum -> delete that mapping
 		core.NewUnversionedObjectIDSet(), // Empty "desired state" -> everything removed
@@ -317,12 +398,18 @@ func (f *GenericFileFinder) ResetMappings(ctx context.Context, m map[ChecksumPat
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// Completely clean up all existing data on the branch before starting.
-	cache := f.cache.cleanVersionRef(core.GetVersionRef(ctx).Branch())
-	logrus.Trace("ResetMappings: cleaned branch")
-
-	// Keep track of all duplicates there are in the mappings
+	// Keep track of all duplicates there are in the mappings.
+	// Always return an empty set, although the version ref does not exist
 	duplicates = core.NewUnversionedObjectIDSet()
+
+	// Get the versioned tree for the context
+	index, err := f.versionedIndex(ctx)
+	if err != nil {
+		return
+	}
+	// Completely clean up all existing data on the branch before starting.
+	index.Clear()
+	logrus.Trace("ResetMappings: cleaned branch")
 
 	// Go through all files and add them to the cache
 	for cp, allIDs := range m {
@@ -334,7 +421,7 @@ func (f *GenericFileFinder) ResetMappings(ctx context.Context, m map[ChecksumPat
 		// Re-use the internal setMappings function again.
 		// We don't need added & removed here, as we know that {allIDs} = {added} + {newDuplicates}
 		// Removals is always empty as we cleaned all mappings before we started this method.
-		_, newDuplicates, _ := f.setIDsAtPath(cache, cp.Path, cp.Checksum, allIDs)
+		_, newDuplicates, _ := f.setIDsAtPath(index, cp.Path, cp.Checksum, allIDs)
 		logrus.Tracef("ResetMappings: newDuplicates: %s", newDuplicates)
 		// Add all duplicates together so we can process them later
 		duplicates.InsertSet(newDuplicates)
@@ -346,15 +433,93 @@ func (f *GenericFileFinder) ResetMappings(ctx context.Context, m map[ChecksumPat
 	// In the resulting mappings; no duplicates are allowed (to avoid "races" at random
 	// between different duplicates otherwise)
 	_ = duplicates.ForEach(func(id core.UnversionedObjectID) error {
-		// Get the ID mapping so we get to know the underlying path
-		n := cache.getID(id)
-		duplicatePath, _ := n.get()
-		// Delete the ID mapping for that path
-		n.delete()
-		// Delete the ID also from the other map
-		cache.rawIDs()[duplicatePath].Delete(id)
+		index.Delete(newIDItem(id, ""))
 		return nil
 	})
 
 	return
 }
+
+// RegisterVersionRef registers a new "head" version ref, based (using copy-on-write logic),
+// on the existing versionref "base". head must be non-nil, but base can be nil, if it is
+// desired that "head" has no parent, and hence, is blank. An error is returned if head is
+// nil, or base does not exist.
+func (f *GenericFileFinder) RegisterVersionRef(head, base core.VersionRef) error {
+	if head == nil {
+		return fmt.Errorf("head must not be nil")
+	}
+	baseBranch := ""
+	if base != nil {
+		baseBranch = base.Branch()
+	}
+	_, err := f.index.NewVersionedTree(head.Branch(), baseBranch)
+	return err
+}
+
+// HasVersionRef returns true if the given head version ref has been registered.
+func (f *GenericFileFinder) HasVersionRef(head core.VersionRef) bool {
+	_, ok := f.index.VersionedTree(head.Branch())
+	return ok
+}
+
+// DeleteVersionRef deletes the given head version ref.
+func (f *GenericFileFinder) DeleteVersionRef(head core.VersionRef) {
+	f.index.DeleteVersionedTree(head.Branch())
+}
+
+func newIDItem(id core.UnversionedObjectID, path string) btree.ValueItem {
+	return &idItemImpl{id: id, path: path}
+}
+
+type idItemImpl struct {
+	id   core.UnversionedObjectID
+	path string
+}
+
+const (
+	idField          = "id"
+	idPathIndexField = "path"
+
+	checksumField = "chk"
+)
+
+func (i *idItemImpl) Less(item btree.OriginalBTreeItem) bool {
+	return i.String() < item.(btree.Item).String()
+}
+func (i *idItemImpl) String() string                                   { return idField + ":" + i.KeyString() }
+func (i *idItemImpl) GetValueItem() btree.ValueItem                    { return i }
+func (i *idItemImpl) GetUnversionedObjectID() core.UnversionedObjectID { return i.id }
+func (i *idItemImpl) Value() interface{}                               { return i.path }
+func (i *idItemImpl) ValueString() string                              { return i.path }
+
+func (i *idItemImpl) Key() interface{} { return i.id }
+func (i *idItemImpl) KeyString() string {
+	// TODO: Cache this and the output of IndexedPtrs()?
+	return i.id.GroupKind().String() + ":" + i.id.ObjectKey().Namespace + ":" + i.id.ObjectKey().Name
+}
+
+func (i *idItemImpl) IndexedPtrs() []btree.Item {
+	var self btree.ValueItem = i
+	return []btree.Item{
+		btree.NewIndexedPtr(&self, idPathIndexField+":"+i.path),
+	}
+}
+
+func newChecksumItem(path, checksum string) btree.ValueItem {
+	return &checksumItemImpl{ChecksumPath{Path: path, Checksum: checksum}}
+}
+
+type checksumItemImpl struct {
+	ChecksumPath
+}
+
+func (i *checksumItemImpl) Less(item btree.OriginalBTreeItem) bool {
+	return i.String() < item.(btree.Item).String()
+}
+func (i *checksumItemImpl) String() string                { return checksumField + ":" + i.KeyString() }
+func (i *checksumItemImpl) GetValueItem() btree.ValueItem { return i }
+func (i *checksumItemImpl) Key() interface{}              { return i.Path }
+func (i *checksumItemImpl) KeyString() string             { return i.Path }
+func (i *checksumItemImpl) Value() interface{}            { return i.ChecksumPath }
+func (i *checksumItemImpl) ValueString() string           { return i.Checksum }
+func (i *checksumItemImpl) IndexedPtrs() []btree.Item     { return nil }
