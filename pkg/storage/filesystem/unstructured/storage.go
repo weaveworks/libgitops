@@ -60,15 +60,28 @@ func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.Unversi
 	fs := fileFinder.Filesystem()
 	contentTyper := fileFinder.ContentTyper()
 
+	// Create pre-made empty sets for the "successful" and "duplicate" IDs
+	// This ensures that although errors occur, we don't return a nil set
+	successful = core.NewUnversionedObjectIDSet()
+	duplicates = core.NewUnversionedObjectIDSet()
+
+	ref := core.GetVersionRef(ctx)
+	if !fileFinder.HasVersionRef(ref) {
+		if err = fileFinder.RegisterVersionRef(ref, nil); err != nil {
+			return
+		}
+	}
+
 	// List all valid files in the fs
-	files, err := filesystem.ListValidFilesInFilesystem(
+	var files []string
+	files, err = filesystem.ListValidFilesInFilesystem(
 		ctx,
 		fs,
 		contentTyper,
 		s.PathExcluder(),
 	)
 	if err != nil {
-		return nil, nil, err
+		return
 	}
 
 	// Walk all files and fill the mappings of the unstructured.FileFinder.
@@ -96,8 +109,6 @@ func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.Unversi
 	// mappings are now the "truth" about what's on disk
 	// Duplicate mappings are returned from ResetMappings
 	duplicates = fileFinder.ResetMappings(ctx, allMappings)
-	// Create an empty set for the "successful" IDs
-	successful = core.NewUnversionedObjectIDSet()
 	// For each set of IDs; add them to the "successful" batch
 	for _, set := range allMappings {
 		successful.InsertSet(set)

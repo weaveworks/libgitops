@@ -79,6 +79,16 @@ type FileFinder interface {
 	// MoveFile moves an internal mapping from oldPath to newPath. moved == true if the oldPath
 	// existed and hence the move was performed.
 	MoveFile(ctx context.Context, oldPath, newPath string) (moved bool)
+
+	// RegisterVersionRef registers a new "head" version ref, based (using copy-on-write logic),
+	// on the existing versionref "base". head must be non-nil, but base can be nil, if it is
+	// desired that "head" has no parent, and hence, is blank. An error is returned if head is
+	// nil, or base does not exist.
+	RegisterVersionRef(head, base core.VersionRef) error
+	// HasVersionRef returns true if the given head version ref has been registered.
+	HasVersionRef(head core.VersionRef) bool
+	// DeleteVersionRef deletes the given head version ref.
+	DeleteVersionRef(head core.VersionRef)
 }
 
 // ChecksumPath is a tuple of a given Checksum and relative file Path,
