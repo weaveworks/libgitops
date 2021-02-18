@@ -10,6 +10,7 @@ require (
 	github.com/fluxcd/pkg/ssh v0.0.5
 	github.com/go-git/go-git/v5 v5.2.0
 	github.com/go-openapi/spec v0.20.0
+	github.com/google/btree v1.0.0
 	github.com/google/go-github/v32 v32.1.0
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/gommon v0.3.0 // indirect
@@ -21,7 +22,6 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.6.1
 	golang.org/x/sys v0.0.0-20210108172913-0df2131ae363
-	k8s.io/api v0.19.2
 	k8s.io/apimachinery v0.19.6
 	k8s.io/kube-openapi v0.0.0-20200805222855-6aeccd4b50c6
 	k8s.io/utils v0.0.0-20200912215256-4140de9c8800
