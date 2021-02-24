@@ -37,7 +37,7 @@ func NewGenericFileFinder(contentTyper filesystem.ContentTyper, fs filesystem.Fi
 	return &GenericFileFinder{
 		contentTyper: contentTyper,
 		fs:           fs,
-		index:        btree.NewBTreeVersionedIndex(),
+		index:        btree.NewVersionedIndex(),
 		mu:           &sync.RWMutex{},
 	}
 }
@@ -56,7 +56,7 @@ type GenericFileFinder struct {
 	contentTyper filesystem.ContentTyper
 	fs           filesystem.Filesystem
 
-	index btree.BTreeVersionedIndex
+	index btree.VersionedIndex
 	// mu guards index
 	mu *sync.RWMutex
 }
@@ -69,7 +69,7 @@ func (f *GenericFileFinder) ContentTyper() filesystem.ContentTyper {
 	return f.contentTyper
 }
 
-func (f *GenericFileFinder) versionedIndex(ctx context.Context) (btree.BTreeIndex, error) {
+func (f *GenericFileFinder) versionedIndex(ctx context.Context) (btree.Index, error) {
 	i, ok := f.index.VersionedTree(core.GetVersionRef(ctx).Branch())
 	if ok {
 		return i, nil
@@ -90,12 +90,12 @@ func (f *GenericFileFinder) ObjectPath(ctx context.Context, id core.UnversionedO
 	}
 
 	// Lookup the BTree item for the given ID
-	p, ok := index.Get(newIDItem(id, ""))
+	p, ok := index.Get(queryObject(id))
 	if !ok {
 		return "", utilerrs.NewAggregate([]error{ErrNotTracked, core.NewErrNotFound(id)})
 	}
 	// Return the path
-	return p.GetValueItem().ValueString(), nil
+	return p.GetValueItem().Value().(string), nil
 }
 
 // ObjectsAt retrieves the ObjectIDs in the file with the given relative file path.
@@ -119,10 +119,10 @@ func (f *GenericFileFinder) ObjectsAt(ctx context.Context, path string) (core.Un
 	return idSet, nil
 }
 
-func (f *GenericFileFinder) objectsAt(index btree.BTreeIndex, path string) core.UnversionedObjectIDSet {
+func (f *GenericFileFinder) objectsAt(index btree.Index, path string) core.UnversionedObjectIDSet {
 	// Traverse the objects belonging to the given path index
 	ids := core.NewUnversionedObjectIDSet()
-	index.List(idPathIndexField+":"+path, "", func(it btree.Item) bool {
+	index.List(queryPath(path), func(it btree.Item) bool {
 		// Insert each objectID belonging to that path into the set
 		ids.Insert(it.GetValueItem().Key().(core.UnversionedObjectID))
 		return true
@@ -150,12 +150,12 @@ func (f *GenericFileFinder) ListGroupKinds(ctx context.Context) ([]core.GroupKin
 	gks := []core.GroupKind{}
 	// List GroupKinds directly under "id:*"
 	prefix := idField + ":"
-	// Extract the GroupKind from the visited item, and return the groupkind exclusively, so it
+	// Extract the GroupKind from the visited item, and return the groupkind, so it
 	// won't be visited again
-	btree.ListUnique(index, prefix, func(it btree.ValueItem) (string, bool) {
+	btree.ListUnique(index, prefix, func(it btree.ValueItem) string {
 		gk := it.Key().(core.UnversionedObjectID).GroupKind()
 		gks = append(gks, gk)
-		return gk.String(), true
+		return gk.String() + ":" // note: important to return this, see btree/utils_test.go why
 	})
 	return gks, nil
 }
@@ -183,13 +183,13 @@ func (f *GenericFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKin
 
 	nsSet := sets.NewString()
 	// List namespaces under "id:{groupkind}:*"
-	prefix := idField + ":" + gk.String() + ":"
+	prefix := idForGroupKind(gk)
 	// Extract the namespace from the visited item, and return the groupkind exclusively, so it
 	// won't be visited again
-	btree.ListUnique(index, prefix, func(it btree.ValueItem) (string, bool) {
+	btree.ListUnique(index, prefix, func(it btree.ValueItem) string {
 		ns := it.Key().(core.UnversionedObjectID).ObjectKey().Namespace
 		nsSet.Insert(ns)
-		return ns, true
+		return ns + ":" // note: important to return this, see btree/utils_test.go why
 	})
 	return nsSet, nil
 }
@@ -211,9 +211,8 @@ func (f *GenericFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind
 	}
 
 	ids := core.NewUnversionedObjectIDSet()
-	// List ObjectIDs under this "folder"
-	base := idField + ":" + gk.String() + ":" + namespace + ":"
-	index.List(base, "", func(it btree.Item) bool {
+	// List ObjectIDs under "id:{groupkind}:{ns}:*"
+	index.List(queryNamespace(gk, namespace), func(it btree.Item) bool {
 		ids.Insert(it.GetValueItem().Key().(core.UnversionedObjectID))
 		return true
 	})
@@ -231,16 +230,7 @@ func (f *GenericFileFinder) ChecksumForPath(ctx context.Context, path string) (s
 	if err != nil {
 		return "", false
 	}
-	return f.checksumForPath(index, path)
-}
-
-func (f *GenericFileFinder) checksumForPath(index btree.BTreeIndex, path string) (string, bool) {
-	// Get the checksum for the given path at the given version
-	item, ok := index.Get(newChecksumItem(path, ""))
-	if !ok {
-		return "", false
-	}
-	return item.GetValueItem().Value().(ChecksumPath).Checksum, true
+	return btree.GetValueString(index, queryChecksum(path))
 }
 
 // MoveFile moves an internal mapping from oldPath to newPath. moved == true if the oldPath
@@ -271,7 +261,7 @@ func (f *GenericFileFinder) MoveFile(ctx context.Context, oldPath, newPath strin
 	// a) getting the checksum for the old path
 	// b) assigning that checksum to the new path
 	// c) deleting the item for the old path
-	checksum, ok := f.checksumForPath(index, oldPath)
+	checksum, ok := btree.GetValueString(index, queryChecksum(oldPath))
 	if !ok {
 		logrus.Error("MoveFile: Expected checksum to be available, but wasn't")
 		// if this happens; newPath won't be mapped to any checksum; but nothing worse
@@ -318,10 +308,10 @@ func (f *GenericFileFinder) SetMapping(ctx context.Context, state ChecksumPath, 
 }
 
 // internal method; not using any mutex; caller's responsibility
-func (f *GenericFileFinder) setIDsAtPath(index btree.BTreeIndex, path, checksum string, newIDs core.UnversionedObjectIDSet) (added, duplicates, removed core.UnversionedObjectIDSet) {
+func (f *GenericFileFinder) setIDsAtPath(index btree.Index, path, checksum string, newIDs core.UnversionedObjectIDSet) (added, duplicates, removed core.UnversionedObjectIDSet) {
 	// If there are no new ids, delete the checksum mapping
 	if newIDs.Len() == 0 {
-		index.Delete(newChecksumItem(path, ""))
+		index.Delete(queryChecksum(path))
 	} else {
 		// Update the checksum.
 		index.Put(newChecksumItem(path, checksum))
@@ -344,7 +334,7 @@ func (f *GenericFileFinder) setIDsAtPath(index btree.BTreeIndex, path, checksum 
 	_ = added.ForEach(func(addedID core.UnversionedObjectID) error {
 		itemToAdd := newIDItem(addedID, path)
 		// Check if this ID already exists in some other file. TODO: Is the second check needed?
-		if otherFile := btree.GetValueString(index, itemToAdd); len(otherFile) != 0 && otherFile != path {
+		if otherFile, _ := btree.GetValueString(index, itemToAdd); len(otherFile) != 0 && otherFile != path {
 			// If so; it is a duplicate; move it to duplicates
 			added.Delete(addedID)
 			duplicates.Insert(addedID)
@@ -360,7 +350,7 @@ func (f *GenericFileFinder) setIDsAtPath(index btree.BTreeIndex, path, checksum 
 
 	// Remove the removed items
 	_ = removed.ForEach(func(removedID core.UnversionedObjectID) error {
-		index.Delete(newIDItem(removedID, ""))
+		index.Delete(queryObject(removedID))
 		return nil
 	})
 
@@ -433,7 +423,7 @@ func (f *GenericFileFinder) ResetMappings(ctx context.Context, m map[ChecksumPat
 	// In the resulting mappings; no duplicates are allowed (to avoid "races" at random
 	// between different duplicates otherwise)
 	_ = duplicates.ForEach(func(id core.UnversionedObjectID) error {
-		index.Delete(newIDItem(id, ""))
+		index.Delete(queryObject(id))
 		return nil
 	})
 
@@ -467,59 +457,53 @@ func (f *GenericFileFinder) DeleteVersionRef(head core.VersionRef) {
 	f.index.DeleteVersionedTree(head.Branch())
 }
 
+func idForGroupKind(gk core.GroupKind) string            { return idField + ":" + gk.String() + ":" }
+func idForNamespace(gk core.GroupKind, ns string) string { return idForGroupKind(gk) + ns + ":" }
+func queryNamespace(gk core.GroupKind, ns string) btree.ItemQuery {
+	return btree.PrefixQuery(idForNamespace(gk, ns))
+}
+
+func idForObject(id core.UnversionedObjectID) string {
+	return idForNamespace(id.GroupKind(), id.ObjectKey().Namespace) + id.ObjectKey().Name
+}
+func queryObject(id core.UnversionedObjectID) btree.ItemQuery {
+	return btree.PrefixQuery(idForObject(id))
+}
+
+func queryPath(path string) btree.ItemQuery     { return btree.PrefixQuery(pathIdxField + ":" + path) }
+func queryChecksum(path string) btree.ItemQuery { return btree.PrefixQuery(checksumField + ":" + path) }
+
+func newChecksumItem(path, checksum string) btree.ValueItem {
+	return btree.NewStringStringItem(checksumField, path, checksum)
+}
+
 func newIDItem(id core.UnversionedObjectID, path string) btree.ValueItem {
-	return &idItemImpl{id: id, path: path}
+	return &idItemImpl{
+		ItemString: btree.NewItemString(idForObject(id)),
+		id:         id,
+		path:       path,
+	}
 }
 
 type idItemImpl struct {
+	btree.ItemString
 	id   core.UnversionedObjectID
 	path string
 }
 
 const (
-	idField          = "id"
-	idPathIndexField = "path"
-
+	idField       = "id"
+	pathIdxField  = "path"
 	checksumField = "chk"
 )
 
-func (i *idItemImpl) Less(item btree.OriginalBTreeItem) bool {
-	return i.String() < item.(btree.Item).String()
-}
-func (i *idItemImpl) String() string                                   { return idField + ":" + i.KeyString() }
-func (i *idItemImpl) GetValueItem() btree.ValueItem                    { return i }
-func (i *idItemImpl) GetUnversionedObjectID() core.UnversionedObjectID { return i.id }
-func (i *idItemImpl) Value() interface{}                               { return i.path }
-func (i *idItemImpl) ValueString() string                              { return i.path }
-
-func (i *idItemImpl) Key() interface{} { return i.id }
-func (i *idItemImpl) KeyString() string {
-	// TODO: Cache this and the output of IndexedPtrs()?
-	return i.id.GroupKind().String() + ":" + i.id.ObjectKey().Namespace + ":" + i.id.ObjectKey().Name
-}
+func (i *idItemImpl) GetValueItem() btree.ValueItem { return i }
+func (i *idItemImpl) Key() interface{}              { return i.id }
+func (i *idItemImpl) Value() interface{}            { return i.path }
 
 func (i *idItemImpl) IndexedPtrs() []btree.Item {
 	var self btree.ValueItem = i
 	return []btree.Item{
-		btree.NewIndexedPtr(&self, idPathIndexField+":"+i.path),
+		btree.NewIndexedPtr(pathIdxField+":"+i.path, &self),
 	}
 }
-
-func newChecksumItem(path, checksum string) btree.ValueItem {
-	return &checksumItemImpl{ChecksumPath{Path: path, Checksum: checksum}}
-}
-
-type checksumItemImpl struct {
-	ChecksumPath
-}
-
-func (i *checksumItemImpl) Less(item btree.OriginalBTreeItem) bool {
-	return i.String() < item.(btree.Item).String()
-}
-func (i *checksumItemImpl) String() string                { return checksumField + ":" + i.KeyString() }
-func (i *checksumItemImpl) GetValueItem() btree.ValueItem { return i }
-func (i *checksumItemImpl) Key() interface{}              { return i.Path }
-func (i *checksumItemImpl) KeyString() string             { return i.Path }
-func (i *checksumItemImpl) Value() interface{}            { return i.ChecksumPath }
-func (i *checksumItemImpl) ValueString() string           { return i.Checksum }
-func (i *checksumItemImpl) IndexedPtrs() []btree.Item     { return nil }
