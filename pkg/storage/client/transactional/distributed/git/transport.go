@@ -71,3 +71,7 @@ type authMethod struct {
 func (a *authMethod) TransportType() gitprovider.TransportType {
 	return a.t
 }
+
+func (a *authMethod) ApplyTo(target *Options) {
+	target.AuthMethod = a
+}

@@ -7,12 +7,8 @@ import (
 	"io/ioutil"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/fluxcd/go-git-providers/gitprovider"
-	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	log "github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
 	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/distributed"
@@ -24,26 +20,11 @@ var (
 	ErrNotStarted = errors.New("the LocalClone hasn't been started (and hence, cloned) yet")
 	// ErrCannotWriteToReadOnly happens if you try to do a write operation for a non-authenticated Git repo.
 	ErrCannotWriteToReadOnly = errors.New("the LocalClone is read-only, cannot write")
+	// ErrWorktreeClean happens if there are no modified files in the worktree when trying to create a commit.
+	ErrWorktreeClean = errors.New("there are no modified files, cannot create new commit")
+	// ErrWorktreeNotClean happens if there are modified files in the worktree when trying to create a new branch.
+	ErrWorktreeNotClean = errors.New("there are uncommitted changes, cannot create new branch")
 )
-
-const (
-	defaultBranch = "master"
-)
-
-// LocalCloneOptions provides options for the LocalClone.
-// TODO: Refactor this into the controller-runtime Options factory pattern.
-type LocalCloneOptions struct {
-	Branch string // default "master"
-
-	// Authentication method. If unspecified, this clone is read-only.
-	AuthMethod AuthMethod
-}
-
-func (o *LocalCloneOptions) Default() {
-	if o.Branch == "" {
-		o.Branch = defaultBranch
-	}
-}
 
 // LocalClone is an implementation of both a Remote, and a BranchManager, for Git.
 var _ transactional.BranchManager = &LocalClone{}
@@ -51,11 +32,10 @@ var _ distributed.Remote = &LocalClone{}
 
 // Create a new Remote and BranchManager implementation using Git. The repo is cloned immediately
 // in the constructor, you can use ctx to enforce a timeout for the clone.
-func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts LocalCloneOptions) (*LocalClone, error) {
+func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts ...Option) (*LocalClone, error) {
 	log.Info("Initializing the Git repo...")
 
-	// Default the options
-	opts.Default()
+	o := defaultOpts().ApplyOptions(opts)
 
 	// Create a temporary directory for the clone
 	tmpDir, err := ioutil.TempDir("", "libgitops")
@@ -66,7 +46,7 @@ func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts 
 
 	d := &LocalClone{
 		repoRef:  repoRef,
-		opts:     opts,
+		opts:     o,
 		cloneDir: tmpDir,
 		lock:     &sync.Mutex{},
 	}
@@ -79,8 +59,8 @@ func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts 
 		log.Infof("Running in read-only mode, won't write status back to the repo")
 	}
 
-	// Clone the repo
-	if err := d.clone(ctx); err != nil {
+	d.impl, err = NewGoGit(ctx, repoRef, tmpDir, o)
+	if err != nil {
 		return nil, err
 	}
 
@@ -88,20 +68,22 @@ func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts 
 }
 
 // LocalClone is an implementation of both a Remote, and a BranchManager, for Git.
+// TODO: Make so that the LocalClone does NOT interfere with any reads or writes by the Client using some shared
+// mutex.
 type LocalClone struct {
 	// user-specified options
 	repoRef gitprovider.RepositoryRef
-	opts    LocalCloneOptions
+	opts    *Options
 
 	// the temporary directory used for the clone
 	cloneDir string
 
-	// go-git objects. wt is the worktree of the repo, persistent during the lifetime of repo.
-	repo *git.Repository
-	wt   *git.Worktree
-
 	// the lock for git operations (so no ops are done simultaneously)
 	lock *sync.Mutex
+
+	impl Interface
+
+	// TODO: Keep track of current worktree branch
 }
 
 func (d *LocalClone) Dir() string {
@@ -109,7 +91,7 @@ func (d *LocalClone) Dir() string {
 }
 
 func (d *LocalClone) MainBranch() string {
-	return d.opts.Branch
+	return d.opts.MainBranch
 }
 
 func (d *LocalClone) RepositoryRef() gitprovider.RepositoryRef {
@@ -123,9 +105,9 @@ func (d *LocalClone) canWrite() bool {
 // verifyRead makes sure it's ok to start a read-something-from-git process
 func (d *LocalClone) verifyRead() error {
 	// Safeguard against not starting yet
-	if d.wt == nil {
+	/*if d.wt == nil {
 		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
-	}
+	}*/
 	return nil
 }
 
@@ -139,52 +121,6 @@ func (d *LocalClone) verifyWrite() error {
 	if !d.canWrite() {
 		return ErrCannotWriteToReadOnly
 	}
-	return nil
-}
-
-func (d *LocalClone) clone(ctx context.Context) error {
-	// Lock the mutex now that we're starting, and unlock it when exiting
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
-	cloneURL := d.repoRef.GetCloneURL(d.opts.AuthMethod.TransportType())
-
-	log.Infof("Starting to clone the repository %s", d.repoRef)
-	// Do a clone operation to the temporary directory
-	var err error
-	d.repo, err = git.PlainCloneContext(ctx, d.Dir(), false, &git.CloneOptions{
-		URL:           cloneURL,
-		Auth:          d.opts.AuthMethod,
-		ReferenceName: plumbing.NewBranchReferenceName(d.opts.Branch),
-		SingleBranch:  true,
-		NoCheckout:    false,
-		//Depth:             1, // ref: https://github.com/src-d/go-git/issues/1143
-		RecurseSubmodules: 0,
-		Progress:          nil,
-		Tags:              git.NoTags,
-	})
-	// Handle errors
-	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("git clone operation timed out: %w", err)
-	} else if errors.Is(err, context.Canceled) {
-		return fmt.Errorf("git clone was cancelled: %w", err)
-	} else if err != nil {
-		return fmt.Errorf("git clone error: %v", err)
-	}
-
-	// Populate the worktree pointer
-	d.wt, err = d.repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("git get worktree error: %v", err)
-	}
-
-	// Get the latest HEAD commit and report it to the user
-	ref, err := d.repo.Head()
-	if err != nil {
-		return err
-	}
-
-	log.Infof("Repo cloned; HEAD commit is %s", ref.Hash())
 	return nil
 }
 
@@ -202,66 +138,26 @@ func (d *LocalClone) Pull(ctx context.Context) error {
 		return err
 	}
 
-	// Perform the git pull operation. The context carries a timeout
-	log.Trace("Starting pull operation")
-	err := d.wt.PullContext(ctx, &git.PullOptions{
-		Auth:         d.opts.AuthMethod,
-		SingleBranch: true,
-	})
-
-	// Handle errors
-	if errors.Is(err, git.NoErrAlreadyUpToDate) {
-		// all good, nothing more to do
-		log.Trace("Pull already up-to-date")
-		return nil
-	} else if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("git pull operation timed out: %w", err)
-	} else if errors.Is(err, context.Canceled) {
-		return fmt.Errorf("git pull was cancelled: %w", err)
-	} else if err != nil {
-		return fmt.Errorf("git pull error: %v", err)
+	if err := d.impl.Pull(ctx); err != nil {
+		return err
 	}
 
-	log.Trace("Pulled successfully")
-
-	// Get current HEAD
-	ref, err := d.repo.Head()
+	ref, err := d.impl.CommitAt(ctx, "") // HEAD
 	if err != nil {
 		return err
 	}
 
-	log.Infof("New commit observed %s", ref.Hash())
+	log.Infof("New commit observed %s", ref)
 	return nil
 }
 
 func (d *LocalClone) Push(ctx context.Context) error {
-	// TODO: Push a specific branch only. Use opts.RefSpecs?
-
 	// Perform the git push operation. The context carries a timeout
 	log.Debug("Starting push operation")
-	err := d.repo.PushContext(ctx, &git.PushOptions{
-		Auth: d.opts.AuthMethod,
-	})
-
-	// Handle errors
-	if errors.Is(err, git.NoErrAlreadyUpToDate) {
-		// TODO: Is it good if there's nothing more to do; or a failure if there's nothing to push?
-		log.Trace("Push already up-to-date")
-		return nil
-	} else if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("git push operation timed out: %w", err)
-	} else if errors.Is(err, context.Canceled) {
-		return fmt.Errorf("git push was cancelled: %w", err)
-	} else if err != nil {
-		return fmt.Errorf("git push error: %v", err)
-	}
-
-	log.Trace("Pushed successfully")
-
-	return nil
+	return d.impl.Push(ctx, "") // TODO: only push the current branch
 }
 
-func (d *LocalClone) CreateBranch(_ context.Context, branch string) error {
+func (d *LocalClone) CreateBranch(ctx context.Context, branch string) error {
 	// Lock the mutex now that we're starting, and unlock it when exiting
 	d.lock.Lock()
 	defer d.lock.Unlock()
@@ -273,13 +169,18 @@ func (d *LocalClone) CreateBranch(_ context.Context, branch string) error {
 		return err
 	}
 
-	return d.wt.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(branch),
-		Create: true,
-	})
+	// Sanity-check that the worktree is clean before switching branches
+	if clean, err := d.impl.IsWorktreeClean(ctx); err != nil {
+		return err
+	} else if !clean {
+		return ErrWorktreeNotClean
+	}
+
+	// Create and switch to the new branch
+	return d.impl.CheckoutBranch(ctx, branch, false, true)
 }
 
-func (d *LocalClone) ResetToCleanBranch(_ context.Context, branch string) error {
+func (d *LocalClone) ResetToCleanBranch(ctx context.Context, branch string) error {
 	// Lock the mutex now that we're starting, and unlock it when exiting
 	d.lock.Lock()
 	defer d.lock.Unlock()
@@ -289,17 +190,12 @@ func (d *LocalClone) ResetToCleanBranch(_ context.Context, branch string) error 
 		return err
 	}
 
-	// Best-effort clean
-	_ = d.wt.Clean(&git.CleanOptions{
-		Dir: true,
-	})
+	// Best-effort clean, don't check the error
+	_ = d.impl.Clean(ctx)
 	// Force-checkout the main branch
 	// TODO: If a transaction (non-branched) was able to commit, and failed after that
 	// we need to roll back that commit.
-	return d.wt.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(branch),
-		Force:  true,
-	})
+	return d.impl.CheckoutBranch(ctx, branch, true, false)
 	// TODO: Do a pull here too?
 }
 
@@ -317,26 +213,16 @@ func (d *LocalClone) Commit(ctx context.Context, commit transactional.Commit) er
 		return err
 	}
 
-	s, err := d.wt.Status()
-	if err != nil {
-		return fmt.Errorf("git status failed: %v", err)
-	}
-	if s.IsClean() {
-		log.Debugf("No changed files in git repo, nothing to commit...")
-		// TODO: Should this be an error instead?
-		return nil
+	// Don't commit anything if already clean
+	if clean, err := d.impl.IsWorktreeClean(ctx); err != nil {
+		return err
+	} else if clean {
+		return ErrWorktreeClean
 	}
 
 	// Do a commit
 	log.Debug("Committing all local changes")
-	hash, err := d.wt.Commit(commit.GetMessage().String(), &git.CommitOptions{
-		All: true,
-		Author: &object.Signature{
-			Name:  commit.GetAuthor().GetName(),
-			Email: commit.GetAuthor().GetEmail(),
-			When:  time.Now(),
-		},
-	})
+	hash, err := d.impl.Commit(ctx, commit)
 	if err != nil {
 		return fmt.Errorf("git commit error: %v", err)
 	}
