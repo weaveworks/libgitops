@@ -44,6 +44,10 @@ func (r *Generic) FileFinder() FileFinder {
 	return r.fileFinder
 }
 
+func (r *Generic) VersionRefResolver() core.VersionRefResolver {
+	return r.fileFinder.Filesystem().VersionRefResolver()
+}
+
 func (r *Generic) Read(ctx context.Context, id core.UnversionedObjectID) ([]byte, error) {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)

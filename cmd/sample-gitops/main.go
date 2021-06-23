@@ -138,15 +138,12 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 	defer func() { cancel() }()
 
 	// Construct the LocalClone implementation which backs the storage
-	localClone, err := git.NewLocalClone(ctx, repoRef, git.LocalCloneOptions{
-		Branch:     "master",
-		AuthMethod: authMethod,
-	})
+	localClone, err := git.NewLocalClone(ctx, repoRef, authMethod, git.Branch("master"))
 	if err != nil {
 		return err
 	}
 
-	ctx = core.WithVersionRef(ctx, core.NewBranchRef(localClone.MainBranch()))
+	ctx = core.WithMutableVersionRef(ctx, localClone.MainBranch())
 
 	// Just use default encoders and decoders
 	encoder := scheme.Serializer.Encoder()
@@ -226,7 +223,7 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail, prMilestone str
 		list.SetGroupVersionKind(v1alpha1.SchemeGroupVersion.WithKind("CarList"))
 
 		/*if br := c.QueryParam("branch"); len(br) != 0 {
-			ctx = core.WithVersionRef(ctx, core.NewBranchRef(br))
+			ctx = core.WithVersionRef(ctx, core.NewMutableVersionRef(br))
 		}*/
 
 		if err := txClient.List(ctx, list); err != nil {

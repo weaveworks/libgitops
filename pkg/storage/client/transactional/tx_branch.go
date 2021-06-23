@@ -1,10 +1,6 @@
 package transactional
 
-import (
-	"context"
-	"fmt"
-)
-
+/*
 type txBranchImpl struct {
 	*txCommon
 
@@ -26,9 +22,9 @@ func (tx *txBranchImpl) CreateTx(c Commit) BranchTxResult {
 
 	// Allow the merger to merge, if supported
 	return &txResultImpl{
-		err:        cleanupErr,
-		ctx:        tx.ctx,
-		merger:     tx.merger,
+		err: cleanupErr,
+		ctx: tx.ctx,
+		//merger:     tx.merger,
 		baseBranch: tx.info.Base,
 		headBranch: tx.info.Head,
 	}
@@ -46,11 +42,11 @@ func newErrTxResult(err error) *txResultImpl {
 }
 
 type txResultImpl struct {
-	err        error
-	ctx        context.Context
-	merger     BranchMerger
-	baseBranch string
-	headBranch string
+	err error
+	ctx context.Context
+	//merger     BranchMerger
+	baseBranch core.VersionRef
+	headBranch core.VersionRef
 }
 
 func (r *txResultImpl) Error() error {
@@ -69,3 +65,4 @@ func (r *txResultImpl) MergeWithBase(c Commit) error {
 	// Try to merge the branch
 	return r.merger.MergeBranches(r.ctx, r.baseBranch, r.headBranch, c)
 }
+*/

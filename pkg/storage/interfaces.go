@@ -34,6 +34,7 @@ type Storage interface {
 // StorageCommon is an interface that contains the resources both needed
 // by Reader and Writer.
 type StorageCommon interface {
+	VersionRefResolver() core.VersionRefResolver
 	// Namespacer gives access to the namespacer that is used
 	Namespacer() Namespacer
 	// Exists checks if the resource indicated by the ID exists.

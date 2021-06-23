@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/spf13/afero"
+	"github.com/weaveworks/libgitops/pkg/storage/core"
 )
 
 // Filesystem extends afero.Fs and afero.Afero with contexts added to every method.
@@ -56,6 +57,8 @@ type Filesystem interface {
 	// This path MUST be absolute. All other paths for the other methods
 	// MUST be relative to this directory.
 	RootDirectory() string
+
+	VersionRefResolver() core.VersionRefResolver
 }
 
 // NewOSFilesystem creates a new afero.OsFs for the local directory, using
@@ -121,6 +124,10 @@ func (f *filesystem) WriteFile(_ context.Context, filename string, data []byte, 
 
 func (f *filesystem) Walk(_ context.Context, root string, walkFn filepath.WalkFunc) error {
 	return afero.Walk(f.fs, root, walkFn)
+}
+
+func (f *filesystem) VersionRefResolver() core.VersionRefResolver {
+	return nil
 }
 
 func checksumFromFileInfo(fi os.FileInfo) string {

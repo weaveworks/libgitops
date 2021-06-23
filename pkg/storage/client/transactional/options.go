@@ -11,22 +11,22 @@ var _ TxOption = &TxOptions{}
 func defaultTxOptions() *TxOptions {
 	return &TxOptions{
 		Timeout: 1 * time.Minute,
-		Mode:    TxModeAtomic,
+		//Mode:    TxModeAtomic,
 	}
 }
 
 type TxOptions struct {
 	Timeout time.Duration
-	Mode    TxMode
+	//Mode    TxMode
 }
 
 func (o *TxOptions) ApplyToTx(target *TxOptions) {
 	if o.Timeout != 0 {
 		target.Timeout = o.Timeout
 	}
-	if len(o.Mode) != 0 {
+	/*if len(o.Mode) != 0 {
 		target.Mode = o.Mode
-	}
+	}*/
 }
 
 func (o *TxOptions) ApplyOptions(opts []TxOption) *TxOptions {
@@ -36,7 +36,7 @@ func (o *TxOptions) ApplyOptions(opts []TxOption) *TxOptions {
 	return o
 }
 
-var _ TxOption = TxMode("")
+/*var _ TxOption = TxMode("")
 
 type TxMode string
 
@@ -55,7 +55,7 @@ const (
 
 func (m TxMode) ApplyToTx(target *TxOptions) {
 	target.Mode = m
-}
+}*/
 
 var _ TxOption = TxTimeout(0)
 

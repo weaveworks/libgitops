@@ -33,3 +33,9 @@ func randomSHA(byteLen int) (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+/*type BranchLocker struct {
+	KeyedLock sync.KeyedLock
+}
+
+func (l *BranchLocker) */

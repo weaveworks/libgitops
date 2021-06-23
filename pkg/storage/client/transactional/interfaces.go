@@ -10,9 +10,12 @@ import (
 type Client interface {
 	client.Reader
 
-	BranchManager() BranchManager
+	TransactionManager() TransactionManager
+	// KeyedLock is used for locking operations targeting branches
+	//KeyedLock() syncutil.NamedLockMap
+
 	// BranchMerger is optional.
-	BranchMerger() BranchMerger
+	//BranchMerger() BranchMerger
 
 	// CommitHookChain is a chain of hooks that are run before and after a commit is made.
 	CommitHookChain() CommitHookChain
@@ -25,23 +28,27 @@ type Client interface {
 	// BranchTransaction creates a new "head" branch with the given {branchName} name, based
 	// on the "base" branch in the context. The "base" branch is not locked for writing while
 	// the transaction is running, but the head branch is.
-	BranchTransaction(ctx context.Context, branchName string, opts ...TxOption) BranchTx
+	BranchTransaction(ctx context.Context, branchName string, opts ...TxOption) Tx
 }
 
-type BranchManager interface {
+type TransactionManager interface {
 	// CreateBranch creates a new branch with the given target branch name. It forks out
 	// of the branch specified in the context.
 	CreateBranch(ctx context.Context, branch string) error
-	// ResetToCleanBranch switches back to the given branch; but first discards all non-committed
+	// ResetToCleanVersion switches back to the given branch; but first discards all non-committed
 	// changes.
-	ResetToCleanBranch(ctx context.Context, branch string) error
+	//ResetToCleanVersion(ctx context.Context, ref core.VersionRef) error
 	// Commit creates a new commit for the branch stored in the context.
 	Commit(ctx context.Context, commit Commit) error
+
+	/*// LockVersionRef takes the VersionRef attached in the context, and makes sure that it is
+	// "locked" to the current commit for a given branch.
+	LockVersionRef(ctx context.Context) (context.Context, error)*/
 }
 
-type BranchMerger interface {
-	MergeBranches(ctx context.Context, base, head string, commit Commit) error
-}
+/*type BranchMerger interface {
+	MergeBranches(ctx context.Context, base, head core.VersionRef, commit Commit) error
+}*/
 
 type CustomTxFunc func(ctx context.Context) error
 
@@ -66,7 +73,7 @@ type Tx interface {
 	PatchStatus(obj client.Object, patch client.Patch, opts ...client.PatchOption) Tx
 }
 
-type BranchTx interface {
+/*type BranchTx interface {
 	CreateTx(Commit) BranchTxResult
 	Abort(err error) error
 
@@ -90,4 +97,4 @@ type BranchTx interface {
 type BranchTxResult interface {
 	Error() error
 	MergeWithBase(Commit) error
-}
+}*/

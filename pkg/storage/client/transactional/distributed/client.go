@@ -50,13 +50,23 @@ type Generic struct {
 	branchLocksMu *sync.Mutex
 }
 
+type branchLockKeyImpl struct{}
+
+var branchLockKey = branchLockKeyImpl{}
+
 type branchLock struct {
 	// mu should be write-locked whenever the branch is actively running any
 	// function from the remote
-	mu *sync.RWMutex
+	// mu *sync.RWMutex
 	// lastPull is guarded by mu, before reading, one should RLock mu
 	lastPull time.Time
 }
+
+/*
+	TxMode.AllowReads is incompatible with the PC/EC distributed mode, and might be with the PC/EL mode.
+	Ahh, just completely remove the AllowReads mode. If the person wants to do a read for a specific version
+	while a tx is going on for a branch, they just need to specify the direct commit.
+*/
 
 func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
 	return c.readWhenPossible(ctx, func() error {
@@ -71,10 +81,14 @@ func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...clie
 }
 
 func (c *Generic) readWhenPossible(ctx context.Context, operation func() error) error {
-	branch := c.branchFromCtx(ctx)
+	ref := core.GetVersionRef(ctx)
+	// If the versionref is immutable, we can read directly.
+	if ref.IsImmutable() {
+		return operation()
+	}
 
 	// Check if we need to do a pull before
-	if c.needsResync(branch, c.opts.CacheValidDuration) {
+	if c.needsResync(ref, c.opts.CacheValidDuration) {
 		// Try to pull the remote branch. If it fails, use returnErr to figure out if
 		// this (depending on the configured PACELC mode) is a critical error, or if we
 		// should continue with the read
@@ -88,7 +102,10 @@ func (c *Generic) readWhenPossible(ctx context.Context, operation func() error) 
 	return operation()
 }
 
-func (c *Generic) getBranchLockInfo(branch string) *branchLock {
+func (c *Generic) getBranchLockInfo(ref core.VersionRef) *branchLock {
+	// We "know" this is a "branch", as immutable references are no-ops in readWhenPossible
+	branch := ref.VersionRef()
+
 	c.branchLocksMu.Lock()
 	defer c.branchLocksMu.Unlock()
 
@@ -104,8 +121,8 @@ func (c *Generic) getBranchLockInfo(branch string) *branchLock {
 	return c.branchLocks[branch]
 }
 
-func (c *Generic) needsResync(branch string, d time.Duration) bool {
-	lck := c.getBranchLockInfo(branch)
+func (c *Generic) needsResync(ref core.VersionRef, d time.Duration) bool {
+	lck := c.getBranchLockInfo(ref)
 	// Lock while reading the last resync time
 	lck.mu.RLock()
 	defer lck.mu.RUnlock()
@@ -162,9 +179,9 @@ func (c *Generic) resyncLoop(ctx context.Context, resyncCacheInterval time.Durat
 	logrus.Info("Exiting the resync loop...")
 }
 
-func (c *Generic) pull(ctx context.Context, branch string) error {
+func (c *Generic) pull(ctx context.Context, ref core.VersionRef) error {
 	// Need to get the branch-specific lock variable
-	lck := c.getBranchLockInfo(branch)
+	lck := c.getBranchLockInfo(ref)
 	// Write-lock while this operation is in progress
 	lck.mu.Lock()
 	defer lck.mu.Unlock()
@@ -174,7 +191,7 @@ func (c *Generic) pull(ctx context.Context, branch string) error {
 	defer cancel()
 
 	// Make a ctx for the given branch
-	ctxForBranch := core.WithVersionRef(pullCtx, core.NewBranchRef(branch))
+	ctxForBranch := core.WithMutableVersionRef(pullCtx, branch)
 	if err := c.remote.Pull(ctxForBranch); err != nil {
 		return err
 	}

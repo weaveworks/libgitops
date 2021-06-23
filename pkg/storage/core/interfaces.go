@@ -44,13 +44,30 @@ type ObjectID interface {
 	GroupVersionKind() GroupVersionKind
 }
 
-// VersionRef is an interface that describes a reference to a specific version (for now; branch)
+/*// VersionRef is an interface that describes a reference to a specific version (for now; branch)
 // of Objects in a Storage or Client.
 type VersionRef interface {
-	// Branch returns the branch name.
-	Branch() string
+	// VersionRef returns the version reference, e.g. a branch name or a commit hash.
+	VersionRef() string
 	// IsZeroValue determines if this VersionRef is the "zero value", which means
 	// that the caller should figure out how to handle that the user did not
 	// give specific opinions of what version of the Object to get.
 	IsZeroValue() bool
+	// IsImmutable determines if the given version reference is immutable, i.e. cannot be modified.
+	IsImmutable() bool
 }
+
+type LockedVersionRef interface {
+	VersionRef
+
+	ImmutableRef() VersionRef
+}
+
+type MutableVersionRef interface {
+	MutableRefName() string
+	IsDefault() bool
+}
+
+type ImmutableVersionRef interface {
+	ImmutableHash() string
+}*/

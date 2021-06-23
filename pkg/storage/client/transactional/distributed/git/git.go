@@ -26,11 +26,11 @@ var (
 	ErrWorktreeNotClean = errors.New("there are uncommitted changes, cannot create new branch")
 )
 
-// LocalClone is an implementation of both a Remote, and a BranchManager, for Git.
-var _ transactional.BranchManager = &LocalClone{}
+// LocalClone is an implementation of both a Remote, and a TransactionManager, for Git.
+var _ transactional.TransactionManager = &LocalClone{}
 var _ distributed.Remote = &LocalClone{}
 
-// Create a new Remote and BranchManager implementation using Git. The repo is cloned immediately
+// Create a new Remote and TransactionManager implementation using Git. The repo is cloned immediately
 // in the constructor, you can use ctx to enforce a timeout for the clone.
 func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts ...Option) (*LocalClone, error) {
 	log.Info("Initializing the Git repo...")
@@ -67,7 +67,7 @@ func NewLocalClone(ctx context.Context, repoRef gitprovider.RepositoryRef, opts 
 	return d, nil
 }
 
-// LocalClone is an implementation of both a Remote, and a BranchManager, for Git.
+// LocalClone is an implementation of both a Remote, and a TransactionManager, for Git.
 // TODO: Make so that the LocalClone does NOT interfere with any reads or writes by the Client using some shared
 // mutex.
 type LocalClone struct {
@@ -162,7 +162,7 @@ func (d *LocalClone) CreateBranch(ctx context.Context, branch string) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	// TODO: Should the caller do a force-reset using ResetToCleanBranch before creating the branch?
+	// TODO: Should the caller do a force-reset using ResetToCleanVersion before creating the branch?
 
 	// Make sure it's okay to write
 	if err := d.verifyWrite(); err != nil {
@@ -180,7 +180,7 @@ func (d *LocalClone) CreateBranch(ctx context.Context, branch string) error {
 	return d.impl.CheckoutBranch(ctx, branch, false, true)
 }
 
-func (d *LocalClone) ResetToCleanBranch(ctx context.Context, branch string) error {
+func (d *LocalClone) ResetToCleanVersion(ctx context.Context, branch string) error {
 	// Lock the mutex now that we're starting, and unlock it when exiting
 	d.lock.Lock()
 	defer d.lock.Unlock()

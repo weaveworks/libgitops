@@ -1,11 +1,15 @@
 package transactional
 
-import "context"
+import (
+	"context"
+
+	"github.com/weaveworks/libgitops/pkg/storage/core"
+)
 
 type TxInfo struct {
-	Base    string
-	Head    string
-	Options TxOptions
+	BaseCommit core.Commit
+	HeadBranch string
+	Options    TxOptions
 }
 
 type CommitHookChain interface {
@@ -76,7 +80,7 @@ type TransactionHookChain interface {
 // of the result of the transaction; these will always be run.
 type TransactionHook interface {
 	// PreTransactionHook executes before CreateBranch has been called for the
-	// BranchManager in BranchTx mode; and in any case before any user-tx-specific
+	// TransactionManager in BranchTx mode; and in any case before any user-tx-specific
 	// code starts executing.
 	PreTransactionHook(ctx context.Context, info TxInfo) error
 	// PostTransactionHook executes when a transaction is terminated, either due

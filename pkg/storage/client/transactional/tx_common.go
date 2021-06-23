@@ -12,7 +12,7 @@ type txFunc func() error
 type txCommon struct {
 	err         error
 	c           client.Client
-	manager     BranchManager
+	manager     TransactionManager
 	commitHook  CommitHook
 	ctx         context.Context
 	ops         []txFunc

@@ -65,13 +65,13 @@ func (g *goGit) clone(ctx context.Context) error {
 		Tags:              git.NoTags,
 	}
 	if g.opts.MainBranch != "" {
-		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(g.opts.MainBranch)
+		cloneOpts.ReferenceName = plumbing.NewMutableVersionReferenceName(g.opts.MainBranch)
 	}
 
 	log.Infof("Starting to clone the repository %s", g.repoRef)
 	// Do a clone operation to the temporary directory
 	var err error
-	g.repo, err = git.PlainCloneContext(ctx, g.dir, false, cloneOpts)
+	g.repo, err = git.PlainCloneContext(ctx, g.dir, true, cloneOpts)
 	// Handle errors
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("git clone operation timed out: %w", err)
@@ -177,7 +177,7 @@ func (g *goGit) Fetch(ctx context.Context, revision string) error {
 
 func (g *goGit) CheckoutBranch(ctx context.Context, branch string, force, create bool) error {
 	return g.wt.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(branch),
+		Branch: plumbing.NewMutableVersionReferenceName(branch),
 		Force:  true,
 		Create: create,
 	})
@@ -259,7 +259,7 @@ func (g *goGit) CommitAt(_ context.Context, branch string) (rev string, err erro
 	if branch != "" { // Point at HEAD
 		reference, err = g.repo.Head()
 	} else {
-		reference, err = g.repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+		reference, err = g.repo.Reference(plumbing.NewMutableVersionReferenceName(branch), true)
 	}
 	if err != nil {
 		return

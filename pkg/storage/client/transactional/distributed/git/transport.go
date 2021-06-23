@@ -17,6 +17,8 @@ type AuthMethod interface {
 	transport.AuthMethod
 	// TransportType defines what transport type should be used with this method
 	TransportType() gitprovider.TransportType
+	// AuthMethod also implements the option interface
+	Option
 }
 
 // NewSSHAuthMethod creates a new AuthMethod for the Git SSH protocol, using a given

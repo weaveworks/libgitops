@@ -58,6 +58,7 @@ func (tx *txImpl) PatchStatus(obj client.Object, patch client.Patch, opts ...cli
 	})
 }
 
+/*
 // Implement the required "fluent/functional" methods on BranchTx.
 // Go doesn't have generics; hence we need to do this twice.
 
@@ -108,3 +109,4 @@ func (tx *txBranchImpl) PatchStatus(obj client.Object, patch client.Patch, opts 
 		return nil // TODO tx.c.Status().Patch(ctx, obj, patch, opts...)
 	})
 }
+*/

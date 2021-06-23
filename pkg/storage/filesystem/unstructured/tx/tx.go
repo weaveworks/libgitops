@@ -30,11 +30,11 @@ type unstructuredStorageTxHandler struct {
 }
 
 func (h *unstructuredStorageTxHandler) PreTransactionHook(ctx context.Context, info transactional.TxInfo) error {
-	head := core.NewBranchRef(info.Head)
+	head := core.NewMutableVersionRef(info.Head)
 	if h.fileFinder.HasVersionRef(head) {
 		return nil // head exists, no-op
 	}
-	base := core.NewBranchRef(info.Base)
+	base := core.NewMutableVersionRef(info.Base)
 	// If both head and base are the same, and we know that head does not exist in the system, we need to create
 	// head "from scratch" as a "root version"
 	if info.Head == info.Base {
