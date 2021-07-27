@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/util/patch"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
@@ -93,7 +95,7 @@ func (p *patcher) ApplyOnStruct(bytePatcher patch.BytePatcher, patch []byte, obj
 
 	// Encode without conversion to the buffer
 	var buf bytes.Buffer
-	if err := p.encoder.EncodeForGroupVersion(NewJSONFrameWriter(&buf), obj, gvk.GroupVersion()); err != nil {
+	if err := p.encoder.EncodeForGroupVersion(frame.NewJSONWriter(content.ToBuffer(&buf)), obj, gvk.GroupVersion()); err != nil {
 		return err
 	}
 
@@ -110,7 +112,7 @@ func (p *patcher) ApplyOnStruct(bytePatcher patch.BytePatcher, patch []byte, obj
 	}
 
 	// Decode into the object to apply the changes
-	fr := NewSingleFrameReader(newJSON, ContentTypeJSON)
+	fr := frame.NewSingleJSONReader(content.FromBytes(newJSON))
 	if err := p.decoder.DecodeInto(fr, obj); err != nil {
 		return err
 	}

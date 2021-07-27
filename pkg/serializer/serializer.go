@@ -3,11 +3,13 @@ package serializer
 import (
 	"errors"
 
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
+/*
 // ContentType specifies a content type for Encoders, Decoders, FrameWriters and FrameReaders
 type ContentType string
 
@@ -19,15 +21,16 @@ const (
 	// ContentTypeYAML specifies usage of YAML as the content type.
 	// It is an alias for k8s.io/apimachinery/pkg/runtime.ContentTypeYAML
 	ContentTypeYAML = ContentType(runtime.ContentTypeYAML)
-)
+)*/
 
 var (
 	// ErrUnsupportedContentType is returned if the specified content type isn't supported
-	ErrUnsupportedContentType = errors.New("unsupported content type")
+	//ErrUnsupportedContentType = errors.New("unsupported content type")
 	// ErrObjectIsNotList is returned when a runtime.Object was not a List type
 	ErrObjectIsNotList = errors.New("given runtime.Object is not a *List type, or does not implement metav1.ListInterface")
 )
 
+/*
 // ContentTyped is an interface for objects that are specific to a set ContentType.
 type ContentTyped interface {
 	// ContentType returns the ContentType (usually ContentTypeYAML or ContentTypeJSON) for the given object.
@@ -35,7 +38,7 @@ type ContentTyped interface {
 }
 
 func (ct ContentType) ContentType() ContentType { return ct }
-
+*/
 // Serializer is an interface providing high-level decoding/encoding functionality
 // for types registered in a *runtime.Scheme
 type Serializer interface {
@@ -77,12 +80,12 @@ type Encoder interface {
 	// The FrameWriter specifies the ContentType. This encoder will automatically convert any
 	// internal object given to the preferred external groupversion. No conversion will happen
 	// if the given object is of an external version.
-	Encode(fw FrameWriter, obj ...runtime.Object) error
+	Encode(fw frame.Writer, obj ...runtime.Object) error
 
 	// EncodeForGroupVersion encodes the given object for the specific groupversion. If the object
 	// is not of that version currently it will try to convert. The output bytes are written to the
 	// FrameWriter. The FrameWriter specifies the ContentType.
-	EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv schema.GroupVersion) error
+	EncodeForGroupVersion(fw frame.Writer, obj runtime.Object, gv schema.GroupVersion) error
 
 	// SchemeLock exposes the underlying LockedScheme
 	GetLockedScheme() LockedScheme
@@ -110,7 +113,7 @@ type Decoder interface {
 	// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
 	// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 	// opts.DecodeListElements is not applicable in this call.
-	Decode(fr FrameReader) (runtime.Object, error)
+	Decode(fr frame.Reader) (runtime.Object, error)
 
 	// DecodeInto decodes the next document in the FrameReader stream into obj if the types are matching.
 	// If there are multiple documents in the underlying stream, this call will read one
@@ -129,7 +132,7 @@ type Decoder interface {
 	// opts.DecodeUnknown is not applicable in this call. In case you want to decode an object into a
 	// 	*runtime.Unknown, just create a runtime.Unknown object and pass the pointer as obj into DecodeInto
 	// 	and it'll work.
-	DecodeInto(fr FrameReader, obj runtime.Object) error
+	DecodeInto(fr frame.Reader, obj runtime.Object) error
 
 	// DecodeAll returns the decoded objects from all documents in the FrameReader stream. The underlying
 	// stream is automatically closed on io.EOF. io.EOF is never returned from this function.
@@ -146,7 +149,7 @@ type Decoder interface {
 	// 	added into the returning slice. The v1.List will in this case not be returned.
 	// If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
 	// 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
-	DecodeAll(fr FrameReader) ([]runtime.Object, error)
+	DecodeAll(fr frame.Reader) ([]runtime.Object, error)
 
 	// SchemeLock exposes the underlying LockedScheme
 	GetLockedScheme() LockedScheme

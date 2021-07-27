@@ -2,9 +2,13 @@ package serializer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"strings"
 
+	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sserializer "k8s.io/apimachinery/pkg/runtime/serializer"
@@ -39,7 +43,7 @@ func (e *encoder) CodecFactory() *k8sserializer.CodecFactory {
 // if the given object is of an external version.
 // TODO: This should automatically convert to the preferred version
 // TODO: Fix that sometimes omitempty fields aren't respected
-func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
+func (e *encoder) Encode(fw frame.Writer, objs ...runtime.Object) error {
 	for _, obj := range objs {
 		// Get the kind for the given object
 		gvk, err := GVKForObject(e.Scheme(), obj)
@@ -67,11 +71,11 @@ func (e *encoder) Encode(fw FrameWriter, objs ...runtime.Object) error {
 // EncodeForGroupVersion encodes the given object for the specific groupversion. If the object
 // is not of that version currently it will try to convert. The output bytes are written to the
 // FrameWriter. The FrameWriter specifies the ContentType.
-func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv schema.GroupVersion) error {
+func (e *encoder) EncodeForGroupVersion(fw frame.Writer, obj runtime.Object, gv schema.GroupVersion) error {
 	// Get the serializer for the media type
 	serializerInfo, ok := runtime.SerializerInfoForMediaType(e.codecs.SupportedMediaTypes(), string(fw.ContentType()))
 	if !ok {
-		return ErrUnsupportedContentType
+		return content.ErrUnsupportedContentType(fw.ContentType()) // TODO: Say what content types are supported
 	}
 
 	// Choose the default, non-pretty serializer, as we prettify if needed later
@@ -85,18 +89,22 @@ func (e *encoder) EncodeForGroupVersion(fw FrameWriter, obj runtime.Object, gv s
 	// Get a version-specific encoder for the specified groupversion
 	versionEncoder := encoderForVersion(e.Scheme(), encoder, gv)
 
+	ctx := context.TODO()
+	wc := frame.ToIoWriteCloser(ctx, fw)
+
 	// Check if the user requested prettified JSON output.
 	// If the ContentType is JSON this is ok, we will intent the encode output on the fly.
-	if *e.opts.JSONIndent > 0 && fw.ContentType() == ContentTypeJSON {
-		fw = &jsonPrettyFrameWriter{indent: *e.opts.JSONIndent, fw: fw}
+	if *e.opts.JSONIndent > 0 && fw.ContentType() == content.ContentTypeJSON {
+		wc = &jsonPrettyWriter{indent: *e.opts.JSONIndent, wc: wc}
 	}
 
 	// Cast the object to a metav1.Object to get access to annotations
 	metaobj, ok := toMetaObject(obj)
 	// For objects without ObjectMeta, the cast will fail. Allow that failure and do "normal" encoding
 	if !ok {
-		return versionEncoder.Encode(obj, fw)
+		return versionEncoder.Encode(obj, wc)
 	}
+	// TODO: Document that the frame.Writer is not closed
 
 	// Specialize the encoder for a specific gv and encode the object
 	return e.encodeWithCommentSupport(versionEncoder, fw, obj, metaobj)
@@ -115,12 +123,12 @@ func encoderForVersion(scheme *runtime.Scheme, encoder runtime.Encoder, gv schem
 	)
 }
 
-type jsonPrettyFrameWriter struct {
+type jsonPrettyWriter struct {
 	indent int32
-	fw     FrameWriter
+	wc     io.WriteCloser
 }
 
-func (w *jsonPrettyFrameWriter) Write(p []byte) (n int, err error) {
+func (w *jsonPrettyWriter) Write(p []byte) (n int, err error) {
 	// Indent the source bytes
 	var indented bytes.Buffer
 	err = json.Indent(&indented, p, "", strings.Repeat(" ", int(w.indent)))
@@ -128,10 +136,10 @@ func (w *jsonPrettyFrameWriter) Write(p []byte) (n int, err error) {
 		return
 	}
 	// Write the pretty bytes to the underlying writer
-	n, err = w.fw.Write(indented.Bytes())
+	n, err = w.wc.Write(indented.Bytes())
 	return
 }
 
-func (w *jsonPrettyFrameWriter) ContentType() ContentType {
-	return w.fw.ContentType()
+func (w *jsonPrettyWriter) Close() error {
+	return w.wc.Close()
 }

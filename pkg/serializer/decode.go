@@ -1,16 +1,18 @@
 package serializer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"reflect"
 
+	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/versioning"
-	serializeryaml "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 )
 
 // This is the groupversionkind for the v1.List object
@@ -62,17 +64,18 @@ func (d *decoder) GetLockedScheme() LockedScheme {
 // If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
 // 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
 // opts.DecodeListElements is not applicable in this call.
-func (d *decoder) Decode(fr FrameReader) (runtime.Object, error) {
+func (d *decoder) Decode(fr frame.Reader) (runtime.Object, error) {
 	// Read a frame from the FrameReader
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
-	doc, err := fr.ReadFrame()
+	ctx := context.TODO()
+	doc, err := fr.ReadFrame(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return d.decode(doc, nil, fr.ContentType())
 }
 
-func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runtime.Object, error) {
+func (d *decoder) decode(doc []byte, into runtime.Object, ct content.ContentType) (runtime.Object, error) {
 	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
 	// make the scheme able to decode the v1.List automatically
 	if *d.opts.DecodeListElements {
@@ -101,7 +104,7 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 		// Give the user good errors wrt missing group & version
 		// TODO: It might be unnecessary to unmarshal twice (as we do in handleDecodeError),
 		// as gvk was returned from Decode above.
-		return nil, d.handleDecodeError(doc, err)
+		return nil, d.handleDecodeError(gvk, err)
 	}
 
 	// Fail fast if object is nil
@@ -142,10 +145,11 @@ func (d *decoder) decode(doc []byte, into runtime.Object, ct ContentType) (runti
 //
 // TODO: Support decoding all frames at once into e.g. PartialMetadataLists, UnstructuredLists, or
 // metav1.Lists.
-func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
+func (d *decoder) DecodeInto(fr frame.Reader, into runtime.Object) error {
 	// Read a frame from the FrameReader.
 	// TODO: Make sure to test the case when doc might contain something, and err is io.EOF
-	doc, err := fr.ReadFrame()
+	ctx := context.TODO()
+	doc, err := fr.ReadFrame(ctx)
 	if err != nil {
 		return err
 	}
@@ -170,7 +174,7 @@ func (d *decoder) DecodeInto(fr FrameReader, into runtime.Object) error {
 // 	added into the returning slice. The v1.List will in this case not be returned.
 // If opts.DecodeUnknown is true, any type with an unrecognized apiVersion/kind will be returned as a
 // 	*runtime.Unknown object instead of returning a UnrecognizedTypeError.
-func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
+func (d *decoder) DecodeAll(fr frame.Reader) ([]runtime.Object, error) {
 	objs := []runtime.Object{}
 	for {
 		obj, err := d.Decode(fr)
@@ -193,7 +197,7 @@ func (d *decoder) DecodeAll(fr FrameReader) ([]runtime.Object, error) {
 }
 
 // decodeUnknown decodes bytes of a certain content type into a returned *runtime.Unknown object
-func (d *decoder) decodeUnknown(doc []byte, ct ContentType) (runtime.Object, error) {
+func (d *decoder) decodeUnknown(doc []byte, ct content.ContentType) (runtime.Object, error) {
 	// Do a DecodeInto the new pointer to the object we've got. The resulting into object is
 	// also returned.
 	// The content type isn't really used here, as runtime.Unknown will never implement
@@ -201,15 +205,9 @@ func (d *decoder) decodeUnknown(doc []byte, ct ContentType) (runtime.Object, err
 	return d.decode(doc, &runtime.Unknown{}, ct)
 }
 
-func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
-	// Parse the document's TypeMeta information
-	gvk, err := serializeryaml.DefaultMetaFactory.Interpret(doc)
-	if err != nil {
-		return fmt.Errorf("failed to interpret TypeMeta from the given the YAML: %v. Decode error was: %w", err, origErr)
-	}
-
+func (d *decoder) handleDecodeError(gvk *schema.GroupVersionKind, origErr error) error {
 	// TODO: Unit test that typed errors are returned properly
-
+	// TODO: Check for gvk == nil here?
 	// Check if the group was known. If not, return that specific error
 	if !d.Scheme().IsGroupRegistered(gvk.Group) {
 		return NewUnrecognizedGroupError(*gvk, origErr)
@@ -230,7 +228,7 @@ func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
 	return origErr
 }
 
-func (d *decoder) extractNestedObjects(obj runtime.Object, ct ContentType) ([]runtime.Object, error) {
+func (d *decoder) extractNestedObjects(obj runtime.Object, ct content.ContentType) ([]runtime.Object, error) {
 	// If we didn't ask for list-unwrapping functionality, return directly
 	if !*d.opts.DecodeListElements {
 		return []runtime.Object{obj}, nil
