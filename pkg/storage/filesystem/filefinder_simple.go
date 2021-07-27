@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -31,7 +31,7 @@ func NewSimpleFileFinder(fs Filesystem, opts SimpleFileFinderOptions) (*SimpleFi
 	if fs == nil {
 		return nil, fmt.Errorf("NewSimpleFileFinder: fs is mandatory")
 	}
-	ct := serializer.ContentTypeJSON
+	ct := content.ContentTypeJSON
 	if len(opts.ContentType) != 0 {
 		ct = opts.ContentType
 	}
@@ -94,8 +94,8 @@ type SimpleFileFinderOptions struct {
 	DisableGroupDirectory bool
 	// Default: ""; means use file names as the means of storage
 	SubDirectoryFileName string
-	// Default: serializer.ContentTypeJSON
-	ContentType serializer.ContentType
+	// Default: content.ContentTypeJSON
+	ContentType content.ContentType
 	// Default: DefaultFileExtensionResolver
 	FileExtensionResolver FileExtensionResolver
 }

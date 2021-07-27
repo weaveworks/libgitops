@@ -11,6 +11,7 @@ import (
 // a possiblility to listen for changes to objects as they change.
 // TODO: Maybe we could use some of controller-runtime's built-in functionality
 // for watching for changes?
+// TODO: Use k8s.io/apimachinery/pkg/watch#EventType et al instead.
 type Storage interface {
 	storage.Storage
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/content"
 )
 
 var (
@@ -21,15 +21,15 @@ type ContentTyper interface {
 	// ContentTypeForPath should return the content type for the file that exists in
 	// the given Filesystem (path is relative). If the content type cannot be determined
 	// please return a wrapped ErrCannotDetermineContentType error.
-	ContentTypeForPath(ctx context.Context, fs Filesystem, path string) (serializer.ContentType, error)
+	ContentTypeForPath(ctx context.Context, fs Filesystem, path string) (content.ContentType, error)
 }
 
 // DefaultContentTypes describes the default connection between
 // file extensions and a content types.
 var DefaultContentTyper ContentTyper = ContentTypeForExtension{
-	".json": serializer.ContentTypeJSON,
-	".yaml": serializer.ContentTypeYAML,
-	".yml":  serializer.ContentTypeYAML,
+	".json": content.ContentTypeJSON,
+	".yaml": content.ContentTypeYAML,
+	".yml":  content.ContentTypeYAML,
 }
 
 // ContentTypeForExtension implements the ContentTyper interface
@@ -39,12 +39,12 @@ var DefaultContentTyper ContentTyper = ContentTypeForExtension{
 // the corresponding content type. There might be many extensions which
 // map to the same content type, e.g. both ".yaml" -> ContentTypeYAML
 // and ".yml" -> ContentTypeYAML.
-type ContentTypeForExtension map[string]serializer.ContentType
+type ContentTypeForExtension map[string]content.ContentType
 
-func (m ContentTypeForExtension) ContentTypeForPath(ctx context.Context, _ Filesystem, path string) (serializer.ContentType, error) {
+func (m ContentTypeForExtension) ContentTypeForPath(ctx context.Context, _ Filesystem, path string) (content.ContentType, error) {
 	ct, ok := m[filepath.Ext(path)]
 	if !ok {
-		return serializer.ContentType(""), fmt.Errorf("%w for file %q", ErrCannotDetermineContentType, path)
+		return content.ContentType(""), fmt.Errorf("%w for file %q", ErrCannotDetermineContentType, path)
 	}
 	return ct, nil
 }
@@ -52,10 +52,10 @@ func (m ContentTypeForExtension) ContentTypeForPath(ctx context.Context, _ Files
 // StaticContentTyper always responds with the same, statically-set, ContentType for any path.
 type StaticContentTyper struct {
 	// ContentType is a required field
-	ContentType serializer.ContentType
+	ContentType content.ContentType
 }
 
-func (t StaticContentTyper) ContentTypeForPath(_ context.Context, _ Filesystem, _ string) (serializer.ContentType, error) {
+func (t StaticContentTyper) ContentTypeForPath(_ context.Context, _ Filesystem, _ string) (content.ContentType, error) {
 	if len(t.ContentType) == 0 {
 		return "", fmt.Errorf("StaticContentTyper.ContentType must not be empty")
 	}
@@ -69,21 +69,21 @@ type FileExtensionResolver interface {
 	// The returned string MUST start with a dot, e.g. ".json". If the given
 	// ContentType is not known, it is recommended to return a wrapped
 	// ErrUnrecognizedContentType.
-	ExtensionForContentType(ct serializer.ContentType) (string, error)
+	ExtensionForContentType(ct content.ContentType) (string, error)
 }
 
 // DefaultFileExtensionResolver describes a default connection between
 // the file extensions and ContentTypes , namely JSON -> ".json" and
 // YAML -> ".yaml".
 var DefaultFileExtensionResolver FileExtensionResolver = ExtensionForContentType{
-	serializer.ContentTypeJSON: ".json",
-	serializer.ContentTypeYAML: ".yaml",
+	content.ContentTypeJSON: ".json",
+	content.ContentTypeYAML: ".yaml",
 }
 
 // ExtensionForContentType is a simple map implementation of FileExtensionResolver.
-type ExtensionForContentType map[serializer.ContentType]string
+type ExtensionForContentType map[content.ContentType]string
 
-func (m ExtensionForContentType) ExtensionForContentType(ct serializer.ContentType) (string, error) {
+func (m ExtensionForContentType) ExtensionForContentType(ct content.ContentType) (string, error) {
 	ext, ok := m[ct]
 	if !ok {
 		return "", fmt.Errorf("%q: %q", ErrUnrecognizedContentType, ct)

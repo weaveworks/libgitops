@@ -109,8 +109,14 @@ func (e FileEventTypes) String() string {
 }
 
 func TestEventConcatenation(t *testing.T) {
+	// TODO: Needs fixing
+	tmp := t.TempDir()
+	fw, err := NewFileWatcher(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, e := range testEvents {
-		result := extractEventTypes((&FileWatcher{}).concatenateEvents(e))
+		result := extractEventTypes(fw.(*FileWatcher).concatenateEvents(e))
 		if !eventsEqual(result, targets[i]) {
 			t.Errorf("wrong concatenation result: %v != %v", result, targets[i])
 		}

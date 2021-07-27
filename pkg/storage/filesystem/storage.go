@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -92,7 +92,7 @@ func (r *Generic) Checksum(ctx context.Context, id core.UnversionedObjectID) (st
 	return checksum, nil
 }
 
-func (r *Generic) ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error) {
+func (r *Generic) ContentType(ctx context.Context, id core.UnversionedObjectID) (content.ContentType, error) {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {

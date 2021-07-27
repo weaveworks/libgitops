@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -73,7 +73,7 @@ type Reader interface {
 	// the object with the given ID. This operation must function also before the
 	// Object with the given id exists in the system, in order to be able to
 	// create new Objects.
-	ContentType(ctx context.Context, id core.UnversionedObjectID) (serializer.ContentType, error)
+	ContentType(ctx context.Context, id core.UnversionedObjectID) (content.ContentType, error)
 
 	// List operations
 	Lister

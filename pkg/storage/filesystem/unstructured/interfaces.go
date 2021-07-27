@@ -3,7 +3,7 @@ package unstructured
 import (
 	"context"
 
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
@@ -24,7 +24,7 @@ type Storage interface {
 	// ObjectRecognizer returns the underlying ObjectRecognizer used.
 	ObjectRecognizer() ObjectRecognizer
 	// FrameReaderFactory returns the underlying FrameReaderFactory used.
-	FrameReaderFactory() serializer.FrameReaderFactory
+	FrameReaderFactory() frame.ReaderFactory
 	// PathExcluder specifies what paths to not sync. Can possibly be nil.
 	PathExcluder() filesystem.PathExcluder
 	// UnstructuredFileFinder returns the underlying unstructured.FileFinder used.
@@ -35,7 +35,7 @@ type Storage interface {
 type ObjectRecognizer interface {
 	// RecognizeObjectIDs returns the ObjectIDs present in the file with the given name,
 	// content type and content (in the FrameReader).
-	RecognizeObjectIDs(fileName string, fr serializer.FrameReader) ([]core.ObjectID, error)
+	RecognizeObjectIDs(fileName string, fr frame.Reader) ([]core.ObjectID, error)
 }
 
 // FileFinder is an extension to filesystem.FileFinder that allows it to have an internal

@@ -6,7 +6,8 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
@@ -18,7 +19,7 @@ func NewGeneric(
 	storage filesystem.Storage,
 	recognizer ObjectRecognizer,
 	pathExcluder filesystem.PathExcluder,
-	framingFactory serializer.FrameReaderFactory,
+	framingFactory frame.ReaderFactory,
 ) (Storage, error) {
 	if storage == nil {
 		return nil, fmt.Errorf("storage is mandatory")
@@ -28,7 +29,7 @@ func NewGeneric(
 	}
 	// optional: use YAML/JSON by default.
 	if framingFactory == nil {
-		framingFactory = serializer.NewFrameReaderFactory()
+		framingFactory = frame.DefaultFactory()
 	}
 	fileFinder, ok := storage.FileFinder().(FileFinder)
 	if !ok {
@@ -48,7 +49,7 @@ type Generic struct {
 	recognizer     ObjectRecognizer
 	fileFinder     FileFinder
 	pathExcluder   filesystem.PathExcluder
-	framingFactory serializer.FrameReaderFactory
+	framingFactory frame.ReaderFactory
 }
 
 // Sync synchronizes the current state of the filesystem, and overwrites all
@@ -124,7 +125,7 @@ func (s *Generic) ObjectRecognizer() ObjectRecognizer {
 }
 
 // FrameReaderFactory returns the underlying FrameReaderFactory used.
-func (s *Generic) FrameReaderFactory() serializer.FrameReaderFactory {
+func (s *Generic) FrameReaderFactory() frame.ReaderFactory {
 	return s.framingFactory
 }
 
@@ -146,7 +147,7 @@ func RecognizeIDsInFile(
 	ctx context.Context,
 	fileFinder FileFinder,
 	recognizer ObjectRecognizer,
-	framingFactory serializer.FrameReaderFactory,
+	framingFactory frame.ReaderFactory,
 	filePath string,
 ) (core.UnversionedObjectIDSet, *ChecksumPath, bool, error) {
 	fs := fileFinder.Filesystem()
@@ -174,7 +175,7 @@ func RecognizeIDsInFile(
 
 	// If the file is not known to the FileFinder yet, or if the checksum
 	// was empty, read the file, and recognize it.
-	content, err := fs.ReadFile(ctx, filePath)
+	fileContent, err := fs.ReadFile(ctx, filePath)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("Could not read file %q: %v", filePath, err)
 	}
@@ -184,7 +185,7 @@ func RecognizeIDsInFile(
 		return nil, nil, false, fmt.Errorf("Could not get content type for file %q: %v", filePath, err)
 	}
 	// Create a new FrameReader for the given ContentType and ReadCloser
-	fr := framingFactory.NewFrameReader(ct, serializer.FromBytes(content))
+	fr := framingFactory.NewReader(ct, content.FromBytes(fileContent))
 	// Recognize all IDs in the file
 	versionedIDs, err := recognizer.RecognizeObjectIDs(filePath, fr)
 	if err != nil {

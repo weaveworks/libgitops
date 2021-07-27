@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
@@ -184,7 +186,7 @@ func (b *Generic) Get(ctx context.Context, obj Object) error {
 		return err
 	}
 	// Read the underlying bytes
-	content, err := b.storage.Read(ctx, id)
+	data, err := b.storage.Read(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -195,7 +197,8 @@ func (b *Generic) Get(ctx context.Context, obj Object) error {
 	}
 
 	// TODO: Check if the decoder "replaces" already-set fields or "leaks" old data?
-	return b.decoder.DecodeInto(serializer.NewSingleFrameReader(content, ct), obj)
+	// TODO: Here it'd be great with a frame.FromSingleBytes method
+	return b.decoder.DecodeInto(frame.NewSingleReader(ct, content.FromBytes(data)), obj)
 }
 
 // ListGroupKinds returns all known GroupKinds by the implementation at that
@@ -336,7 +339,7 @@ func (b *Generic) write(ctx context.Context, id core.ObjectID, obj Object) error
 
 	var objBytes bytes.Buffer
 	// This FrameWriter works for any content type; and transparently writes to objBytes
-	fw := serializer.NewSingleFrameWriter(&objBytes, ct)
+	fw := frame.ToSingleBuffer(ct, &objBytes)
 	// The encoder is set to use the given ContentType through fw; and encodes obj.
 	if err := b.encoder.EncodeForGroupVersion(fw, obj, gv); err != nil {
 		return err

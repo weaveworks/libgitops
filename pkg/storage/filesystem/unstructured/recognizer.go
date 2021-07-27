@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,7 +34,7 @@ type KubeObjectRecognizer struct {
 	AllowDuplicates bool
 }
 
-func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr serializer.FrameReader) ([]core.ObjectID, error) {
+func (r KubeObjectRecognizer) RecognizeObjectIDs(_ string, fr frame.Reader) ([]core.ObjectID, error) {
 	if r.Decoder == nil {
 		return nil, errors.New("programmer error: KubeObjectRecognizer.Decoder is nil")
 	}
