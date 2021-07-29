@@ -16,7 +16,6 @@ require (
 	// Keep this in sync with Kubernetes by checking
 	// https://github.com/kubernetes-sigs/controller-runtime/blob/v0.9.2/go.mod
 	github.com/go-logr/logr v0.4.0
-	github.com/go-openapi/spec v0.19.8
 	github.com/google/go-github/v32 v32.1.0
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/gommon v0.3.0 // indirect
@@ -38,9 +37,6 @@ require (
 	gopkg.in/check.v1 v1.0.0-20200902074654-038fdea0a05b // indirect
 	// Use the latest available Kubernetes version.
 	k8s.io/apimachinery v0.21.2
-	// Keep this in sync with the Kubernetes version by checking
-	// https://github.com/kubernetes/apimachinery/blob/v0.21.2/go.mod
-	k8s.io/kube-openapi v0.0.0-20210421082810-95288971da7e
 	// Keep this in sync with the Kubernetes version by checking
 	// https://github.com/kubernetes/kubernetes/blob/v1.21.2/go.mod#L527
 	k8s.io/utils v0.0.0-20210527160623-6fdb442a123b

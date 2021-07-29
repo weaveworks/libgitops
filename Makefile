@@ -44,7 +44,7 @@ tidy-internal: /go/bin/goimports
 	goimports -w ${SRC_PKGS}
 
 autogen: docker-autogen-internal
-autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen /go/bin/openapi-gen
+autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen
 	# Let the boilerplate be empty
 	touch /tmp/boilerplate
 
@@ -63,12 +63,13 @@ autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-
 		--input-dirs ${API_DIRS} \
 		-O zz_generated.conversion \
 		-h /tmp/boilerplate
-	
-	/go/bin/openapi-gen \
-		--input-dirs ${API_DIRS} \
-		--output-package ${PROJECT}/api/openapi \
-		--report-filename api/openapi/violations.txt \
-		-h /tmp/boilerplate
+
+#	Uncomment this if you'd like to enable OpenAPI generation for the types.	
+#	/go/bin/openapi-gen \
+#		--input-dirs ${API_DIRS} \
+#		--output-package ${PROJECT}/api/openapi \
+#		--report-filename api/openapi/violations.txt \
+#		-h /tmp/boilerplate
 
 	# These commands modify the environment, perform cleanup
 	$(MAKE) tidy-internal
@@ -76,8 +77,9 @@ autogen-internal: /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-
 /go/bin/deepcopy-gen /go/bin/defaulter-gen /go/bin/conversion-gen: /go/bin/%:
 	go get k8s.io/code-generator/cmd/$*
 
-/go/bin/openapi-gen:
-	go get k8s.io/kube-openapi/cmd/openapi-gen
+#	Uncomment this if you'd like to enable OpenAPI generation for the types.
+#/go/bin/openapi-gen:
+#	go get k8s.io/kube-openapi/cmd/openapi-gen
 
 /go/bin/goimports:
 	go get golang.org/x/tools/cmd/goimports
