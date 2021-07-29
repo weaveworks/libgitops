@@ -17,6 +17,12 @@ import (
 	"go.uber.org/multierr"
 )
 
+// TODO: Figure out how to unit-test this creation flow, as one cannot compare the
+// returned tracerProviders due to internal fields.
+
+// ErrNoExportersProvided describes that no exporters where provided when building
+var ErrNoExportersProvided = errors.New("no exporters provided")
+
 // SDKTracerProvider represents a TracerProvider that is generated from the OpenTelemetry
 // SDK and hence can be force-flushed and shutdown (which in both cases flushes all async,
 // batched traces before stopping).
@@ -146,8 +152,6 @@ func (b *builder) WithLogging(log bool) TracerProviderBuilder {
 	return b
 }
 
-var ErrNoExportersProvided = errors.New("no exporters provided")
-
 func (b *builder) Build() (SDKTracerProvider, error) {
 	// Combine and filter the errors from the exporter building
 	if err := multierr.Combine(b.errs...); err != nil {
@@ -156,7 +160,6 @@ func (b *builder) Build() (SDKTracerProvider, error) {
 	if len(b.exporters) == 0 {
 		return nil, ErrNoExportersProvided
 	}
-	// TODO: Require at least one exporter
 
 	// By default, set the service name to "libgitops".
 	// This can be overridden through WithAttributes
