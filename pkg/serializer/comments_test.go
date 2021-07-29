@@ -37,7 +37,7 @@ spec:
     var: true
 status:
   nested:
-    fields:
+    fields: {}
     # Just a comment
 `
 
