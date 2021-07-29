@@ -71,11 +71,18 @@ type JSONYAMLOption interface {
 }
 
 type jsonYAMLOptions struct {
+	// Only applicable to JSON at the moment; YAML indentation config not supported
 	Indentation *string
 	// Only applicable to YAML; either yaml.CompactSequenceStyle or yaml.WideSequenceStyle
 	ForceSeqIndentStyle yaml.SequenceIndentStyle
-
+	// Only applicable to YAML; JSON doesn't support comments
 	CopyComments *bool
+	/*
+		TODO: ForceMapKeyOrder that can either be
+		- PreserveOrder (if unset) => preserves the order from the prior if given. no-op if no prior.
+		- Alphabetic => sorts all keys alphabetically
+		- None => don't preserve order from the prior; no-op
+	*/
 }
 
 func defaultJSONYAMLOptions() *jsonYAMLOptions {
@@ -126,6 +133,13 @@ func (defaultSanitizer) SupportedContentTypes() content.ContentTypes {
 
 var ErrTooManyFrames = errors.New("too many frames")
 
+/*
+- New policy got applied to all files
+- Previously existing policy got applied
+*/
+
+// TODO: Make sure maps are alphabetically sorted, or match the prior
+// Can e.g. use https://github.com/kubernetes-sigs/kustomize/blob/master/kyaml/order/syncorder.go
 func (s *defaultSanitizer) handleYAML(ctx context.Context, frame []byte) ([]byte, error) {
 	// Get prior data, if any (from the context), that we'll use to copy comments over and
 	// infer the sequence indenting style.
@@ -179,6 +193,8 @@ func (s *defaultSanitizer) resolveSeqStyle(frame, priorData []byte, hasPriorData
 	return yaml.SequenceIndentStyle(yaml.DeriveSeqIndentStyle(deriveYAML))
 }
 
+// TODO: Maybe use the "Remarshal" property defined here to apply alphabetic order?
+// https://stackoverflow.com/questions/18668652/how-to-produce-json-with-sorted-keys-in-go
 func (s *defaultSanitizer) handleJSON(frame []byte) ([]byte, error) {
 	// If it's all whitespace, just return an empty byte array, no actual content here
 	if len(bytes.TrimSpace(frame)) == 0 {

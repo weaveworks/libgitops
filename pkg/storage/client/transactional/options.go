@@ -16,7 +16,19 @@ func defaultTxOptions() *TxOptions {
 }
 
 type TxOptions struct {
+	// Timeout is the maximum time one run of the transaction can take.
 	Timeout time.Duration
+	// Retry is by default 0, which means "no retries". If it's specified to be
+	// negative, retries (with backoff) are infinite. If the function specified is
+	// non-re-entrant, use a retry of only 0.
+	Retry *int32
+
+	// Success scenario for git would be if --ff-only succeeds cleanly.
+	// Git always tries an --ff-only git push in the beginning, then optionally
+	// tries some merge strategy, and then finally retries (return signature should
+	// be (error, bool) where the bool specifies whether to keep retrying or not)
+	// Git-recognized strategies are: AutoMerge (which is what "git pull" does by default)
+	MergeStrategy string
 	//Mode    TxMode
 }
 

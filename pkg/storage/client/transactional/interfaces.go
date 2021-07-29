@@ -4,11 +4,16 @@ import (
 	"context"
 
 	"github.com/weaveworks/libgitops/pkg/storage/client"
+	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 )
 
 type Client interface {
 	client.Reader
+
+	AtRef(commit.Ref) Client
+	AtSymbolicRef(string) Client
+	CurrentRef() commit.Ref
 
 	TransactionManager() TransactionManager
 	// KeyedLock is used for locking operations targeting branches
@@ -24,22 +29,33 @@ type Client interface {
 
 	// Transaction creates a new transaction on the branch stored in the context, so that
 	// no other writes to that branch can take place meanwhile.
-	Transaction(ctx context.Context, opts ...TxOption) Tx
-	// BranchTransaction creates a new "head" branch with the given {branchName} name, based
+	//Transaction(ctx context.Context, opts ...TxOption) Tx
+
+	// Transaction creates a new "head" branch (if branchName) with the given {branchName} name, based
 	// on the "base" branch in the context. The "base" branch is not locked for writing while
 	// the transaction is running, but the head branch is.
-	BranchTransaction(ctx context.Context, branchName string, opts ...TxOption) Tx
+	Transaction(ctx context.Context, branchName string, opts ...TxOption) Tx
 }
 
 type TransactionManager interface {
+	// Init is run at the beginning of the transaction
+	Init(ctx context.Context, tx *TxInfo) error
+
+	// Commit creates a new commit for the given branch.
+	//
+	Commit(ctx context.Context, tx *TxInfo, req commit.Request) error
+
+	Abort(ctx context.Context, tx *TxInfo) error
+
+	RefResolver() commit.RefResolver
+	CommitResolver() commit.Resolver
+
 	// CreateBranch creates a new branch with the given target branch name. It forks out
 	// of the branch specified in the context.
-	CreateBranch(ctx context.Context, branch string) error
+	//CreateBranch(ctx context.Context, branch string) error
 	// ResetToCleanVersion switches back to the given branch; but first discards all non-committed
 	// changes.
 	//ResetToCleanVersion(ctx context.Context, ref core.VersionRef) error
-	// Commit creates a new commit for the branch stored in the context.
-	Commit(ctx context.Context, commit Commit) error
 
 	/*// LockVersionRef takes the VersionRef attached in the context, and makes sure that it is
 	// "locked" to the current commit for a given branch.
@@ -53,11 +69,12 @@ type TransactionManager interface {
 type CustomTxFunc func(ctx context.Context) error
 
 type Tx interface {
-	Commit(Commit) error
+	Commit(req commit.Request) error
 	Abort(err error) error
 
 	Client() client.Client
 
+	// TODO: Rename to Do/Run/Execute
 	Custom(CustomTxFunc) Tx
 
 	Get(key core.ObjectKey, obj client.Object) Tx

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/weaveworks/libgitops/pkg/storage/client"
+	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
 	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 )
 
@@ -32,25 +33,25 @@ func (tx *txCommon) Abort(err error) error {
 	})
 }
 
-func (tx *txCommon) handlePreCommit(c Commit) txFunc {
+func (tx *txCommon) handlePreCommit(c commit.Request) txFunc {
 	return func() error {
 		return tx.commitHook.PreCommitHook(tx.ctx, c, tx.info)
 	}
 }
 
-func (tx *txCommon) commit(c Commit) txFunc {
+func (tx *txCommon) commit(c commit.Request) txFunc {
 	return func() error {
-		return tx.manager.Commit(tx.ctx, c)
+		return tx.manager.Commit(tx.ctx, &tx.info, c)
 	}
 }
 
-func (tx *txCommon) handlePostCommit(c Commit) txFunc {
+func (tx *txCommon) handlePostCommit(c commit.Request) txFunc {
 	return func() error {
 		return tx.commitHook.PostCommitHook(tx.ctx, c, tx.info)
 	}
 }
 
-func (tx *txCommon) tryApplyAndCommitOperations(c Commit) error {
+func (tx *txCommon) tryApplyAndCommitOperations(c commit.Request) error {
 	// If an error occurred already before, just return it directly
 	if tx.err != nil {
 		return tx.err

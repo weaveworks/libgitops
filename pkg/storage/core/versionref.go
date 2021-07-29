@@ -1,9 +1,6 @@
 package core
 
-import (
-	"context"
-)
-
+/*
 type VersionRefResolver interface {
 	//IsImmutable(ref string) (bool, error)
 	// Turns a branch name into a commit hash. If ref already is an existing commit, this is a no-op.
@@ -11,10 +8,6 @@ type VersionRefResolver interface {
 }
 
 type Commit string
-
-/*type VersionRef2 string
-
- */
 
 var versionRefKey = versionRefKeyImpl{}
 
@@ -38,7 +31,7 @@ func GetVersionRef(ctx context.Context) string {
 		return ""
 	}
 	return r
-}
+}*/
 
 /*
 // NewMutableVersionRef creates a new VersionRef for a given branch. It is

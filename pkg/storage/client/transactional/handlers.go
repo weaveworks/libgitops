@@ -3,11 +3,11 @@ package transactional
 import (
 	"context"
 
-	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
 )
 
 type TxInfo struct {
-	BaseCommit core.Commit
+	BaseCommit commit.Hash
 	HeadBranch string
 	Options    TxOptions
 }
@@ -25,13 +25,13 @@ type CommitHookChain interface {
 type CommitHook interface {
 	// PreCommitHook executes arbitrary logic for the given transaction info
 	// and commit info; if an error is returned, the commit won't happen.
-	PreCommitHook(ctx context.Context, commit Commit, info TxInfo) error
+	PreCommitHook(ctx context.Context, req commit.Request, info TxInfo) error
 	// PostCommitHook executes arbitrary logic for the given transaction info
 	// and commit info; if an error is returned, the commit will happen in the
 	// case of a BranchTx on the head branch; but the transaction itself will
 	// fail. In the case of a "normal" transaction; the commit will be made,
 	// but later rolled back.
-	PostCommitHook(ctx context.Context, commit Commit, info TxInfo) error
+	PostCommitHook(ctx context.Context, req commit.Request, info TxInfo) error
 }
 
 var _ CommitHookChain = &MultiCommitHook{}
@@ -45,24 +45,24 @@ func (m *MultiCommitHook) Register(h CommitHook) {
 	m.CommitHooks = append(m.CommitHooks, h)
 }
 
-func (m *MultiCommitHook) PreCommitHook(ctx context.Context, commit Commit, info TxInfo) error {
+func (m *MultiCommitHook) PreCommitHook(ctx context.Context, req commit.Request, info TxInfo) error {
 	for _, ch := range m.CommitHooks {
 		if ch == nil {
 			continue
 		}
-		if err := ch.PreCommitHook(ctx, commit, info); err != nil {
+		if err := ch.PreCommitHook(ctx, req, info); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m *MultiCommitHook) PostCommitHook(ctx context.Context, commit Commit, info TxInfo) error {
+func (m *MultiCommitHook) PostCommitHook(ctx context.Context, req commit.Request, info TxInfo) error {
 	for _, ch := range m.CommitHooks {
 		if ch == nil {
 			continue
 		}
-		if err := ch.PostCommitHook(ctx, commit, info); err != nil {
+		if err := ch.PostCommitHook(ctx, req, info); err != nil {
 			return err
 		}
 	}

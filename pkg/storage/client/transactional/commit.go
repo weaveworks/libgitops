@@ -1,11 +1,6 @@
 package transactional
 
-import (
-	"fmt"
-
-	"github.com/fluxcd/go-git-providers/validation"
-)
-
+/*
 // Commit describes a result of a transaction.
 type Commit interface {
 	// GetAuthor describes the author of this commit.
@@ -124,3 +119,4 @@ func (r GenericCommitMessage) String() string {
 	}
 	return r.Title
 }
+*/

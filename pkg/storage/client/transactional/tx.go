@@ -1,10 +1,12 @@
 package transactional
 
+import "github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
+
 type txImpl struct {
 	*txCommon
 }
 
-func (tx *txImpl) Commit(c Commit) error {
+func (tx *txImpl) Commit(c commit.Request) error {
 	// Run the operations, and try to create the commit
 	if err := tx.tryApplyAndCommitOperations(c); err != nil {
 		// If we failed with the transaction, abort directly

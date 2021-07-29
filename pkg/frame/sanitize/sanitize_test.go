@@ -316,6 +316,56 @@ items:
 `,
 		},
 		{
+			name: "copy comments; mappingnode keys are now alphabetically sorted",
+			ct:   content.ContentTypeYAML,
+			opts: []JSONYAMLOption{},
+			prior: `# root
+# hello
+
+items:
+# ignoreme
+  - item1 # hello
+    # bla
+  - item2 # hi
+  # after
+kind: List # foo
+# bla
+apiVersion: v1
+notexist: foo # remember me!
+
+`,
+			frame: `---
+apiVersion: v1
+fruits:
+- fruit1
+kind:    List
+items:
+- item1
+- item2
+- item3
+
+`,
+			want: `# root
+# hello
+# Comments lost during file manipulation:
+# Field "notexist": "remember me!"
+
+# bla
+apiVersion: v1
+fruits:
+  - fruit1
+items:
+  # ignoreme
+  - item1 # hello
+  # bla
+  - item2 # hi
+  # after
+
+  - item3
+kind: List # foo
+`,
+		},
+		{
 			name: "don't copy comments; infer from prior",
 			ct:   content.ContentTypeYAML,
 			opts: []JSONYAMLOption{WithNoCommentsCopy()},
