@@ -15,6 +15,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/storage/watch"
 	"github.com/weaveworks/libgitops/pkg/storage/watch/update"
+	"github.com/weaveworks/libgitops/pkg/stream"
 )
 
 var watchDirFlag = pflag.String("watch-dir", "/tmp/libgitops/watch", "Where to watch for YAML/JSON manifests")
