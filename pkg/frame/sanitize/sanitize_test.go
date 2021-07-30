@@ -407,7 +407,7 @@ foo:
 			ctx := context.Background()
 			s := NewJSONYAML(tt.opts...)
 			if len(tt.prior) != 0 {
-				ctx = WithPriorData(ctx, []byte(tt.prior))
+				ctx = WithOriginalData(ctx, []byte(tt.prior))
 			}
 			got, err := s.Sanitize(ctx, tt.ct, []byte(tt.frame))
 			assert.Equal(t, tt.want, string(got))
@@ -457,4 +457,11 @@ func TestIfSupported(t *testing.T) {
 			assert.Equal(t, tt.want, string(got))
 		})
 	}
+}
+
+func TestJSON(t *testing.T) {
+	b, err := JSON(context.Background(), []byte(` { "foo"  : true  }  `), nil)
+	assert.Nil(t, err)
+	assert.Equal(t, `{"foo":true}
+`, string(b))
 }

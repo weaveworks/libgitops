@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/weaveworks/libgitops/pkg/frame/sanitize/comments"
@@ -14,18 +13,77 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
+// JSON sanitizes JSON data in "current" using the NewJSONYAML() sanitizer with the given
+// options. Optionally, "original" data can be used to preserve earlier styles.
+func JSON(ctx context.Context, current, original []byte, opts ...JSONYAMLOption) ([]byte, error) {
+	return Sanitize(ctx, NewJSONYAML(opts...), stream.ContentTypeJSON, current, original)
+}
+
+// YAML sanitizes YAML data in "current" using the NewJSONYAML() sanitizer with the given
+// options. Optionally, "original" data can be used to preserve earlier styles, e.g. copy
+// over comments and remember the sequence indentation style.
+func YAML(ctx context.Context, current, original []byte, opts ...JSONYAMLOption) ([]byte, error) {
+	return Sanitize(ctx, NewJSONYAML(opts...), stream.ContentTypeYAML, current, original)
+}
+
+// Sanitize sanitizes the "current" frame using the Sanitizer s, for the given ContentType if supported.
+// If original is non-nil, it'll be used to merge the "current" frame with information from the original,
+// for YAML this e.g. means copying comments and remembering the sequence indentation style.
+func Sanitize(ctx context.Context, s Sanitizer, ct stream.ContentType, current, original []byte) ([]byte, error) {
+	if original != nil {
+		ctx = WithOriginalData(ctx, original)
+	}
+	return IfSupported(ctx, s, ct, current)
+}
+
+// IfSupported calls the Sanitizer.Sanitize function using the given Sanitizer if the content type
+// is supported. If the content type is not supported, the frame is returned as-is, with no error.
+func IfSupported(ctx context.Context, s Sanitizer, ct stream.ContentType, frame []byte) ([]byte, error) {
+	// If the content type isn't supported, nothing to do
+	if s == nil || !s.SupportedContentTypes().Has(ct) {
+		return frame, nil
+	}
+	return s.Sanitize(ctx, ct, frame)
+}
+
+// WithOriginalData registers the given frame with the context such that the frame can be used
+// as "original data" when sanitizing. Prior data can be used to copy over YAML comments
+// automatically from the original data, remember the key order, sequence indentation level, etc.
+func WithOriginalData(ctx context.Context, original []byte) context.Context {
+	return context.WithValue(ctx, originalDataKey, original)
+}
+
+// GetOriginalData retrieves the original data frame, if any, set using WithOriginalData.
+func GetOriginalData(ctx context.Context) ([]byte, bool) {
+	b, ok := ctx.Value(originalDataKey).([]byte)
+	return b, ok
+}
+
+// ErrTooManyFrames is returned if more than one frame is given to the Sanitizer
+const ErrTooManyFrames = strConstError("sanitizing multiple frames at once not supported")
+
+type strConstError string
+
+func (s strConstError) Error() string { return string(s) }
+
+type originalDataKeyStruct struct{}
+
+var originalDataKey = originalDataKeyStruct{}
+
 // Sanitizer is an interface for sanitizing frames. Note that a sanitizer can only do
-// its work correctly if frame actually only contains one frame within.
+// its work correctly if only one single frame is given at a time. To chop a byte stream
+// into frames, see the pkg/frame package.
 type Sanitizer interface {
 	// Sanitize sanitizes the frame in a standardized way for the given
-	// FramingType. If the FramingType isn't known, the Sanitizer can choose between
-	// returning an ErrUnsupportedFramingType error or just returning frame, nil unmodified.
-	// If ErrUnsupportedFramingType is returned, the consumer won't probably be able to handle
-	// other framing types than the default ones, which might not be desired.
+	// stream.ContentType. If the stream.ContentType isn't known, the Sanitizer should
+	// return stream.UnsupportedContentTypeError. The consumer can use IfSupported() to
+	// just skip sanitation if the content type is not supported. If multiple frames are
+	// given, ErrTooManyFrames can be returned.
 	//
 	// The returned frame should have len == 0 if it's considered empty.
 	Sanitize(ctx context.Context, ct stream.ContentType, frame []byte) ([]byte, error)
 
+	// The Sanitizer supports sanitizing one or many content types
 	stream.ContentTypeSupporter
 }
 
@@ -79,9 +137,9 @@ type jsonYAMLOptions struct {
 	CopyComments *bool
 	/*
 		TODO: ForceMapKeyOrder that can either be
-		- PreserveOrder (default) => preserves the order from the prior if given. no-op if no prior.
+		- PreserveOrder (default) => preserves the order from the original if given. no-op if no original.
 		- Alphabetic => sorts all keys alphabetically
-		- None => don't preserve order from the prior; no-op
+		- None => don't preserve order from the original; no-op
 	*/
 }
 
@@ -131,12 +189,10 @@ func (defaultSanitizer) SupportedContentTypes() stream.ContentTypes {
 	return []stream.ContentType{stream.ContentTypeYAML, stream.ContentTypeJSON}
 }
 
-var ErrTooManyFrames = errors.New("too many frames")
-
 func (s *defaultSanitizer) handleYAML(ctx context.Context, frame []byte) ([]byte, error) {
-	// Get prior data, if any (from the context), that we'll use to copy comments over and
+	// Get original data, if any (from the context), that we'll use to copy comments over and
 	// infer the sequence indenting style.
-	priorData, hasPriorData := GetPriorData(ctx)
+	originalData, hasOriginalData := GetOriginalData(ctx)
 
 	// Parse the current node
 	frameNodes, err := (&kio.ByteReader{
@@ -154,32 +210,32 @@ func (s *defaultSanitizer) handleYAML(ctx context.Context, frame []byte) ([]byte
 	}
 	frameNode := frameNodes[0]
 
-	if hasPriorData && s.opts.CopyComments != nil && *s.opts.CopyComments {
-		priorNode, err := yaml.Parse(string(priorData))
+	if hasOriginalData && s.opts.CopyComments != nil && *s.opts.CopyComments {
+		originalNode, err := yaml.Parse(string(originalData))
 		if err != nil {
 			return nil, err
 		}
 		// Copy comments over
-		if err := comments.CopyComments(priorNode, frameNode, true); err != nil {
+		if err := comments.CopyComments(originalNode, frameNode, true); err != nil {
 			return nil, err
 		}
 	}
 
 	return yaml.MarshalWithOptions(frameNode.Document(), &yaml.EncoderOptions{
-		SeqIndent: s.resolveSeqStyle(frame, priorData, hasPriorData),
+		SeqIndent: s.resolveSeqStyle(frame, originalData, hasOriginalData),
 	})
 }
 
-func (s *defaultSanitizer) resolveSeqStyle(frame, priorData []byte, hasPriorData bool) yaml.SequenceIndentStyle {
+func (s *defaultSanitizer) resolveSeqStyle(frame, originalData []byte, hasOriginalData bool) yaml.SequenceIndentStyle {
 	// If specified, use these; can be used as "force-formatting" directives for consistency
 	if len(s.opts.ForceSeqIndentStyle) != 0 {
 		return s.opts.ForceSeqIndentStyle
 	}
-	// Otherwise, autodetect the indentation from prior data, if exists, or the current frame
+	// Otherwise, autodetect the indentation from original data, if exists, or the current frame
 	// If the sequence style cannot be derived; the compact form will be used
 	var deriveYAML string
-	if hasPriorData {
-		deriveYAML = string(priorData)
+	if hasOriginalData {
+		deriveYAML = string(originalData)
 	} else {
 		deriveYAML = string(frame)
 	}
@@ -204,28 +260,3 @@ func (s *defaultSanitizer) handleJSON(frame []byte) ([]byte, error) {
 	// Trim all other spaces than an ending newline
 	return append(bytes.TrimSpace(buf.Bytes()), '\n'), nil
 }
-
-func IfSupported(ctx context.Context, s Sanitizer, ct stream.ContentType, frame []byte) ([]byte, error) {
-	// If the content type isn't supported, nothing to do
-	if s == nil || !s.SupportedContentTypes().Has(ct) {
-		return frame, nil
-	}
-	return s.Sanitize(ctx, ct, frame)
-}
-
-// WithPriorData registers the given frame with the context such that the frame can be used
-// as "prior data" when sanitizing. Prior data can be used to copy over YAML comments
-// automatically from the prior data, remember the key order, sequence indentation level, etc.
-func WithPriorData(ctx context.Context, frame []byte) context.Context {
-	return context.WithValue(ctx, priorDataKey, frame)
-}
-
-// GetPriorData retrieves the prior data frame, if any, set using WithPriorData.
-func GetPriorData(ctx context.Context) ([]byte, bool) {
-	b, ok := ctx.Value(priorDataKey).([]byte)
-	return b, ok
-}
-
-type priorDataKeyStruct struct{}
-
-var priorDataKey = priorDataKeyStruct{}
