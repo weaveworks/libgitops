@@ -1,8 +1,8 @@
 package frame
 
 import (
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame/sanitize"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
 )
 
@@ -58,7 +58,7 @@ func defaultRecognizingReaderOptions() *recognizingReaderOptions {
 	return &recognizingReaderOptions{
 		RecognizingOptions: RecognizingOptions{
 			Options:    defaultReaderOptions().Options,
-			Recognizer: content.NewJSONYAMLContentTypeRecognizer(),
+			Recognizer: stream.NewJSONYAMLContentTypeRecognizer(),
 		},
 	}
 }
@@ -67,7 +67,7 @@ func defaultRecognizingWriterOptions() *recognizingWriterOptions {
 	return &recognizingWriterOptions{
 		RecognizingOptions: RecognizingOptions{
 			Options:    defaultWriterOptions().Options,
-			Recognizer: content.NewJSONYAMLContentTypeRecognizer(),
+			Recognizer: stream.NewJSONYAMLContentTypeRecognizer(),
 		},
 	}
 }
@@ -109,7 +109,7 @@ func (o Options) applyTo(target *Options) {
 type RecognizingOptions struct {
 	Options
 
-	Recognizer content.ContentTypeRecognizer
+	Recognizer stream.ContentTypeRecognizer
 }
 
 func (o RecognizingOptions) applyToRecognizing(target *RecognizingOptions) {

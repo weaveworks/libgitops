@@ -7,21 +7,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 )
 
 func TestNewWriter_Unrecognized(t *testing.T) {
-	fr := DefaultFactory().NewWriter(content.ContentType("doesnotexist"), content.NewWriter(io.Discard))
+	fr := DefaultFactory().NewWriter(stream.ContentType("doesnotexist"), stream.NewWriter(io.Discard))
 	ctx := context.Background()
 	err := fr.WriteFrame(ctx, make([]byte, 1))
-	assert.ErrorIs(t, err, &content.UnsupportedContentTypeError{})
+	assert.ErrorIs(t, err, &stream.UnsupportedContentTypeError{})
 }
 
 func TestWriterShortBuffer(t *testing.T) {
 	var buf bytes.Buffer
 	w := &halfWriter{&buf}
 	ctx := context.Background()
-	err := NewYAMLWriter(content.NewWriter(w)).WriteFrame(ctx, []byte("foo: bar"))
+	err := NewYAMLWriter(stream.NewWriter(w)).WriteFrame(ctx, []byte("foo: bar"))
 	assert.Equal(t, io.ErrShortWrite, err)
 }
 

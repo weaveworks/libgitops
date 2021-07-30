@@ -1,4 +1,4 @@
-package content
+package stream
 
 import (
 	"bufio"
@@ -8,7 +8,7 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 	"github.com/weaveworks/libgitops/pkg/tracing"
 	"github.com/weaveworks/libgitops/pkg/util/compositeio"
 	"go.opentelemetry.io/otel/trace"

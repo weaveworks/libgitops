@@ -1,10 +1,10 @@
-package content
+package stream
 
 import (
 	"context"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 	"github.com/weaveworks/libgitops/pkg/tracing"
 	"github.com/weaveworks/libgitops/pkg/util/compositeio"
 	"go.opentelemetry.io/otel/trace"

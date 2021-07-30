@@ -12,7 +12,6 @@ import (
 	"github.com/weaveworks/libgitops/cmd/common"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/v1alpha1"
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/runtime"
@@ -42,7 +41,7 @@ func run() error {
 	logs.Logger.SetLevel(logrus.InfoLevel)
 
 	plainStorage := storage.NewGenericStorage(
-		storage.NewGenericRawStorage(*manifestDirFlag, v1alpha1.SchemeGroupVersion, content.ContentTypeYAML),
+		storage.NewGenericRawStorage(*manifestDirFlag, v1alpha1.SchemeGroupVersion, stream.ContentTypeYAML),
 		scheme.Serializer,
 		[]runtime.IdentifierFactory{runtime.Metav1NameIdentifier},
 	)
@@ -61,7 +60,7 @@ func run() error {
 			return err
 		}
 		var buf bytes.Buffer
-		if err := scheme.Serializer.Encoder().Encode(frame.NewJSONWriter(content.ToBuffer(&buf)), obj); err != nil {
+		if err := scheme.Serializer.Encoder().Encode(frame.NewJSONWriter(stream.ToBuffer(&buf)), obj); err != nil {
 			return err
 		}
 		return c.JSONBlob(http.StatusOK, buf.Bytes())

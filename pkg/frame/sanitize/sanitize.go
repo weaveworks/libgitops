@@ -7,8 +7,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame/sanitize/comments"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/kustomize/kyaml/kio"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
@@ -24,9 +24,9 @@ type Sanitizer interface {
 	// other framing types than the default ones, which might not be desired.
 	//
 	// The returned frame should have len == 0 if it's considered empty.
-	Sanitize(ctx context.Context, ct content.ContentType, frame []byte) ([]byte, error)
+	Sanitize(ctx context.Context, ct stream.ContentType, frame []byte) ([]byte, error)
 
-	content.ContentTypeSupporter
+	stream.ContentTypeSupporter
 }
 
 // defaultSanitizer implements frame sanitation for JSON and YAML.
@@ -115,11 +115,11 @@ type defaultSanitizer struct {
 	opts *jsonYAMLOptions
 }
 
-func (s *defaultSanitizer) Sanitize(ctx context.Context, ct content.ContentType, frame []byte) ([]byte, error) {
+func (s *defaultSanitizer) Sanitize(ctx context.Context, ct stream.ContentType, frame []byte) ([]byte, error) {
 	switch ct {
-	case content.ContentTypeYAML:
+	case stream.ContentTypeYAML:
 		return s.handleYAML(ctx, frame)
-	case content.ContentTypeJSON:
+	case stream.ContentTypeJSON:
 		return s.handleJSON(frame)
 	default:
 		// Just passthrough
@@ -127,8 +127,8 @@ func (s *defaultSanitizer) Sanitize(ctx context.Context, ct content.ContentType,
 	}
 }
 
-func (defaultSanitizer) SupportedContentTypes() content.ContentTypes {
-	return []content.ContentType{content.ContentTypeYAML, content.ContentTypeJSON}
+func (defaultSanitizer) SupportedContentTypes() stream.ContentTypes {
+	return []stream.ContentType{stream.ContentTypeYAML, stream.ContentTypeJSON}
 }
 
 var ErrTooManyFrames = errors.New("too many frames")
@@ -205,7 +205,7 @@ func (s *defaultSanitizer) handleJSON(frame []byte) ([]byte, error) {
 	return append(bytes.TrimSpace(buf.Bytes()), '\n'), nil
 }
 
-func IfSupported(ctx context.Context, s Sanitizer, ct content.ContentType, frame []byte) ([]byte, error) {
+func IfSupported(ctx context.Context, s Sanitizer, ct stream.ContentType, frame []byte) ([]byte, error) {
 	// If the content type isn't supported, nothing to do
 	if s == nil || !s.SupportedContentTypes().Has(ct) {
 		return frame, nil

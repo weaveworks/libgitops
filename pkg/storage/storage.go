@@ -7,11 +7,11 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/filter"
 	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	patchutil "github.com/weaveworks/libgitops/pkg/util/patch"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
@@ -28,7 +28,7 @@ var (
 )
 
 type ReadStorage interface {
-	// Get returns a new Object for the resource at the specified kind/uid path, based on the file content.
+	// Get returns a new Object for the resource at the specified kind/uid path, based on the file stream.
 	// If the resource referred to by the given ObjectKey does not exist, Get returns ErrNotFound.
 	Get(key ObjectKey) (runtime.Object, error)
 
@@ -151,7 +151,7 @@ func (s *GenericStorage) GetMeta(key ObjectKey) (runtime.PartialObject, error) {
 // TODO: Make sure we don't save a partial object
 func (s *GenericStorage) write(key ObjectKey, obj runtime.Object) error {
 	// Set the content type based on the format given by the RawStorage, but default to JSON
-	contentType := content.ContentTypeJSON
+	contentType := stream.ContentTypeJSON
 	if ct := s.raw.ContentType(key); len(ct) != 0 {
 		contentType = ct
 	}
@@ -362,7 +362,7 @@ func (s *GenericStorage) decode(key ObjectKey, objBytes []byte) (runtime.Object,
 	logrus.Infof("Decoding with content type %s", ct)
 	obj, err := s.serializer.Decoder(
 		serializer.WithConvertToHubDecode(isInternal),
-	).Decode(frame.NewSingleReader(ct, content.FromBytes(objBytes)))
+	).Decode(frame.NewSingleReader(ct, stream.FromBytes(objBytes)))
 	// TODO: Multi-frame support
 	if err != nil {
 		return nil, err
@@ -381,7 +381,7 @@ func (s *GenericStorage) decode(key ObjectKey, objBytes []byte) (runtime.Object,
 
 func (s *GenericStorage) decodeMeta(key ObjectKey, frame []byte) (runtime.PartialObject, error) {
 	gvk := key.GetGVK()
-	partobjs, err := DecodePartialObjects(content.FromBytes(frame), s.serializer.Scheme(), false, &gvk)
+	partobjs, err := DecodePartialObjects(stream.FromBytes(frame), s.serializer.Scheme(), false, &gvk)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +417,7 @@ func (s *GenericStorage) walkKind(kind KindKey, fn func(key ObjectKey, content [
 // DecodePartialObjects reads any set of frames from the given ReadCloser, decodes the frames into
 // PartialObjects, validates that the decoded objects are known to the scheme, and optionally sets a default
 // group
-func DecodePartialObjects(r content.Reader, scheme *kruntime.Scheme, allowMultiple bool, defaultGVK *schema.GroupVersionKind) ([]runtime.PartialObject, error) {
+func DecodePartialObjects(r stream.Reader, scheme *kruntime.Scheme, allowMultiple bool, defaultGVK *schema.GroupVersionKind) ([]runtime.PartialObject, error) {
 	fr := frame.NewYAMLReader(r)
 
 	ctx := context.TODO()

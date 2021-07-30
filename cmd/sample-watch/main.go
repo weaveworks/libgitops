@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/weaveworks/libgitops/cmd/common"
 	"github.com/weaveworks/libgitops/cmd/sample-app/apis/sample/scheme"
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/logs"
 	"github.com/weaveworks/libgitops/pkg/storage/watch"
@@ -68,7 +67,7 @@ func run() error {
 			return err
 		}
 		var buf bytes.Buffer
-		if err := scheme.Serializer.Encoder().Encode(frame.NewJSONWriter(content.ToBuffer(&buf)), obj); err != nil {
+		if err := scheme.Serializer.Encoder().Encode(frame.NewJSONWriter(stream.ToBuffer(&buf)), obj); err != nil {
 			return err
 		}
 		return c.JSONBlob(http.StatusOK, buf.Bytes())

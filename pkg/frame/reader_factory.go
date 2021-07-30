@@ -3,7 +3,7 @@ package frame
 import (
 	"context"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
 )
 
@@ -15,22 +15,22 @@ var internalFactoryVar = DefaultFactory()
 
 type defaultFactory struct{}
 
-func (defaultFactory) NewReader(ct content.ContentType, r content.Reader, opts ...ReaderOption) Reader {
+func (defaultFactory) NewReader(ct stream.ContentType, r stream.Reader, opts ...ReaderOption) Reader {
 	o := defaultReaderOptions().applyOptions(opts)
 
 	var lowlevel Reader
 	switch ct {
-	case content.ContentTypeYAML:
+	case stream.ContentTypeYAML:
 		lowlevel = newYAMLReader(r, o)
-	case content.ContentTypeJSON:
+	case stream.ContentTypeJSON:
 		lowlevel = newJSONReader(r, o)
 	default:
-		return newErrReader(content.ErrUnsupportedContentType(ct), "", r.ContentMetadata())
+		return newErrReader(stream.ErrUnsupportedContentType(ct), "", r.ContentMetadata())
 	}
 	return newHighlevelReader(lowlevel, o)
 }
 
-func (defaultFactory) NewSingleReader(ct content.ContentType, r content.Reader, opts ...SingleReaderOption) Reader {
+func (defaultFactory) NewSingleReader(ct stream.ContentType, r stream.Reader, opts ...SingleReaderOption) Reader {
 	o := defaultSingleReaderOptions().applyOptions(opts)
 
 	return newHighlevelReader(newSingleReader(r, ct, o), &readerOptions{
@@ -40,11 +40,11 @@ func (defaultFactory) NewSingleReader(ct content.ContentType, r content.Reader, 
 	})
 }
 
-func (f defaultFactory) NewRecognizingReader(ctx context.Context, r content.Reader, opts ...RecognizingReaderOption) Reader {
+func (f defaultFactory) NewRecognizingReader(ctx context.Context, r stream.Reader, opts ...RecognizingReaderOption) Reader {
 	o := defaultRecognizingReaderOptions().applyOptions(opts)
 
 	// Recognize the content type using the given recognizer
-	r, ct, err := content.NewRecognizingReader(ctx, r, o.Recognizer)
+	r, ct, err := stream.NewRecognizingReader(ctx, r, o.Recognizer)
 	if err != nil {
 		return newErrReader(err, "", r.ContentMetadata())
 	}
@@ -52,11 +52,11 @@ func (f defaultFactory) NewRecognizingReader(ctx context.Context, r content.Read
 	return f.NewReader(ct, r, o)
 }
 
-func (defaultFactory) SupportedContentTypes() content.ContentTypes {
-	return []content.ContentType{content.ContentTypeYAML, content.ContentTypeJSON}
+func (defaultFactory) SupportedContentTypes() stream.ContentTypes {
+	return []stream.ContentType{stream.ContentTypeYAML, stream.ContentTypeJSON}
 }
 
-func newErrReader(err error, ct content.ContentType, meta content.Metadata) Reader {
+func newErrReader(err error, ct stream.ContentType, meta stream.Metadata) Reader {
 	return &errReader{
 		ct,
 		meta.ToContainer(),
@@ -67,8 +67,8 @@ func newErrReader(err error, ct content.ContentType, meta content.Metadata) Read
 
 // errReader always returns an error
 type errReader struct {
-	content.ContentTyped
-	content.MetadataContainer
+	stream.ContentTyped
+	stream.MetadataContainer
 	Closer
 	err error
 }

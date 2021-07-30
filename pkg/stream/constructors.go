@@ -1,4 +1,4 @@
-package content
+package stream
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing/iotest"
 
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 )
 
 // newErrReader makes a Reader implementation that only returns the given error on Read()
@@ -55,7 +55,7 @@ func FromFile(filePath string, opts ...metadata.HeaderOption) Reader {
 	return NewReader(f, opts...)
 }
 
-// FromBytes returns an io.Reader from the given byte content.
+// FromBytes returns an io.Reader from the given byte stream.
 func FromBytes(content []byte, opts ...metadata.HeaderOption) Reader {
 	// Register the Content-Length
 	opts = append(opts, metadata.WithContentLength(int64(len(content))))
@@ -63,7 +63,7 @@ func FromBytes(content []byte, opts ...metadata.HeaderOption) Reader {
 	return NewReader(bytes.NewReader(content), opts...)
 }
 
-// FromString returns an io.Reader from the given string content.
+// FromString returns an io.Reader from the given string stream.
 func FromString(content string, opts ...metadata.HeaderOption) Reader {
 	// Register the Content-Length
 	opts = append(opts, metadata.WithContentLength(int64(len(content))))

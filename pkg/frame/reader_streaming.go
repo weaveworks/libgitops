@@ -5,13 +5,13 @@ import (
 	"errors"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apimachinery/pkg/runtime/serializer/streaming"
 )
 
-func newYAMLReader(r content.Reader, o *readerOptions) Reader {
+func newYAMLReader(r stream.Reader, o *readerOptions) Reader {
 	// json.YAMLFramer.NewFrameReader takes care of the actual YAML framing logic
 	maxFrameSizeInt, err := o.MaxFrameSize.Int()
 	if err != nil {
@@ -22,22 +22,22 @@ func newYAMLReader(r content.Reader, o *readerOptions) Reader {
 	})
 
 	// Mark the content type as YAML
-	r.ContentMetadata().Apply(content.WithContentType(content.ContentTypeYAML))
+	r.ContentMetadata().Apply(stream.WithContentType(stream.ContentTypeYAML))
 
-	return newStreamingReader(content.ContentTypeYAML, r, o.MaxFrameSize)
+	return newStreamingReader(stream.ContentTypeYAML, r, o.MaxFrameSize)
 }
 
 // newJSONReader creates a "low-level" JSON Reader from the given io.ReadCloser.
-func newJSONReader(r content.Reader, o *readerOptions) Reader {
+func newJSONReader(r stream.Reader, o *readerOptions) Reader {
 	// json.Framer.NewFrameReader takes care of the actual JSON framing logic
 	r = r.Wrap(func(underlying io.ReadCloser) io.Reader {
 		return json.Framer.NewFrameReader(underlying)
 	})
 
 	// Mark the content type as JSON
-	r.ContentMetadata().Apply(content.WithContentType(content.ContentTypeJSON))
+	r.ContentMetadata().Apply(stream.WithContentType(stream.ContentTypeJSON))
 
-	return newStreamingReader(content.ContentTypeJSON, r, o.MaxFrameSize)
+	return newStreamingReader(stream.ContentTypeJSON, r, o.MaxFrameSize)
 }
 
 // newStreamingReader makes a generic Reader that reads from an io.ReadCloser returned
@@ -49,11 +49,11 @@ func newJSONReader(r content.Reader, o *readerOptions) Reader {
 //
 // Note: This Reader is a so-called "low-level" one. It doesn't do tracing, mutex locking, or
 // proper closing logic. It must be wrapped by a composite, high-level Reader like highlevelReader.
-func newStreamingReader(ct content.ContentType, r content.Reader, maxFrameSize limitedio.Limit) Reader {
-	// Limit the amount of bytes read from the content.Reader
-	r, resetCounter := content.WrapLimited(r, maxFrameSize)
+func newStreamingReader(ct stream.ContentType, r stream.Reader, maxFrameSize limitedio.Limit) Reader {
+	// Limit the amount of bytes read from the stream.Reader
+	r, resetCounter := stream.WrapLimited(r, maxFrameSize)
 	// Wrap
-	cr := r.WrapSegment(func(rc io.ReadCloser) content.RawSegmentReader {
+	cr := r.WrapSegment(func(rc io.ReadCloser) stream.RawSegmentReader {
 		return newK8sStreamingReader(rc, maxFrameSize.Int64())
 	})
 
@@ -72,10 +72,10 @@ func newStreamingReader(ct content.ContentType, r content.Reader, maxFrameSize l
 // given k8sStreamingReader. When reader_streaming_k8s.go is upstreamed, we can replace the
 // temporary k8sStreamingReader interface with a "proper" Kubernetes one.
 type streamingReader struct {
-	content.MetadataContainer
-	content.ContentTyped
-	resetCounter content.ResetCounterFunc
-	cr           content.SegmentReader
+	stream.MetadataContainer
+	stream.ContentTyped
+	resetCounter stream.ResetCounterFunc
+	cr           stream.SegmentReader
 	maxFrameSize limitedio.Limit
 }
 

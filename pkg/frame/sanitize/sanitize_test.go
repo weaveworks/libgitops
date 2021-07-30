@@ -6,14 +6,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 )
 
 func Test_defaultSanitizer_Sanitize(t *testing.T) {
 	tests := []struct {
 		name     string
 		opts     []JSONYAMLOption
-		ct       content.ContentType
+		ct       stream.ContentType
 		prior    string
 		frame    string
 		want     string
@@ -22,13 +22,13 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 	}{
 		{
 			name:  "passthrough whatever",
-			ct:    content.ContentType("unknown"),
+			ct:    stream.ContentType("unknown"),
 			frame: "{randomdata:",
 			want:  "{randomdata:",
 		},
 		{
 			name: "default compact",
-			ct:   content.ContentTypeJSON,
+			ct:   stream.ContentTypeJSON,
 			frame: `{
 				"foo": {
 					"bar": "baz"
@@ -40,7 +40,7 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name: "with two spaces",
-			ct:   content.ContentTypeJSON,
+			ct:   stream.ContentTypeJSON,
 			frame: `  {  "foo"  : "bar"  }  
 `,
 			opts: []JSONYAMLOption{WithSpacesIndent(2)},
@@ -51,7 +51,7 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name: "with four spaces",
-			ct:   content.ContentTypeJSON,
+			ct:   stream.ContentTypeJSON,
 			frame: `  {  "foo"  : {"bar": "baz"}  }  
 `,
 			opts: []JSONYAMLOption{WithSpacesIndent(4)},
@@ -64,7 +64,7 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name: "with tab indent",
-			ct:   content.ContentTypeJSON,
+			ct:   stream.ContentTypeJSON,
 			frame: `  {  "foo"  : {"bar": "baz"}  }  
 `,
 			opts: []JSONYAMLOption{WithTabsIndent(1)},
@@ -77,7 +77,7 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name:  "with malformed",
-			ct:    content.ContentTypeJSON,
+			ct:    stream.ContentTypeJSON,
 			frame: `{"foo":"`,
 			opts:  []JSONYAMLOption{WithCompactIndent()},
 			checkErr: func(err error) bool {
@@ -87,7 +87,7 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name: "only whitespace",
-			ct:   content.ContentTypeJSON,
+			ct:   stream.ContentTypeJSON,
 			frame: `
 	
   `,
@@ -95,13 +95,13 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name:  "no json",
-			ct:    content.ContentTypeJSON,
+			ct:    stream.ContentTypeJSON,
 			frame: "",
 			want:  "",
 		},
 		{
 			name: "weird empty formatting",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			frame: `
 ---
  
@@ -111,13 +111,13 @@ func Test_defaultSanitizer_Sanitize(t *testing.T) {
 		},
 		{
 			name:  "no yaml",
-			ct:    content.ContentTypeYAML,
+			ct:    stream.ContentTypeYAML,
 			frame: "",
 			want:  "",
 		},
 		{
 			name: "too many frames",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			frame: `aa: true
 ---
 bb: false
@@ -126,7 +126,7 @@ bb: false
 		},
 		{
 			name: "make sure lists are not expanded",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			frame: `---
 kind: List
 apiVersion: "v1"
@@ -143,7 +143,7 @@ items:
 		},
 		{
 			name: "yaml format; don't be confused by the bar commend",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			frame: `---
 
 kind:    List
@@ -164,7 +164,7 @@ items:
 		},
 		{
 			name: "detect indentation; don't be confused by the bar commend",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			frame: `---
 
 kind:    List
@@ -185,7 +185,7 @@ items:
 		},
 		{
 			name: "force compact",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			opts: []JSONYAMLOption{WithCompactSeqIndent()},
 			frame: `---
 
@@ -207,7 +207,7 @@ items:
 		},
 		{
 			name: "force wide",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			opts: []JSONYAMLOption{WithWideSeqIndent()},
 			frame: `---
 
@@ -229,7 +229,7 @@ items:
 		},
 		{
 			name: "invalid indentation",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			frame: `---
 
 kind: "foo"
@@ -240,7 +240,7 @@ kind: "foo"
 		},
 		{
 			name: "infer seq style from prior; default is compact",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			opts: []JSONYAMLOption{},
 			prior: `# root
 # no lists here to look at
@@ -269,7 +269,7 @@ items:
 		},
 		{
 			name: "copy comments; infer seq style from prior",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			opts: []JSONYAMLOption{},
 			prior: `# root
 # hello
@@ -317,7 +317,7 @@ items:
 		},
 		{
 			name: "don't copy comments; infer from prior",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			opts: []JSONYAMLOption{WithNoCommentsCopy()},
 			prior: `# root
 # hello
@@ -357,7 +357,7 @@ items: # new
 		},
 		{
 			name: "invalid prior",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			prior: `# root
 # hello
 
@@ -389,7 +389,7 @@ items: # new
 		},
 		{
 			name: "invalid copy comments; change from scalar to mapping node",
-			ct:   content.ContentTypeYAML,
+			ct:   stream.ContentTypeYAML,
 			prior: `# root
 foo: "bar" # baz`,
 			frame: `
@@ -425,7 +425,7 @@ func TestIfSupported(t *testing.T) {
 	tests := []struct {
 		name    string
 		s       Sanitizer
-		ct      content.ContentType
+		ct      stream.ContentType
 		frame   string
 		want    string
 		wantErr bool
@@ -438,14 +438,14 @@ func TestIfSupported(t *testing.T) {
 		{
 			name:  "unknown content type",
 			s:     NewJSONYAML(),
-			ct:    content.ContentType("unknown"),
+			ct:    stream.ContentType("unknown"),
 			frame: "foo",
 			want:  "foo",
 		},
 		{
 			name:  "sanitize",
 			s:     NewJSONYAML(WithCompactIndent()),
-			ct:    content.ContentTypeJSON,
+			ct:    stream.ContentTypeJSON,
 			frame: ` { "foo"  : true  }  `,
 			want: `{"foo":true}
 `,

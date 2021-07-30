@@ -6,8 +6,8 @@ import (
 	"io"
 	"reflect"
 
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/util"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,7 +41,7 @@ type DecodingOptions struct {
 	DecodeListElements *bool
 
 	// Whether to preserve YAML comments internally. This only works for objects embedding metav1.ObjectMeta.
-	// Only applicable to content.ContentTypeYAML framers.
+	// Only applicable to stream.ContentTypeYAML framers.
 	// Using any other framer will be silently ignored. Usage of this option also requires setting
 	// the PreserveComments in EncodingOptions, too. (Default: false)
 	PreserveComments *bool
@@ -150,7 +150,7 @@ func (d *decoder) Decode(fr frame.Reader) (runtime.Object, error) {
 	return d.decode(doc, nil, fr.ContentType())
 }
 
-func (d *decoder) decode(doc []byte, into runtime.Object, ct content.ContentType) (runtime.Object, error) {
+func (d *decoder) decode(doc []byte, into runtime.Object, ct stream.ContentType) (runtime.Object, error) {
 	// If the scheme doesn't recognize a v1.List, and we enabled opts.DecodeListElements,
 	// make the scheme able to decode the v1.List automatically
 	if *d.opts.DecodeListElements && !d.scheme.Recognizes(listGVK) {
@@ -263,7 +263,7 @@ func (d *decoder) DecodeAll(fr frame.Reader) ([]runtime.Object, error) {
 }
 
 // decodeUnknown decodes bytes of a certain content type into a returned *runtime.Unknown object
-func (d *decoder) decodeUnknown(doc []byte, ct content.ContentType) (runtime.Object, error) {
+func (d *decoder) decodeUnknown(doc []byte, ct stream.ContentType) (runtime.Object, error) {
 	// Do a DecodeInto the new pointer to the object we've got. The resulting into object is
 	// also returned.
 	// The content type isn't really used here, as runtime.Unknown will never implement
@@ -300,7 +300,7 @@ func (d *decoder) handleDecodeError(doc []byte, origErr error) error {
 	return origErr
 }
 
-func (d *decoder) extractNestedObjects(obj runtime.Object, ct content.ContentType) ([]runtime.Object, error) {
+func (d *decoder) extractNestedObjects(obj runtime.Object, ct stream.ContentType) ([]runtime.Object, error) {
 	// If we didn't ask for list-unwrapping functionality, return directly
 	if !*d.opts.DecodeListElements {
 		return []runtime.Object{obj}, nil

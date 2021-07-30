@@ -3,30 +3,30 @@ package frame
 import (
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
-func (defaultFactory) NewWriter(ct content.ContentType, w content.Writer, opts ...WriterOption) Writer {
+func (defaultFactory) NewWriter(ct stream.ContentType, w stream.Writer, opts ...WriterOption) Writer {
 	o := defaultWriterOptions().applyOptions(opts)
 
 	var lowlevel Writer
 	switch ct {
-	case content.ContentTypeYAML:
-		lowlevel = newDelegatingWriter(content.ContentTypeYAML, w.Wrap(func(underlying io.WriteCloser) io.Writer {
+	case stream.ContentTypeYAML:
+		lowlevel = newDelegatingWriter(stream.ContentTypeYAML, w.Wrap(func(underlying io.WriteCloser) io.Writer {
 			// This writer always prepends a "---" before each frame
 			return json.YAMLFramer.NewFrameWriter(underlying)
 		}))
-	case content.ContentTypeJSON:
+	case stream.ContentTypeJSON:
 		// JSON documents are self-framing; hence, no need to wrap the writer in any way
-		lowlevel = newDelegatingWriter(content.ContentTypeJSON, w)
+		lowlevel = newDelegatingWriter(stream.ContentTypeJSON, w)
 	default:
-		return newErrWriter(ct, content.ErrUnsupportedContentType(ct), w.ContentMetadata())
+		return newErrWriter(ct, stream.ErrUnsupportedContentType(ct), w.ContentMetadata())
 	}
 	return newHighlevelWriter(lowlevel, o)
 }
 
-func (defaultFactory) NewSingleWriter(ct content.ContentType, w content.Writer, opts ...SingleWriterOption) Writer {
+func (defaultFactory) NewSingleWriter(ct stream.ContentType, w stream.Writer, opts ...SingleWriterOption) Writer {
 	o := defaultSingleWriterOptions().applyOptions(opts)
 
 	return newHighlevelWriter(newDelegatingWriter(ct, w), &writerOptions{
@@ -37,11 +37,11 @@ func (defaultFactory) NewSingleWriter(ct content.ContentType, w content.Writer, 
 	})
 }
 
-func (f defaultFactory) NewRecognizingWriter(w content.Writer, opts ...RecognizingWriterOption) Writer {
+func (f defaultFactory) NewRecognizingWriter(w stream.Writer, opts ...RecognizingWriterOption) Writer {
 	o := defaultRecognizingWriterOptions().applyOptions(opts)
 
 	// Recognize the content type using the given recognizer
-	r, ct, err := content.NewRecognizingWriter(w, o.Recognizer)
+	r, ct, err := stream.NewRecognizingWriter(w, o.Recognizer)
 	if err != nil {
 		return newErrWriter("", err, r.ContentMetadata())
 	}

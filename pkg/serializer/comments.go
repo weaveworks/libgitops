@@ -8,9 +8,9 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/frame/sanitize/comments"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
@@ -27,10 +27,10 @@ var (
 
 // tryToPreserveComments tries to save the original file data (base64-encoded) into an annotation.
 // This original file data can be used at encoding-time to preserve comments
-func (d *decoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct content.ContentType) {
+func (d *decoder) tryToPreserveComments(doc []byte, obj runtime.Object, ct stream.ContentType) {
 	// If the user opted into preserving comments and the format is YAML, proceed
 	// If they didn't, return directly
-	if !(*d.opts.PreserveComments && ct == content.ContentTypeYAML) {
+	if !(*d.opts.PreserveComments && ct == stream.ContentTypeYAML) {
 		return
 	}
 
@@ -50,8 +50,8 @@ func (e *encoder) encodeWithCommentSupport(versionEncoder runtime.Encoder, fw fr
 	}
 
 	// The user requested to preserve comments, but content type is not YAML, so log, sanitize and return
-	if fw.ContentType() != content.ContentTypeYAML {
-		logrus.Debugf("Asked to preserve comments, but content.ContentType is not YAML, so ignoring")
+	if fw.ContentType() != stream.ContentTypeYAML {
+		logrus.Debugf("Asked to preserve comments, but stream.ContentType is not YAML, so ignoring")
 
 		// Normal encoding without the annotation (so it doesn't leak by accident)
 		return noAnnotationWrapper(metaObj, e.normalEncodeFunc(versionEncoder, fw, obj))

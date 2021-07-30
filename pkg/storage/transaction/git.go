@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/gitdir"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/util"
 	"github.com/weaveworks/libgitops/pkg/util/watcher"
 )
@@ -145,7 +145,7 @@ func computeMappings(dir string, s storage.Storage) (map[storage.ObjectKey]strin
 	// can automatically subscribe to changes of objects between versions.
 	m := map[storage.ObjectKey]string{}
 	for _, file := range files {
-		partObjs, err := storage.DecodePartialObjects(content.FromFile(file), s.Serializer().Scheme(), false, nil)
+		partObjs, err := storage.DecodePartialObjects(stream.FromFile(file), s.Serializer().Scheme(), false, nil)
 		if err != nil {
 			logrus.Errorf("couldn't decode %q into a partial object: %v", file, err)
 			continue

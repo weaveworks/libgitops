@@ -1,11 +1,11 @@
-package content
+package stream
 
 import (
 	"encoding/json"
 	"net/textproto"
 	"net/url"
 
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 )
 
 // Metadata is the interface that's common to contentMetadataOptions and a wrapper

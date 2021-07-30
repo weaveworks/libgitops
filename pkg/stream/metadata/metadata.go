@@ -1,5 +1,5 @@
 // Metadata contains an interface to work with HTTP-like headers carrying metadata about
-// some content.
+// some stream.
 package metadata
 
 import (
@@ -13,20 +13,20 @@ import (
 /*
 	Metadata origin in the system by default:
 
-	content.FromFile -> content.Reader
+	stream.FromFile -> stream.Reader
 	- X-Content-Location
 	- Content-Length
 
-	content.FromBytes -> content.Reader
+	stream.FromBytes -> stream.Reader
 	- Content-Length
 
-	content.FromString -> content.Reader
+	stream.FromString -> stream.Reader
 	- Content-Length
 
-	content.ToFile -> content.Writer
+	stream.ToFile -> stream.Writer
 	- X-Content-Location
 
-	content.ToBuffer -> content.Writer
+	stream.ToBuffer -> stream.Writer
 
 	frame.NewYAMLReader -> frame.Reader
 	- Content-Type => YAML

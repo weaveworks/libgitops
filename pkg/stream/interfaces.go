@@ -1,16 +1,16 @@
-package content
+package stream
 
 import (
 	"context"
 	"fmt"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 )
 
 var _ fmt.Stringer = ContentType("")
 
-// ContentType specifies the content type of some content.
+// ContentType specifies the content type of some stream.
 // Ideally, a standard MIME notation like "application/json" shall be used.
 type ContentType string
 

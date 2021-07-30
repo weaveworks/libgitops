@@ -3,7 +3,7 @@ package frame
 import (
 	"context"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 )
 
 // TODO: Maybe implement/use context-aware (cancellable) io.Readers and io.Writers underneath?
@@ -50,13 +50,13 @@ type Closer interface {
 // Returned errors (including io.EOF) MUST be checked for equality using
 // errors.Is(err, target), NOT using err == target.
 //
-// TODO: Say that the ContentType is assumed constant per content.Reader
+// TODO: Say that the ContentType is assumed constant per stream.Reader
 //
 // The Reader MAY respect cancellation signals on the context, depending on ReaderOptions.
 // The Reader MAY support reporting trace spans for how long certain operations take.
 type Reader interface {
 	// The Reader is specific to possibly multiple framing types
-	content.ContentTyped
+	stream.ContentTyped
 
 	// ReadFrame reads one frame from the underlying io.Read(Clos)er. At maximum, the frame is as
 	// large as ReadWriterOptions.MaxFrameSize. See the documentation on the Reader interface for more
@@ -64,7 +64,7 @@ type Reader interface {
 	ReadFrame(ctx context.Context) ([]byte, error)
 
 	// Exposes Metadata about the underlying io.Reader
-	content.MetadataContainer
+	stream.MetadataContainer
 
 	// The Reader can be closed. If an underlying io.Reader is used, this is a no-op. If an
 	// io.ReadCloser is used, this will close that io.ReadCloser.
@@ -75,20 +75,20 @@ type Reader interface {
 type ReaderFactory interface {
 	// ct is dominant; will error if r has a conflicting content type
 	// ct must be one of the supported content types
-	NewReader(ct content.ContentType, r content.Reader, opts ...ReaderOption) Reader
+	NewReader(ct stream.ContentType, r stream.Reader, opts ...ReaderOption) Reader
 	// opts.MaxFrameCount is dominant, will always be set to 1
 	// ct can be anything
 	// ct is dominant; will error if r has a conflicting content type
 	// Single options should not have MaxFrameCount at all, if possible
-	NewSingleReader(ct content.ContentType, r content.Reader, opts ...SingleReaderOption) Reader
+	NewSingleReader(ct stream.ContentType, r stream.Reader, opts ...SingleReaderOption) Reader
 	// will use the content type from r if set, otherwise infer from content metadata
-	// or peek bytes using the content.ContentTypeRecognizer
+	// or peek bytes using the stream.ContentTypeRecognizer
 	// should add to options for a recognizer
-	NewRecognizingReader(ctx context.Context, r content.Reader, opts ...RecognizingReaderOption) Reader
+	NewRecognizingReader(ctx context.Context, r stream.Reader, opts ...RecognizingReaderOption) Reader
 
 	// The SupportedContentTypes() method specifies what content types are supported by the
 	// ReaderFactory
-	content.ContentTypeSupporter
+	stream.ContentTypeSupporter
 }
 
 // Writer is a framing type specific writer to an underlying io.Writer or io.WriteCloser.
@@ -122,16 +122,16 @@ type ReaderFactory interface {
 // The Writer MAY respect cancellation signals on the context, depending on WriterOptions.
 // The Writer MAY support reporting trace spans for how long certain operations take.
 //
-// TODO: Say that the ContentType is assumed constant per content.Writer
+// TODO: Say that the ContentType is assumed constant per stream.Writer
 type Writer interface {
 	// The Writer is specific to this framing type.
-	content.ContentTyped
+	stream.ContentTyped
 	// WriteFrame writes one frame to the underlying io.Write(Close)r.
 	// See the documentation on the Writer interface for more details.
 	WriteFrame(ctx context.Context, frame []byte) error
 
-	// Exposes metadata from the underlying content.Writer
-	content.MetadataContainer
+	// Exposes metadata from the underlying stream.Writer
+	stream.MetadataContainer
 
 	// The Writer can be closed. If an underlying io.Writer is used, this is a no-op. If an
 	// io.WriteCloser is used, this will close that io.WriteCloser.
@@ -142,20 +142,20 @@ type Writer interface {
 type WriterFactory interface {
 	// ct is dominant; will error if r has a conflicting content type
 	// ct must be one of the supported content types
-	NewWriter(ct content.ContentType, w content.Writer, opts ...WriterOption) Writer
+	NewWriter(ct stream.ContentType, w stream.Writer, opts ...WriterOption) Writer
 	// opts.MaxFrameCount is dominant, will always be set to 1
 	// ct can be anything
 	// ct is dominant; will error if r has a conflicting content type
 	// Single options should not have MaxFrameCount at all, if possible
-	NewSingleWriter(ct content.ContentType, w content.Writer, opts ...SingleWriterOption) Writer
+	NewSingleWriter(ct stream.ContentType, w stream.Writer, opts ...SingleWriterOption) Writer
 	// will use the content type from r if set, otherwise infer from content metadata
-	// using the content.ContentTypeRecognizer
+	// using the stream.ContentTypeRecognizer
 	// should add to options for a recognizer
-	NewRecognizingWriter(w content.Writer, opts ...RecognizingWriterOption) Writer
+	NewRecognizingWriter(w stream.Writer, opts ...RecognizingWriterOption) Writer
 
 	// The SupportedContentTypes() method specifies what content types are supported by the
 	// WriterFactory
-	content.ContentTypeSupporter
+	stream.ContentTypeSupporter
 }
 
 // Factory is the union of ReaderFactory and WriterFactory.

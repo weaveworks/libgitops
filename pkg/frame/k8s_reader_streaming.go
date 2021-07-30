@@ -30,13 +30,13 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
 	"k8s.io/apimachinery/pkg/runtime/serializer/streaming"
 )
 
 // Ref: https://github.com/kubernetes/apimachinery/blob/v0.21.2/pkg/runtime/serializer/streaming/streaming.go#L63-L67
-func newK8sStreamingReader(rc io.ReadCloser, maxFrameSize int64) content.ClosableRawSegmentReader {
+func newK8sStreamingReader(rc io.ReadCloser, maxFrameSize int64) stream.ClosableRawSegmentReader {
 	if maxFrameSize == 0 {
 		maxFrameSize = limitedio.DefaultMaxReadSize.Int64()
 	}

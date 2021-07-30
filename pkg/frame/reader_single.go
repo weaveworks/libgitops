@@ -4,12 +4,12 @@ import (
 	"context"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 )
 
-func newSingleReader(r content.Reader, ct content.ContentType, o *singleReaderOptions) Reader {
+func newSingleReader(r stream.Reader, ct stream.ContentType, o *singleReaderOptions) Reader {
 	// Make sure not more than this set of bytes can be read
-	r, _ = content.WrapLimited(r, o.MaxFrameSize)
+	r, _ = stream.WrapLimited(r, o.MaxFrameSize)
 	return &singleReader{
 		// TODO: Apply options?
 		MetadataContainer: r.ContentMetadata().Clone().ToContainer(),
@@ -22,9 +22,9 @@ func newSingleReader(r content.Reader, ct content.ContentType, o *singleReaderOp
 // It MUST be wrapped in a higher-level composite Reader like the highlevelReader to satisfy the
 // Reader interface correctly.
 type singleReader struct {
-	content.MetadataContainer
-	content.ContentTyped
-	r           content.Reader
+	stream.MetadataContainer
+	stream.ContentTyped
+	r           stream.Reader
 	hasBeenRead bool
 }
 

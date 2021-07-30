@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/conversion"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -358,18 +358,18 @@ func TestEncode(t *testing.T) {
 	newCRDObj := &CRDNewVersion{OtherString: "foobar"}
 	tests := []struct {
 		name    string
-		ct      content.ContentType
+		ct      stream.ContentType
 		objs    []runtime.Object
 		want    []byte
 		wantErr error
 	}{
-		{"simple yaml", content.ContentTypeYAML, []runtime.Object{simpleObj}, oneSimple, nil},
-		{"complex yaml", content.ContentTypeYAML, []runtime.Object{complexObj}, oneComplex, nil},
-		{"both simple and complex yaml", content.ContentTypeYAML, []runtime.Object{simpleObj, complexObj}, simpleAndComplex, nil},
-		{"simple json", content.ContentTypeJSON, []runtime.Object{simpleObj}, simpleJSON, nil},
-		{"complex json", content.ContentTypeJSON, []runtime.Object{complexObj}, complexJSON, nil},
-		{"old CRD yaml", content.ContentTypeYAML, []runtime.Object{oldCRDObj}, oldCRDNoComments, nil},
-		{"new CRD yaml", content.ContentTypeYAML, []runtime.Object{newCRDObj}, newCRDNoComments, nil},
+		{"simple yaml", stream.ContentTypeYAML, []runtime.Object{simpleObj}, oneSimple, nil},
+		{"complex yaml", stream.ContentTypeYAML, []runtime.Object{complexObj}, oneComplex, nil},
+		{"both simple and complex yaml", stream.ContentTypeYAML, []runtime.Object{simpleObj, complexObj}, simpleAndComplex, nil},
+		{"simple json", stream.ContentTypeJSON, []runtime.Object{simpleObj}, simpleJSON, nil},
+		{"complex json", stream.ContentTypeJSON, []runtime.Object{complexObj}, complexJSON, nil},
+		{"old CRD yaml", stream.ContentTypeYAML, []runtime.Object{oldCRDObj}, oldCRDNoComments, nil},
+		{"new CRD yaml", stream.ContentTypeYAML, []runtime.Object{newCRDObj}, newCRDNoComments, nil},
 		//{"no-conversion simple", defaultEncoder, &runtimetest.ExternalSimple{TestString: "foo"}, simpleJSON, false},
 		//{"support internal", defaultEncoder, []runtime.Object{simpleObj}, []byte(`{"testString":"foo"}` + "\n"), false},
 	}
@@ -377,7 +377,7 @@ func TestEncode(t *testing.T) {
 	for _, rt := range tests {
 		t.Run(rt.name, func(t2 *testing.T) {
 			var buf bytes.Buffer
-			cw := content.ToBuffer(&buf, content.WithContentType(rt.ct))
+			cw := stream.ToBuffer(&buf, stream.WithContentType(rt.ct))
 			err := defaultEncoder.Encode(frame.NewRecognizingWriter(cw), rt.objs...)
 			assert.ErrorIs(t, err, rt.wantErr)
 			assert.Equal(t, string(rt.want), buf.String())
@@ -415,7 +415,7 @@ func TestDecode(t *testing.T) {
 			obj, err := ourserializer.Decoder(
 				WithDefaultsDecode(rt.doDefaulting),
 				WithConvertToHubDecode(rt.doConversion),
-			).Decode(frame.NewYAMLReader(content.FromBytes(rt.data)))
+			).Decode(frame.NewYAMLReader(stream.FromBytes(rt.data)))
 			assert.Equal(t, err != nil, rt.wantErr)
 			assert.Equal(t, rt.want, obj)
 		})
@@ -452,7 +452,7 @@ func TestDecodeInto(t *testing.T) {
 
 			actual := ourserializer.Decoder(
 				WithDefaultsDecode(rt.doDefaulting),
-			).DecodeInto(frame.NewYAMLReader(content.FromBytes(rt.data)), rt.obj)
+			).DecodeInto(frame.NewYAMLReader(stream.FromBytes(rt.data)), rt.obj)
 			if (actual != nil) != rt.expectedErr {
 				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
 			}
@@ -493,7 +493,7 @@ func TestDecodeAll(t *testing.T) {
 			objs, actual := ourserializer.Decoder(
 				WithDefaultsDecode(rt.doDefaulting),
 				WithListElementsDecoding(rt.listSplit),
-			).DecodeAll(frame.NewYAMLReader(content.FromBytes(rt.data)))
+			).DecodeAll(frame.NewYAMLReader(stream.FromBytes(rt.data)))
 			if (actual != nil) != rt.expectedErr {
 				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
 			}
@@ -535,7 +535,7 @@ func TestDecodeUnknown(t *testing.T) {
 		t.Run(rt.name, func(t2 *testing.T) {
 			obj, actual := ourserializer.Decoder(
 				WithUnknownDecode(rt.unknown),
-			).Decode(frame.NewYAMLReader(content.FromBytes(rt.data)))
+			).Decode(frame.NewYAMLReader(stream.FromBytes(rt.data)))
 			if (actual != nil) != rt.expectedErr {
 				t2.Errorf("expected error %t but actual %t: %v", rt.expectedErr, actual != nil, actual)
 			}
@@ -550,15 +550,15 @@ func TestRoundtrip(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
-		ct   content.ContentType
+		ct   stream.ContentType
 		gv   *schema.GroupVersion // use a specific groupversion if set. if nil, then use the default Encode
 	}{
-		{"simple yaml", oneSimple, content.ContentTypeYAML, nil},
-		{"complex yaml", oneComplex, content.ContentTypeYAML, nil},
-		{"simple json", simpleJSON, content.ContentTypeJSON, nil},
-		{"complex json", complexJSON, content.ContentTypeJSON, nil},
-		{"crd with objectmeta & comments", oldCRD, content.ContentTypeYAML, &ext1gv}, // encode as v1alpha1
-		{"unknown object", unrecognizedGVK, content.ContentTypeYAML, nil},
+		{"simple yaml", oneSimple, stream.ContentTypeYAML, nil},
+		{"complex yaml", oneComplex, stream.ContentTypeYAML, nil},
+		{"simple json", simpleJSON, stream.ContentTypeJSON, nil},
+		{"complex json", complexJSON, stream.ContentTypeJSON, nil},
+		{"crd with objectmeta & comments", oldCRD, stream.ContentTypeYAML, &ext1gv}, // encode as v1alpha1
+		{"unknown object", unrecognizedGVK, stream.ContentTypeYAML, nil},
 		// TODO: Maybe an unit test (case) for a type with ObjectMeta embedded as a pointer being nil
 		// TODO: Make sure that the Encode call (with comments support) doesn't mutate the object state
 		// i.e. doesn't remove the annotation after use so multiple similar encode calls work.
@@ -570,13 +570,13 @@ func TestRoundtrip(t *testing.T) {
 				WithConvertToHubDecode(true),
 				WithCommentsDecode(true),
 				WithUnknownDecode(true),
-			).Decode(frame.NewYAMLReader(content.FromBytes(rt.data)))
+			).Decode(frame.NewYAMLReader(stream.FromBytes(rt.data)))
 			if err != nil {
 				t2.Errorf("unexpected decode error: %v", err)
 				return
 			}
 			var buf bytes.Buffer
-			cw := content.ToBuffer(&buf, content.WithContentType(rt.ct))
+			cw := stream.ToBuffer(&buf, stream.WithContentType(rt.ct))
 			if rt.gv == nil {
 				err = defaultEncoder.Encode(frame.NewRecognizingWriter(cw), obj)
 			} else {
@@ -692,13 +692,13 @@ testString: bar
 func TestListRoundtrip(t *testing.T) {
 	objs, err := ourserializer.Decoder(
 		WithCommentsDecode(true),
-	).DecodeAll(frame.NewYAMLReader(content.FromBytes(testList)))
+	).DecodeAll(frame.NewYAMLReader(stream.FromBytes(testList)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	buf := new(bytes.Buffer)
-	if err := defaultEncoder.Encode(frame.NewWriter(content.ContentTypeYAML, buf), objs...); err != nil {
+	if err := defaultEncoder.Encode(frame.NewWriter(stream.ContentTypeYAML, buf), objs...); err != nil {
 		t.Fatal(err)
 	}
 	actual := buf.Bytes()

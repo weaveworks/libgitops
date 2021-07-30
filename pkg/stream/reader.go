@@ -1,4 +1,4 @@
-package content
+package stream
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 	"github.com/weaveworks/libgitops/pkg/tracing"
 	"github.com/weaveworks/libgitops/pkg/util/compositeio"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"

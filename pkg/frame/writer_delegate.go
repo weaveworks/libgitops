@@ -4,10 +4,10 @@ import (
 	"context"
 	"io"
 
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 )
 
-func newDelegatingWriter(ct content.ContentType, w content.Writer) Writer {
+func newDelegatingWriter(ct stream.ContentType, w stream.Writer) Writer {
 	return &delegatingWriter{
 		// TODO: Register options?
 		MetadataContainer: w.ContentMetadata().Clone().ToContainer(),
@@ -18,9 +18,9 @@ func newDelegatingWriter(ct content.ContentType, w content.Writer) Writer {
 
 // delegatingWriter is an implementation of the Writer interface
 type delegatingWriter struct {
-	content.MetadataContainer
-	content.ContentTyped
-	w content.Writer
+	stream.MetadataContainer
+	stream.ContentTyped
+	w stream.Writer
 }
 
 func (w *delegatingWriter) WriteFrame(ctx context.Context, frame []byte) error {
@@ -32,7 +32,7 @@ func (w *delegatingWriter) WriteFrame(ctx context.Context, frame []byte) error {
 
 func (w *delegatingWriter) Close(ctx context.Context) error { return w.w.WithContext(ctx).Close() }
 
-func newErrWriter(ct content.ContentType, err error, meta content.Metadata) Writer {
+func newErrWriter(ct stream.ContentType, err error, meta stream.Metadata) Writer {
 	return &errWriter{
 		meta.Clone().ToContainer(),
 		ct,
@@ -42,8 +42,8 @@ func newErrWriter(ct content.ContentType, err error, meta content.Metadata) Writ
 }
 
 type errWriter struct {
-	content.MetadataContainer
-	content.ContentTyped
+	stream.MetadataContainer
+	stream.ContentTyped
 	Closer
 	err error
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame/sanitize"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/tracing"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
 	"go.opentelemetry.io/otel/trace"
@@ -61,9 +61,9 @@ func (r *highlevelReader) ReadFrame(ctx context.Context) ([]byte, error) {
 			}
 
 			// Record how large the frame is, and its content for debugging
-			span.SetAttributes(content.SpanAttrByteContent(frame)...)
+			span.SetAttributes(stream.SpanAttrByteContent(frame)...)
 			return nil
-		}).RegisterCustom(content.SpanRegisterReadError)
+		}).RegisterCustom(stream.SpanRegisterReadError)
 	// SpanRegisterReadError registers io.EOF as an "event", and other errors as "unknown errors" in the trace
 	if err != nil {
 		return nil, err
@@ -108,6 +108,6 @@ func (r *highlevelReader) readFrame(ctx context.Context) ([]byte, error) {
 	return frame, nil
 }
 
-func (r *highlevelReader) ContentType() content.ContentType  { return r.read.ContentType() }
-func (r *highlevelReader) Close(ctx context.Context) error   { return closeWithTrace(ctx, r.read, r) }
-func (r *highlevelReader) ContentMetadata() content.Metadata { return r.read.ContentMetadata() }
+func (r *highlevelReader) ContentType() stream.ContentType  { return r.read.ContentType() }
+func (r *highlevelReader) Close(ctx context.Context) error  { return closeWithTrace(ctx, r.read, r) }
+func (r *highlevelReader) ContentMetadata() stream.Metadata { return r.read.ContentMetadata() }

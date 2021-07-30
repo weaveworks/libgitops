@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"github.com/weaveworks/libgitops/pkg/tracing"
 	"github.com/weaveworks/libgitops/pkg/util/compositeio"
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
@@ -33,8 +33,8 @@ func TestFromConstructors(t *testing.T) {
 	got, err := FromYAMLFile(yamlPath).ReadFrame(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, str, string(got))
-	// content.FromFile -- already closed
-	f := content.FromFile(yamlPath)
+	// stream.FromFile -- already closed
+	f := stream.FromFile(yamlPath)
 	(f.(rawCloserExposer)).RawCloser().Close() // deliberately close the file before giving it to the reader
 	got, err = NewYAMLReader(f).ReadFrame(ctx)
 	assert.ErrorIs(t, err, fs.ErrClosed)
@@ -57,7 +57,7 @@ func TestFromConstructors(t *testing.T) {
 func TestToIoWriteCloser(t *testing.T) {
 	var buf bytes.Buffer
 	closeRec := &recordingCloser{}
-	cw := content.NewWriter(compositeio.WriteCloser(&buf, closeRec))
+	cw := stream.NewWriter(compositeio.WriteCloser(&buf, closeRec))
 	w := NewYAMLWriter(cw, SingleOptions{MaxFrameSize: limitedio.Limit(testYAMLlen)})
 	ctx := tracing.Context(true)
 	iow := ToIoWriteCloser(ctx, w)
@@ -91,7 +91,7 @@ func TestListFromReader(t *testing.T) {
 	assert.Nil(t, err)
 
 	// Non-happy case
-	r := NewJSONReader(content.FromString(testJSON2), SingleOptions{MaxFrameSize: limitedio.Limit(testJSONlen - 1)})
+	r := NewJSONReader(stream.FromString(testJSON2), SingleOptions{MaxFrameSize: limitedio.Limit(testJSONlen - 1)})
 	fr, err = ListFromReader(ctx, r)
 	assert.Len(t, fr, 0)
 	assert.ErrorIs(t, err, &limitedio.ReadSizeOverflowError{})
@@ -101,8 +101,8 @@ func TestListFromReader(t *testing.T) {
 func TestList_WriteTo(t *testing.T) {
 	var buf bytes.Buffer
 	// TODO: Automatically get the name of the writer passed in, to avoid having to name
-	// everything. i.e. content.NewWriterName(string, io.Writer)
-	cw := content.NewWriter(&buf)
+	// everything. i.e. stream.NewWriterName(string, io.Writer)
+	cw := stream.NewWriter(&buf)
 	w := NewYAMLWriter(cw)
 	ctx := context.Background()
 	// Happy case

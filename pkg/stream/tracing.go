@@ -1,4 +1,4 @@
-package content
+package stream
 
 import "go.opentelemetry.io/otel/attribute"
 

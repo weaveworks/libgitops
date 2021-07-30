@@ -1,10 +1,10 @@
-package content
+package stream
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/weaveworks/libgitops/pkg/content/metadata"
+	"github.com/weaveworks/libgitops/pkg/stream/metadata"
 )
 
 func Test_negotiateAccept(t *testing.T) {
