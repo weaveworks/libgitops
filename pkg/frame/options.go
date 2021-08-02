@@ -6,6 +6,90 @@ import (
 	"github.com/weaveworks/libgitops/pkg/util/limitedio"
 )
 
+// TODO: Figure out a new Options pattern, in the form of:
+
+/*
+func SomeOperation(bla string, opts ...Option) {
+	o := defaultOpts().ApplyOptions(opts)
+
+	// Call "downstream"
+	SomeCompositeOperation(bla, opts...)
+}
+
+func SomeCompositeOperation(bla string, opts ...Option) {
+	o := defaultExtOpts().ApplyOptionsToExt(opts)
+}
+
+func defaultOpts() *Options {
+	return &Options{"abc", nil}
+}
+
+type Options struct {
+	Foo string
+	Bar *bool
+}
+
+func (o *Options) GetOptions() *Options {return o}
+func (o *Options) ApplyTo(t OptionsTarget) {
+	target := t.GetOptions()
+	if len(o.Foo) != 0 {
+		target.Foo = o.Foo
+	}
+	if o.Bar != nil {
+		target.Bar = o.Bar
+	}
+}
+func (o *Options) ApplyOptions(opts []Option) *Options {
+	for _, opt := range opts {
+		opt.ApplyTo(o)
+	}
+	return o
+}
+
+func defaultExtOpts() *ExtOptions {
+	return &ExtOptions{
+		OptionsTarget: defaultOpts,
+		Baz: 1,
+	}
+}
+
+type ExtOptions struct {
+	OptionsTarget
+	Baz int64
+}
+
+func (o *ExtOptions) GetExtOptions() *ExtOptions {return o}
+func (o *ExtOptions) ApplyTo(t OptionsTarget) {
+	ext, ok := t.(ExtOptionsTarget)
+	if !ok {
+		return
+	}
+	target := ext.GetExtOptions()
+	if o.Baz != 0 {
+		target.Baz = o.Baz
+	}
+}
+func (o *ExtOptions) ApplyOptionsToExt(opts []Option) *ExtOptions {
+	for _, opt := range opts {
+		opt.ApplyTo(o)
+	}
+	return o
+}
+
+type Option interface {
+	ApplyTo(OptionsTarget)
+}
+type OptionsTarget interface {
+	GetOptions() *Options
+	// ApplyOptions(opts []Option) *Options
+}
+type ExtOptionsTarget interface {
+	OptionsTarget
+	GetExtOptions() *ExtOptions
+	// ApplyOptionsToExt(opts []Option) *ExtOptions
+}
+*/
+
 // DefaultMaxFrameCount specifies the default maximum of frames that can be read by a Reader.
 const DefaultReadMaxFrameCount = 1024
 
