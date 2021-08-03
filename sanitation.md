@@ -125,7 +125,7 @@ Quite a difference! We can see that the
 - Comments are now aligned with the default indentation at that context
   - As per the [YAML 1.2 spec](https://yaml.org/spec/1.2/spec.html#id2767100) "comments are not associated with a particular node".
   - In practice, though, [gopkg.in/yaml.v3
-](https://pkg.go.dev/gopkg.in/yaml.v3) **does attach** comments to YAML nodes. Arguably, this is also what users do expect.
+](https://pkg.go.dev/gopkg.in/yaml.v3) (and by extension, kyaml) **does attach** comments to YAML nodes. Arguably, this is also what users do expect.
   - Hence, what is happening when sanitizing this document is that all comments line up on the same indentation as it's context.
 - The unnecessary `---` separator has been removed
   - Frame separators should not be part of the frame
@@ -135,3 +135,6 @@ Quite a difference! We can see that the
 - Unnecessary newlines are removed
 
 TODO: Investigate what happens to comments when you prepend an item to a list.
+TODO: Show that it trims whitespace, e.g. `kind    :    Foo` becomes `kind: Foo`
+TODO: Show that it removes empty fields from the YAML, e.g. `status: {}` or `creationTimestamp: null`
+TODO: Share the context on why the above actually show up in YAML in the first place.

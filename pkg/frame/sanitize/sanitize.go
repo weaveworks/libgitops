@@ -76,7 +76,8 @@ type jsonYAMLOptions struct {
 	// Only applicable to YAML; either yaml.CompactSequenceStyle or yaml.WideSequenceStyle
 	ForceSeqIndentStyle yaml.SequenceIndentStyle
 	// Only applicable to YAML; JSON doesn't support comments
-	CopyComments *bool
+	CopyComments     *bool
+	ClearEmptyFields [][]string
 	/*
 		TODO: ForceMapKeyOrder that can either be
 		- PreserveOrder (if unset) => preserves the order from the prior if given. no-op if no prior.
@@ -89,6 +90,10 @@ func defaultJSONYAMLOptions() *jsonYAMLOptions {
 	return (&jsonYAMLOptions{
 		Indentation:  pointer.String(""),
 		CopyComments: pointer.Bool(true),
+		ClearEmptyFields: [][]string{
+			[]string{"metadata", "creationTimestamp"},
+			[]string{"status"},
+		},
 	})
 }
 
@@ -101,6 +106,9 @@ func (o *jsonYAMLOptions) applyToJSONYAML(target *jsonYAMLOptions) {
 	}
 	if o.CopyComments != nil {
 		target.CopyComments = o.CopyComments
+	}
+	if o.ClearEmptyFields != nil {
+		target.ClearEmptyFields = o.ClearEmptyFields
 	}
 }
 
@@ -147,6 +155,7 @@ func (s *defaultSanitizer) handleYAML(ctx context.Context, frame []byte) ([]byte
 
 	// Parse the current node
 	frameNodes, err := (&kio.ByteReader{
+		// TODO: Is this a bug in kyaml?
 		Reader:                bytes.NewReader(append([]byte{'\n'}, frame...)),
 		DisableUnwrapping:     true,
 		OmitReaderAnnotations: true,
@@ -168,6 +177,24 @@ func (s *defaultSanitizer) handleYAML(ctx context.Context, frame []byte) ([]byte
 		}
 		// Copy comments over
 		if err := comments.CopyComments(priorNode, frameNode, true); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, clearPath := range s.opts.ClearEmptyFields {
+		if len(clearPath) == 0 {
+			continue
+		}
+		filters := []yaml.Filter{}
+		if len(clearPath) > 1 {
+			// lookup the elements before the last element
+			filters = append(filters, yaml.Lookup(clearPath[:len(clearPath)-1]...))
+		}
+		filters = append(filters, yaml.FieldClearer{
+			Name:    clearPath[len(clearPath)-1], // clear the last element
+			IfEmpty: true,
+		})
+		if err := frameNode.PipeE(filters...); err != nil {
 			return nil, err
 		}
 	}

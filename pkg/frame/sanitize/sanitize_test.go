@@ -338,11 +338,13 @@ notexist: foo # remember me!
 apiVersion: v1
 fruits:
 - fruit1
-kind:    List
+
 items:
 - item1
 - item2
 - item3
+
+kind:    List
 
 `,
 			want: `# root
@@ -500,6 +502,28 @@ func TestIfSupported(t *testing.T) {
 			want: `{"foo":true}
 `,
 		},
+		{ // TODO: Test all possible corner cases with this, and move to the test above
+			name: "remove empty .metadata.creationTimestamp and .status",
+			s:    NewJSONYAML(),
+			ct:   content.ContentTypeYAML,
+			frame: `---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: foo
+  creationTimestamp: null
+spec:
+  containers: null
+status: {}
+`,
+			want: `apiVersion: v1
+kind: Pod
+metadata:
+  name: foo
+spec:
+  containers: null
+`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -508,3 +532,33 @@ func TestIfSupported(t *testing.T) {
 		})
 	}
 }
+
+/*
+func ExampleClear() {
+	obj, err := yaml.Parse(`
+kind: Deployment
+metadata: null
+spec:
+  template: {}
+`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	node, err := obj.Pipe(yaml.FieldClearer{Name: "metadata", IfEmpty: true})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(node.String())
+	fmt.Println(obj.String())
+	// Output:
+	// name: app
+	// annotations:
+	//   a.b.c: d.e.f
+	//   g: h
+	//  <nil>
+	// kind: Deployment
+	// spec:
+	//   template: {}
+	//  <nil>
+}
+*/
