@@ -2,20 +2,21 @@ package filesystem
 
 import (
 	"context"
-	"os"
+	"io/fs"
 )
 
 // ListValidFilesInFilesystem discovers files in the given Filesystem that has a
 // ContentType that contentTyper recognizes, and is not a path that is excluded by
 // pathExcluder.
-func ListValidFilesInFilesystem(ctx context.Context, fs Filesystem, contentTyper ContentTyper, pathExcluder PathExcluder) (files []string, err error) {
-	err = fs.Walk(ctx, "", func(path string, info os.FileInfo, err error) error {
+func ListValidFilesInFilesystem(ctx context.Context, givenFs Filesystem, contentTyper ContentTyper, pathExcluder PathExcluder) (files []string, err error) {
+	fsys := givenFs.WithContext(ctx)
+	err = fs.WalkDir(fsys, "", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Only include valid files
-		if !info.IsDir() && IsValidFileInFilesystem(ctx, fs, contentTyper, pathExcluder, path) {
+		if !d.IsDir() && IsValidFileInFilesystem(ctx, givenFs, contentTyper, pathExcluder, path) {
 			files = append(files, path)
 		}
 		return nil

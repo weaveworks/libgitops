@@ -5,16 +5,24 @@ import (
 	"time"
 
 	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 )
+
+type Client interface {
+	GenericClient
+
+	AtHash(commit.Hash) Client
+	AtRef(commit.Ref) Client
+}
 
 // Client is a client that can sync state with a remote in a transactional way.
 //
 // A distributed.Client is itself most likely both a CommitHook and TransactionHook; if so,
 // it should be automatically registered with the transactional.Client's *HookChain in the
 // distributed.Client's constructor.
-type Client interface {
+type GenericClient interface {
 	// The distributed Client extends the transactional Client
-	transactional.Client
+	transactional.GenericClient
 
 	// StartResyncLoop starts a resync loop for the given branches for
 	// the given interval.
@@ -23,7 +31,7 @@ type Client interface {
 	// (remote Pulls) should be run in the background. The duration must
 	// be positive, and non-zero.
 	//
-	// resyncBranches specifies what branches to resync. The default is
+	// resync specifies what symbolic references to sync. The default is
 	// []string{""}, i.e. only the "default" branch.
 	//
 	// ctx should be used to cancel the loop, if needed.
@@ -33,7 +41,7 @@ type Client interface {
 	// you need. The branches will be pulled synchronously in order. The
 	// resync interval is non-sliding, which means that the interval
 	// includes the time of the operations.
-	StartResyncLoop(ctx context.Context, resyncCacheInterval time.Duration, resyncBranches ...string)
+	StartResyncLoop(ctx context.Context, resyncCacheInterval time.Duration, resync ...commit.Ref)
 
 	// Remote exposes the underlying remote used
 	Remote() Remote

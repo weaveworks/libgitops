@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/frame"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
@@ -66,8 +67,9 @@ func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.Unversi
 	successful = core.NewUnversionedObjectIDSet()
 	duplicates = core.NewUnversionedObjectIDSet()
 
-	ref := core.GetVersionRef(ctx)
-	if !fileFinder.HasVersionRef(ref) {
+	// If the context carries a
+	ref, ok := commit.GetRef(ctx)
+	if ok && !fileFinder.HasVersionRef(ref) {
 		if err = fileFinder.RegisterVersionRef(ref, nil); err != nil {
 			return
 		}
@@ -154,7 +156,7 @@ func RecognizeIDsInFile(
 	contentTyper := fileFinder.ContentTyper()
 
 	// Get the current checksum of the file
-	currentChecksum, err := fs.Checksum(ctx, filePath)
+	currentChecksum, err := fs.WithContext(ctx).Checksum(filePath)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("Could not get checksum for file %q: %v", filePath, err)
 	}
@@ -175,7 +177,7 @@ func RecognizeIDsInFile(
 
 	// If the file is not known to the FileFinder yet, or if the checksum
 	// was empty, read the file, and recognize it.
-	fileContent, err := fs.ReadFile(ctx, filePath)
+	fileContent, err := fs.WithContext(ctx).ReadFile(filePath)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("Could not read file %q: %v", filePath, err)
 	}
@@ -185,6 +187,7 @@ func RecognizeIDsInFile(
 		return nil, nil, false, fmt.Errorf("Could not get content type for file %q: %v", filePath, err)
 	}
 	// Create a new FrameReader for the given ContentType and ReadCloser
+	// TODO: Use a recognizing frame.Reader here
 	fr := framingFactory.NewReader(ct, content.FromBytes(fileContent))
 	// Recognize all IDs in the file
 	versionedIDs, err := recognizer.RecognizeObjectIDs(filePath, fr)

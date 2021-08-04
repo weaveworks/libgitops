@@ -1,23 +1,7 @@
 package git
 
-import (
-	"context"
-	"errors"
-	"fmt"
-	"sync"
-	"time"
-
-	"github.com/fluxcd/go-git-providers/gitprovider"
-	git "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
-	"k8s.io/apimachinery/pkg/util/sets"
-)
-
-func NewGoGit(ctx context.Context, repoRef gitprovider.RepositoryRef, dir string, opts *Options) (Interface, error) {
+/*
+func NewGoGit(ctx context.Context, repoRef gitprovider.RepositoryRef, dir string, opts *Options) (*goGit, error) {
 	gg := &goGit{
 		repoRef: repoRef,
 		dir:     dir,
@@ -239,6 +223,26 @@ func (g *goGit) IsWorktreeClean(_ context.Context) (bool, error) {
 	return s.IsClean(), nil
 }
 
+func (g *goGit) fileAtCommit(_ context.Context, commit, file string) (*object.File, *object.Commit, error) {
+	c, err := g.repo.CommitObject(plumbing.NewHash(commit))
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := c.File(file)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, c, nil
+}
+
+func (g *goGit) Stat(ctx context.Context, commit, file string) (fs.FileInfo, error) {
+	f, c, err := g.fileAtCommit(ctx, commit, file)
+	if err != nil {
+		return nil, err
+	}
+	return &fileInfoWrapper{f, c.Committer.When}, nil
+}
+
 func (g *goGit) ReadFileAtCommit(_ context.Context, commit string, file string) ([]byte, error) {
 	c, err := g.repo.CommitObject(plumbing.NewHash(commit))
 	if err != nil {
@@ -276,3 +280,4 @@ func sameRevisionRefSpecs(revision string) []config.RefSpec {
 	}
 	return []config.RefSpec{config.RefSpec(revision)}
 }
+*/

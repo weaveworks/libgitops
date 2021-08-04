@@ -30,6 +30,13 @@ type Reader interface {
 	BackendReader() backend.Reader
 }
 
+type EventReader interface {
+	Reader
+	// If ctx points to a tag; then only tag updates are followed
+	// If ctx points to a branch; then updates to that branch are included
+	client.WithWatch
+}
+
 type Writer interface {
 	client.Writer
 	BackendWriter() backend.Writer

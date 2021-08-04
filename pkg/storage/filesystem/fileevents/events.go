@@ -28,6 +28,8 @@ func (e FileEventType) String() string {
 // FileEvent describes a file change of a certain kind at a certain
 // (relative) path. Often emitted by FileEventsEmitter.
 type FileEvent struct {
+	// TODO: Include some kind of commit.Hash here that is optional?
+	// TODO: Make this an interface?
 	Path string
 	Type FileEventType
 

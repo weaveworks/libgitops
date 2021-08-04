@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -34,11 +35,13 @@ type Storage interface {
 // StorageCommon is an interface that contains the resources both needed
 // by Reader and Writer.
 type StorageCommon interface {
-	VersionRefResolver() core.VersionRefResolver
+	// RefResolver is able to resolve version references to immutable
+	// commit hashes.
+	RefResolver() commit.RefResolver
 	// Namespacer gives access to the namespacer that is used
 	Namespacer() Namespacer
 	// Exists checks if the resource indicated by the ID exists.
-	Exists(ctx context.Context, id core.UnversionedObjectID) bool
+	Exists(ctx context.Context, id core.UnversionedObjectID) (bool, error)
 }
 
 // Namespacer is an interface that lets the caller know if a GroupKind is namespaced

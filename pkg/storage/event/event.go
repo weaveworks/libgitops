@@ -1,11 +1,6 @@
 package event
 
-import (
-	"fmt"
-
-	"github.com/weaveworks/libgitops/pkg/storage/core"
-)
-
+/*
 // ObjectEventType is an enum describing a change in an Object's state.
 type ObjectEventType byte
 
@@ -52,3 +47,4 @@ type ObjectEvent struct {
 
 // ObjectEventStream is a channel of ObjectEvents
 type ObjectEventStream chan *ObjectEvent
+*/

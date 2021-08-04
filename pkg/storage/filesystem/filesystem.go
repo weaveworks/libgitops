@@ -2,40 +2,33 @@ package filesystem
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/afero"
-	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 )
 
-// Filesystem extends afero.Fs and afero.Afero with contexts added to every method.
 type Filesystem interface {
+	WithContext(ctx context.Context) FS
+	RefResolver() commit.RefResolver
+}
 
-	// Members of afero.Fs
+type FS interface {
+	fs.StatFS
+	fs.ReadDirFS
+	fs.ReadFileFS
 
 	// MkdirAll creates a directory path and all parents that does not exist
 	// yet.
-	MkdirAll(ctx context.Context, path string, perm os.FileMode) error
+	MkdirAll(path string, perm os.FileMode) error
 	// Remove removes a file identified by name, returning an error, if any
 	// happens.
-	Remove(ctx context.Context, name string) error
-	// Stat returns a FileInfo describing the named file, or an error, if any
-	// happens.
-	Stat(ctx context.Context, name string) (os.FileInfo, error)
+	Remove(name string) error
 
-	// Members of afero.Afero
-
-	ReadDir(ctx context.Context, dirname string) ([]os.FileInfo, error)
-
-	Exists(ctx context.Context, path string) (bool, error)
-
-	ReadFile(ctx context.Context, filename string) ([]byte, error)
-
-	WriteFile(ctx context.Context, filename string, data []byte, perm os.FileMode) error
-
-	Walk(ctx context.Context, root string, walkFn filepath.WalkFunc) error
+	WriteFile(filename string, data []byte, perm os.FileMode) error
 
 	// Custom methods
 
@@ -49,22 +42,90 @@ type Filesystem interface {
 	// file content, or the latest Git commit when the file was
 	// changed.
 	//
-	// os.IsNotExist(err) can be used to check if the file doesn't
-	// exist.
-	Checksum(ctx context.Context, filename string) (string, error)
+	// Like Stat(filename), os.ErrNotExist is returned if the file does
+	// not exist, such that errors.Is(err, os.ErrNotExist) can be used
+	// to check.
+	Checksum(filename string) (string, error)
 
 	// RootDirectory specifies where on disk the root directory is stored.
 	// This path MUST be absolute. All other paths for the other methods
 	// MUST be relative to this directory.
-	RootDirectory() string
+	//RootDirectory() (string, error)
+}
 
-	VersionRefResolver() core.VersionRefResolver
+type ContextFS interface {
+	Open(ctx context.Context, name string) (fs.File, error)
+	Stat(ctx context.Context, name string) (fs.FileInfo, error)
+	ReadDir(ctx context.Context, name string) ([]fs.DirEntry, error)
+	ReadFile(ctx context.Context, name string) ([]byte, error)
+	MkdirAll(ctx context.Context, path string, perm os.FileMode) error
+	Remove(ctx context.Context, name string) error
+	WriteFile(ctx context.Context, filename string, data []byte, perm os.FileMode) error
+	Checksum(ctx context.Context, filename string) (string, error)
+	//RootDirectory(ctx context.Context) (string, error)
+}
+
+// Exists uses the ctxFs.Stat() method to check whether the file exists.
+// If os.ErrNotExist is returned from the stat call, the return value is
+// false, nil. If another error occurred, then false, err is returned.
+// If err == nil, then true, nil is returned.
+func Exists(ctxFs FS, name string) (bool, error) {
+	_, err := ctxFs.Stat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func FromContext(ctxFs ContextFS) Filesystem {
+	return &fromCtxFs{ctxFs}
+}
+
+type fromCtxFs struct {
+	ctxFs ContextFS
+}
+
+func (f *fromCtxFs) WithContext(ctx context.Context) FS {
+	return &fromCtxFsMapper{f, ctx}
+}
+
+type fromCtxFsMapper struct {
+	*fromCtxFs
+	ctx context.Context
+}
+
+func (f *fromCtxFsMapper) Open(name string) (fs.File, error) {
+	return f.ctxFs.Open(f.ctx, name)
+}
+func (f *fromCtxFsMapper) Stat(name string) (fs.FileInfo, error) {
+	return f.ctxFs.Stat(f.ctx, name)
+}
+func (f *fromCtxFsMapper) ReadDir(name string) ([]fs.DirEntry, error) {
+	return f.ctxFs.ReadDir(f.ctx, name)
+}
+func (f *fromCtxFsMapper) ReadFile(name string) ([]byte, error) {
+	return f.ctxFs.ReadFile(f.ctx, name)
+}
+func (f *fromCtxFsMapper) MkdirAll(path string, perm os.FileMode) error {
+	return f.ctxFs.MkdirAll(f.ctx, path, perm)
+}
+func (f *fromCtxFsMapper) Remove(name string) error {
+	return f.ctxFs.Remove(f.ctx, name)
+}
+func (f *fromCtxFsMapper) WriteFile(filename string, data []byte, perm os.FileMode) error {
+	return f.ctxFs.WriteFile(f.ctx, filename, data, perm)
+}
+func (f *fromCtxFsMapper) Checksum(filename string) (string, error) {
+	return f.ctxFs.Checksum(f.ctx, filename)
 }
 
 // NewOSFilesystem creates a new afero.OsFs for the local directory, using
 // NewFilesystem underneath.
 func NewOSFilesystem(rootDir string) Filesystem {
-	return NewFilesystem(afero.NewOsFs(), rootDir)
+	return FilesystemFromAfero(afero.NewOsFs())
 }
 
 // NewFilesystem wraps an underlying afero.Fs without context knowledge,
@@ -72,62 +133,30 @@ func NewOSFilesystem(rootDir string) Filesystem {
 // (i.e. wrapped in afero.NewBasePathFs(fs, rootDir)).
 //
 // Checksum is calculated based on the modification timestamp of the file.
-func NewFilesystem(fs afero.Fs, rootDir string) Filesystem {
+func FilesystemFromAfero(fs afero.Fs) Filesystem {
 	// TODO: rootDir validation? It must be absolute, exist, and be a directory.
-	return &filesystem{afero.NewBasePathFs(fs, rootDir), rootDir}
+	return &nopCtx{&filesystem{afero.NewIOFS(fs)}}
 }
+
+type nopCtx struct {
+	fs FS
+}
+
+func (c *nopCtx) WithContext(context.Context) FS { return c.fs }
 
 type filesystem struct {
-	fs      afero.Fs
-	rootDir string
+	afero.IOFS
 }
 
-func (f *filesystem) RootDirectory() string {
-	return f.rootDir
+func (f *filesystem) WriteFile(filename string, data []byte, perm os.FileMode) error {
+	return afero.WriteFile(f.IOFS.Fs, filename, data, perm)
 }
-
-func (f *filesystem) Checksum(ctx context.Context, filename string) (string, error) {
-	fi, err := f.Stat(ctx, filename)
+func (f *filesystem) Checksum(filename string) (string, error) {
+	fi, err := f.Stat(filename)
 	if err != nil {
 		return "", err
 	}
 	return checksumFromFileInfo(fi), nil
-}
-
-func (f *filesystem) MkdirAll(_ context.Context, path string, perm os.FileMode) error {
-	return f.fs.MkdirAll(path, perm)
-}
-
-func (f *filesystem) Remove(_ context.Context, name string) error {
-	return f.fs.Remove(name)
-}
-
-func (f *filesystem) Stat(_ context.Context, name string) (os.FileInfo, error) {
-	return f.fs.Stat(name)
-}
-
-func (f *filesystem) ReadDir(_ context.Context, dirname string) ([]os.FileInfo, error) {
-	return afero.ReadDir(f.fs, dirname)
-}
-
-func (f *filesystem) Exists(_ context.Context, path string) (bool, error) {
-	return afero.Exists(f.fs, path)
-}
-
-func (f *filesystem) ReadFile(_ context.Context, filename string) ([]byte, error) {
-	return afero.ReadFile(f.fs, filename)
-}
-
-func (f *filesystem) WriteFile(_ context.Context, filename string, data []byte, perm os.FileMode) error {
-	return afero.WriteFile(f.fs, filename, data, perm)
-}
-
-func (f *filesystem) Walk(_ context.Context, root string, walkFn filepath.WalkFunc) error {
-	return afero.Walk(f.fs, root, walkFn)
-}
-
-func (f *filesystem) VersionRefResolver() core.VersionRefResolver {
-	return nil
 }
 
 func checksumFromFileInfo(fi os.FileInfo) string {

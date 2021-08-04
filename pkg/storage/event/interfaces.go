@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/weaveworks/libgitops/pkg/storage"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // EventStorage is the abstract combination of a normal Storage, and
@@ -20,7 +21,9 @@ type Storage interface {
 	// limit large enough to not block normal operation. An error might
 	// be returned if a maximum amount of watches has been opened already,
 	// e.g. ErrTooManyWatches.
-	WatchForObjectEvents(ctx context.Context, into ObjectEventStream) error
+	//WatchForObjectEvents(ctx context.Context, into ObjectEventStream) error
+
+	Watch(ctx context.Context) (watch.Interface, error)
 
 	// Close closes the EventStorage and underlying resources gracefully.
 	io.Closer

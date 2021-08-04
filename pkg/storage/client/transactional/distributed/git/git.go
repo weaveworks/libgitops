@@ -1,19 +1,6 @@
 package git
 
-import (
-	"context"
-	"errors"
-	"fmt"
-	"io/ioutil"
-	"os"
-	"sync"
-
-	"github.com/fluxcd/go-git-providers/gitprovider"
-	log "github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
-	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/distributed"
-)
-
+/*
 var (
 	// ErrNotStarted happens if you try to operate on the LocalClone before you have started
 	// it with StartCheckoutLoop.
@@ -105,9 +92,9 @@ func (d *LocalClone) canWrite() bool {
 // verifyRead makes sure it's ok to start a read-something-from-git process
 func (d *LocalClone) verifyRead() error {
 	// Safeguard against not starting yet
-	/*if d.wt == nil {
+	*if d.wt == nil {
 		return fmt.Errorf("cannot pull: %w", ErrNotStarted)
-	}*/
+	}*
 	return nil
 }
 
@@ -241,3 +228,4 @@ func (d *LocalClone) Cleanup() error {
 	}
 	return nil
 }
+*/

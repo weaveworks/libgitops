@@ -16,7 +16,7 @@ type Option interface {
 	ApplyTo(*Options)
 }
 
-func (o *Options) ApplyToTx(target *Options) {
+func (o *Options) ApplyTo(target *Options) {
 	if o.MainBranch != "" {
 		target.MainBranch = o.MainBranch
 	}

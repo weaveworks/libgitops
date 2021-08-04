@@ -30,12 +30,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.0.0-RC2
 	go.uber.org/atomic v1.7.0
 	go.uber.org/multierr v1.6.0
-	go.uber.org/zap v1.17.0
-	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
-	k8s.io/apimachinery v0.21.2
+	go.uber.org/zap v1.18.1
+	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
+	k8s.io/apimachinery v0.21.3
 	k8s.io/kube-openapi v0.0.0-20210527164424-3c818078ee3d
-	k8s.io/utils v0.0.0-20210527160623-6fdb442a123b
-	sigs.k8s.io/controller-runtime v0.9.3
+	k8s.io/utils v0.0.0-20210722164352-7f3ee0f31471
+	sigs.k8s.io/controller-runtime v0.9.5
 	sigs.k8s.io/kustomize/kyaml v0.11.1-0.20210721155208-d6ce84604738
 	sigs.k8s.io/yaml v1.2.0
 )

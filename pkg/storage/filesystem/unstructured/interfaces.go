@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/weaveworks/libgitops/pkg/frame"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem"
 )
@@ -84,11 +85,11 @@ type FileFinder interface {
 	// on the existing versionref "base". head must be non-nil, but base can be nil, if it is
 	// desired that "head" has no parent, and hence, is blank. An error is returned if head is
 	// nil, or base does not exist.
-	RegisterVersionRef(head, base core.VersionRef) error
+	RegisterVersionRef(head commit.Ref, base commit.Hash) error
 	// HasVersionRef returns true if the given head version ref has been registered.
-	HasVersionRef(head core.VersionRef) bool
+	HasVersionRef(head commit.Ref) bool
 	// DeleteVersionRef deletes the given head version ref.
-	DeleteVersionRef(head core.VersionRef)
+	DeleteVersionRef(head commit.Ref)
 }
 
 // ChecksumPath is a tuple of a given Checksum and relative file Path,

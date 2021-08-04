@@ -33,6 +33,8 @@ type Emitter interface {
 	// Suspend blocks the next event dispatch for this given path. Useful
 	// for not sending "your own" modification events into the
 	// FileEventStream that is listening. path is relative.
+	// TODO: Should this be handled at this level, or should the "figure out
+	// what is my own changes" be handled at higher levels in the stack?
 	Suspend(ctx context.Context, path string)
 
 	// Close closes the emitter gracefully.

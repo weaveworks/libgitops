@@ -11,6 +11,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/serializer"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"go.uber.org/multierr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -260,8 +261,12 @@ func (b *Generic) Create(ctx context.Context, obj Object) error {
 		return err
 	}
 
-	// Do not create it if it already exists
-	if b.storage.Exists(ctx, id) {
+	// Do not create the object if it already exists.
+	exists, err := b.storage.Exists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if exists {
 		return core.NewErrAlreadyExists(id)
 	}
 
@@ -293,9 +298,10 @@ func (b *Generic) Update(ctx context.Context, obj Object) error { // If the cont
 		return err
 	}
 
-	// Require that the object already exists
-	if !b.storage.Exists(ctx, id) {
-		return core.NewErrNotFound(id)
+	// Require that the object already exists. If err != nil,
+	// exists == false, hence it's enough to check for !exists
+	if exists, err := b.storage.Exists(ctx, id); !exists {
+		return multierr.Combine(core.NewErrNotFound(id), err)
 	}
 
 	// Validate that the change is ok
@@ -360,9 +366,10 @@ func (b *Generic) Delete(ctx context.Context, obj Object) error {
 		return err
 	}
 
-	// Verify it did exist
-	if !b.storage.Exists(ctx, id) {
-		return core.NewErrNotFound(id)
+	// Verify it did exist. If err != nil,
+	// exists == false, hence it's enough to check for !exists
+	if exists, err := b.storage.Exists(ctx, id); !exists {
+		return multierr.Combine(core.NewErrNotFound(id), err)
 	}
 
 	// Validate that the change is ok

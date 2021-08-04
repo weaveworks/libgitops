@@ -6,16 +6,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 	"github.com/weaveworks/libgitops/pkg/storage/client"
 	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // NewClient creates a new distributed Client using the given underlying transactional Client,
 // remote, and options that configure how the Client should respond to network partitions.
-func NewClient(c transactional.Client, remote Remote, opts ...ClientOption) (*Generic, error) {
+func NewClient(c transactional.Client, remote Remote, opts ...ClientOption) (Client, error) {
 	if c == nil {
 		return nil, fmt.Errorf("%w: c is mandatory", core.ErrInvalidParameter)
 	}
@@ -25,29 +26,57 @@ func NewClient(c transactional.Client, remote Remote, opts ...ClientOption) (*Ge
 
 	o := defaultOptions().ApplyOptions(opts)
 
-	g := &Generic{
-		Client:        c,
+	g := &generic{
+		GenericClient: c,
 		remote:        remote,
 		opts:          *o,
 		branchLocks:   make(map[string]*branchLock),
 		branchLocksMu: &sync.Mutex{},
 	}
 
-	// Register ourselves to hook into the transactional.Client's operations
-	c.CommitHookChain().Register(g)
-	c.TransactionHookChain().Register(g)
+	// Construct the default client
+	dc := &genericWithRef{g, nil, commit.Default()}
 
-	return g, nil
+	// Register ourselves to hook into the transactional.Client's operations
+	c.CommitHookChain().Register(dc)
+	c.TransactionHookChain().Register(dc)
+
+	return dc, nil
 }
 
-type Generic struct {
-	transactional.Client
+type generic struct {
+	transactional.GenericClient
 	remote Remote
 	opts   ClientOptions
 	// branchLocks maps a given branch to a given lock the state of the branch
 	branchLocks map[string]*branchLock
 	// branchLocksMu guards branchLocks
 	branchLocksMu *sync.Mutex
+}
+
+type genericWithRef struct {
+	*generic
+	hash commit.Hash
+	ref  commit.Ref
+}
+
+func (c *genericWithRef) AtHash(h commit.Hash) Client {
+	return &genericWithRef{generic: c.generic, hash: h, ref: c.ref}
+}
+func (c *genericWithRef) AtRef(symbolic commit.Ref) Client {
+	// TODO: Invalid (programmer error) to pass symbolic == nil
+	return &genericWithRef{generic: c.generic, hash: c.hash, ref: symbolic}
+}
+func (c *genericWithRef) CurrentRef() commit.Ref {
+	return c.ref
+}
+func (c *genericWithRef) CurrentHash() (commit.Hash, error) {
+	// Use the fixed hash if set
+	if c.hash != nil {
+		return c.hash, nil
+	}
+	// Otherwise, lookup the symbolic
+	return c.ref.Resolve(c.TransactionManager().RefResolver())
 }
 
 type branchLockKeyImpl struct{}
@@ -57,7 +86,7 @@ var branchLockKey = branchLockKeyImpl{}
 type branchLock struct {
 	// mu should be write-locked whenever the branch is actively running any
 	// function from the remote
-	// mu *sync.RWMutex
+	mu *sync.RWMutex
 	// lastPull is guarded by mu, before reading, one should RLock mu
 	lastPull time.Time
 }
@@ -68,66 +97,85 @@ type branchLock struct {
 	while a tx is going on for a branch, they just need to specify the direct commit.
 */
 
-func (c *Generic) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
-	return c.readWhenPossible(ctx, func() error {
-		return c.Client.Get(ctx, key, obj)
+func (c *genericWithRef) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
+	return c.readWhenPossible(ctx, func(ctx context.Context) error {
+		return c.GenericClient.Get(ctx, key, obj)
 	})
 }
 
-func (c *Generic) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	return c.readWhenPossible(ctx, func() error {
-		return c.Client.List(ctx, list, opts...)
+func (c *genericWithRef) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return c.readWhenPossible(ctx, func(ctx context.Context) error {
+		return c.GenericClient.List(ctx, list, opts...)
 	})
 }
 
-func (c *Generic) readWhenPossible(ctx context.Context, operation func() error) error {
-	ref := core.GetVersionRef(ctx)
-	// If the versionref is immutable, we can read directly.
-	if ref.IsImmutable() {
-		return operation()
+func (c *genericWithRef) readWhenPossible(ctx context.Context, operation func(context.Context) error) error {
+	// If the read is immutable, just proceed
+	if _, ok := commit.GetHash(ctx); ok {
+		return operation(ctx)
+	}
+	if c.hash != nil {
+		return operation(commit.WithHash(ctx, c.hash))
 	}
 
-	// Check if we need to do a pull before
-	if c.needsResync(ref, c.opts.CacheValidDuration) {
-		// Try to pull the remote branch. If it fails, use returnErr to figure out if
+	// Use the ref from the context, if set, otherwise default to the one configured
+	// in this Client.
+	ref, ok := commit.GetRef(ctx)
+	if !ok {
+		ref = c.ref
+	}
+
+	// If the read is reference-based; look it up if it needs resync first
+	if c.needsResync(ref) {
+		// Try to pull the remote ref. If it fails, use returnErr to figure out if
 		// this (depending on the configured PACELC mode) is a critical error, or if we
 		// should continue with the read
-		if err := c.pull(ctx, branch); err != nil {
+		if err := c.pull(ctx, ref); err != nil {
 			if criticalErr := c.returnErr(err); criticalErr != nil {
 				return criticalErr
 			}
 		}
 	}
 	// Do the read operation
-	return operation()
+	return operation(commit.WithRef(ctx, ref))
 }
 
-func (c *Generic) getBranchLockInfo(ref core.VersionRef) *branchLock {
-	// We "know" this is a "branch", as immutable references are no-ops in readWhenPossible
-	branch := ref.VersionRef()
+// makes a string representation of the ref that is used to uniquely determine
+// if two refs are "similar" (i.e. are touching the same resource to be pulled)
+func refToStr(ref commit.Ref) string {
+	return fmt.Sprintf("%s-%s", ref.Type(), ref.Target())
+}
 
+func (c *genericWithRef) getBranchLockInfo(ref commit.Ref) *branchLock {
 	c.branchLocksMu.Lock()
 	defer c.branchLocksMu.Unlock()
 
-	// Check if there exists a lock for that branch
-	info, ok := c.branchLocks[branch]
+	// Check if there exists a lock for that ref
+	str := refToStr(ref)
+	info, ok := c.branchLocks[str]
 	if ok {
 		return info
 	}
 	// Write to the branchLocks map
-	c.branchLocks[branch] = &branchLock{
+	c.branchLocks[str] = &branchLock{
 		mu: &sync.RWMutex{},
 	}
-	return c.branchLocks[branch]
+	return c.branchLocks[str]
 }
 
-func (c *Generic) needsResync(ref core.VersionRef, d time.Duration) bool {
+func (c *genericWithRef) needsResync(ref commit.Ref) bool {
+	// Always resync if the cache is always directly invalidated
+	cacheValid := c.opts.CacheValidDuration
+	if cacheValid == 0 {
+		return true
+	}
+
 	lck := c.getBranchLockInfo(ref)
 	// Lock while reading the last resync time
 	lck.mu.RLock()
 	defer lck.mu.RUnlock()
 	// Resync if there has been no sync so far, or if the last resync was too long ago
-	return lck.lastPull.IsZero() || time.Since(lck.lastPull) > d
+	return lck.lastPull.IsZero() || time.Since(lck.lastPull) > cacheValid
 }
 
 // StartResyncLoop starts a resync loop for the given branches for
@@ -138,7 +186,7 @@ func (c *Generic) needsResync(ref core.VersionRef, d time.Duration) bool {
 // be positive, and non-zero.
 //
 // resyncBranches specifies what branches to resync. The default is
-// []string{""}, i.e. only the "default" branch.
+// []commit.Ref{commit.Default()}, i.e. only the "default" branch.
 //
 // ctx should be used to cancel the loop, if needed.
 //
@@ -147,39 +195,45 @@ func (c *Generic) needsResync(ref core.VersionRef, d time.Duration) bool {
 // you need. The branches will be pulled synchronously in order. The
 // resync interval is non-sliding, which means that the interval
 // includes the time of the operations.
-func (c *Generic) StartResyncLoop(ctx context.Context, resyncCacheInterval time.Duration, resyncBranches ...string) {
+func (c *genericWithRef) StartResyncLoop(ctx context.Context, resyncCacheInterval time.Duration, sync ...commit.Ref) {
+	log := c.logger(ctx)
 	// Only start this loop if resyncCacheInterval > 0
 	if resyncCacheInterval <= 0 {
-		logrus.Warn("No need to start the resync loop; resyncCacheInterval <= 0")
+		log.Info("No need to start the resync loop; resyncCacheInterval <= 0")
 		return
 	}
 	// If unset, only sync the default branch.
-	if resyncBranches == nil {
-		resyncBranches = []string{""}
+	if sync == nil {
+		sync = []commit.Ref{commit.Default()}
 	}
 
 	// Start the resync goroutine
-	go c.resyncLoop(ctx, resyncCacheInterval, resyncBranches)
+	go c.resyncLoop(ctx, resyncCacheInterval, sync)
 }
 
-func (c *Generic) resyncLoop(ctx context.Context, resyncCacheInterval time.Duration, resyncBranches []string) {
-	logrus.Debug("Starting the resync loop...")
+func (c *genericWithRef) logger(ctx context.Context) logr.Logger {
+	return logr.FromContextOrDiscard(ctx).WithName("distributed.Client")
+}
+
+func (c *genericWithRef) resyncLoop(ctx context.Context, resyncCacheInterval time.Duration, sync []commit.Ref) {
+	log := c.logger(ctx).WithName("resyncLoop")
+	log.V(2).Info("starting resync loop")
 
 	wait.NonSlidingUntilWithContext(ctx, func(_ context.Context) {
 
-		for _, branch := range resyncBranches {
-			logrus.Tracef("resyncLoop: Will perform pull operation on branch: %q", branch)
+		for _, branch := range sync {
+			log.V(2).Info("resyncLoop: Will perform pull operation on branch: %q", branch)
 			// Perform a fetch, pull & checkout of the new revision
 			if err := c.pull(ctx, branch); err != nil {
-				logrus.Errorf("resyncLoop: pull failed with error: %v", err)
+				log.Error(err, "remote pull failed")
 				return
 			}
 		}
 	}, resyncCacheInterval)
-	logrus.Info("Exiting the resync loop...")
+	log.V(2).Info("context cancelled, exiting resync loop")
 }
 
-func (c *Generic) pull(ctx context.Context, ref core.VersionRef) error {
+func (c *genericWithRef) pull(ctx context.Context, ref commit.Ref) error {
 	// Need to get the branch-specific lock variable
 	lck := c.getBranchLockInfo(ref)
 	// Write-lock while this operation is in progress
@@ -187,74 +241,55 @@ func (c *Generic) pull(ctx context.Context, ref core.VersionRef) error {
 	defer lck.mu.Unlock()
 
 	// Create a new context that times out after the given duration
-	pullCtx, cancel := context.WithTimeout(ctx, c.opts.PullTimeout)
+	ctx, cancel := context.WithTimeout(ctx, c.opts.PullTimeout)
 	defer cancel()
 
-	// Make a ctx for the given branch
-	ctxForBranch := core.WithMutableVersionRef(pullCtx, branch)
-	if err := c.remote.Pull(ctxForBranch); err != nil {
+	// Make a ctx with the given ref
+	ctx = commit.WithRef(ctx, ref)
+	if err := c.remote.Pull(ctx); err != nil {
 		return err
 	}
 
 	// Register the timestamp into the lock
 	lck.lastPull = time.Now()
-
-	// All good
 	return nil
 }
 
-func (c *Generic) PreTransactionHook(ctx context.Context, info transactional.TxInfo) error {
+func (c *genericWithRef) PreTransactionHook(ctx context.Context, info transactional.TxInfo) error {
 	// We count on ctx having the VersionRef registered for the head branch
-
-	// Lock the branch for writing, if supported by the remote
-	// If the lock fails, we DO NOT try to pull, but just exit (either with err or a nil error,
-	// depending on the configured PACELC mode)
-	// TODO: Can we rely on the timeout being exact enough here?
-	// TODO: How to do this before the branch even exists...?
-	if err := c.lock(ctx, info.Options.Timeout); err != nil {
-		return c.returnErr(err)
-	}
 
 	// Always Pull the _base_ branch before a transaction, to be up-to-date
 	// before creating the new head branch
-	if err := c.pull(ctx, info.Base); err != nil {
+	ref := commit.AtBranch(info.Target.DestBranch())
+	if err := c.pull(ctx, ref); err != nil {
+		// TODO: Consider a wrapping closure here instead of having to remember to
+		// wrap the error in returnErr
 		return c.returnErr(err)
 	}
 
-	// All good
 	return nil
 }
 
-func (c *Generic) PreCommitHook(ctx context.Context, commit transactional.Commit, info transactional.TxInfo) error {
+func (c *genericWithRef) PreCommitHook(context.Context, transactional.TxInfo, commit.Request) error {
 	return nil // nothing to do here
 }
 
-func (c *Generic) PostCommitHook(ctx context.Context, _ transactional.Commit, _ transactional.TxInfo) error {
+func (c *genericWithRef) PostCommitHook(ctx context.Context, info transactional.TxInfo, _ commit.Request) error {
 	// Push the branch in the ctx
-	if err := c.push(ctx); err != nil {
+	ref := commit.AtBranch(info.Target.DestBranch())
+	if err := c.push(ctx, ref); err != nil {
 		return c.returnErr(err)
 	}
 	return nil
 }
 
-func (c *Generic) PostTransactionHook(ctx context.Context, info transactional.TxInfo) error {
-	// Unlock the head branch, if supported
-	if err := c.unlock(ctx); err != nil {
-		return c.returnErr(err)
-	}
-
-	return nil
+func (c *genericWithRef) PostTransactionHook(context.Context, transactional.TxInfo) error {
+	return nil // nothing to do here; if we had locking capability one would unlock
 }
 
-func (c *Generic) Remote() Remote {
-	return c.remote
-}
+func (c *genericWithRef) Remote() Remote { return c.remote }
 
-func (c *Generic) branchFromCtx(ctx context.Context) string {
-	return core.GetVersionRef(ctx).Branch()
-}
-
-func (c *Generic) returnErr(err error) error {
+func (c *genericWithRef) returnErr(err error) error {
 	// If RemoteErrorStream isn't defined, just pass the error through
 	if c.opts.RemoteErrorStream == nil {
 		return err
@@ -266,7 +301,43 @@ func (c *Generic) returnErr(err error) error {
 	return nil
 }
 
-func (c *Generic) lock(ctx context.Context, d time.Duration) error {
+func (c *genericWithRef) push(ctx context.Context, ref commit.Ref) error {
+	// Need to get the branch-specific lock variable
+	lck := c.getBranchLockInfo(ref)
+	// Write-lock while this operation is in progress
+	lck.mu.Lock()
+	defer lck.mu.Unlock()
+
+	// Create a new context that times out after the given duration
+	ctx, cancel := context.WithTimeout(ctx, c.opts.PushTimeout)
+	defer cancel()
+
+	// Push the head branch using the remote
+	// If the Push fails, don't execute any other later statements
+	return c.remote.Push(ctx)
+}
+
+/*
+
+func (c *genericWithRef) branchFromCtx(ctx context.Context) string {
+	return core.GetVersionRef(ctx).Branch()
+}
+
+// Lock the branch for writing, if supported by the remote
+	// If the lock fails, we DO NOT try to pull, but just exit (either with err or a nil error,
+	// depending on the configured PACELC mode)
+	// TODO: Can we rely on the timeout being exact enough here?
+	// TODO: How to do this before the branch even exists...?
+	if err := c.lock(ctx, info.Options.Timeout); err != nil {
+		return c.returnErr(err)
+	}
+
+// Unlock the head branch, if supported
+	if err := c.unlock(ctx); err != nil {
+		return c.returnErr(err)
+	}
+
+func (c *genericWithRef) lock(ctx context.Context, d time.Duration) error {
 	lr, ok := c.remote.(LockableRemote)
 	if !ok {
 		return nil
@@ -285,7 +356,7 @@ func (c *Generic) lock(ctx context.Context, d time.Duration) error {
 	return lr.Lock(lockCtx, d)
 }
 
-func (c *Generic) unlock(ctx context.Context) error {
+func (c *genericWithRef) unlock(ctx context.Context) error {
 	lr, ok := c.remote.(LockableRemote)
 	if !ok {
 		return nil
@@ -303,22 +374,4 @@ func (c *Generic) unlock(ctx context.Context) error {
 
 	return lr.Unlock(unlockCtx)
 }
-
-func (c *Generic) push(ctx context.Context) error {
-	// Need to get the branch-specific lock variable
-	lck := c.getBranchLockInfo(c.branchFromCtx(ctx))
-	// Write-lock while this operation is in progress
-	lck.mu.Lock()
-	defer lck.mu.Unlock()
-
-	// Create a new context that times out after the given duration
-	pushCtx, cancel := context.WithTimeout(ctx, c.opts.PushTimeout)
-	defer cancel()
-
-	// Push the head branch using the remote
-	// If the Push fails, don't execute any other later statements
-	if err := c.remote.Push(pushCtx); err != nil {
-		return err
-	}
-	return nil
-}
+*/

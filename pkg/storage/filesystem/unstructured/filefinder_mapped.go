@@ -70,7 +70,9 @@ func (f *GenericFileFinder) ContentTyper() filesystem.ContentTyper {
 }
 
 func (f *GenericFileFinder) versionedIndex(ctx context.Context) (btree.Index, error) {
-	i, ok := f.index.VersionedTree(core.GetVersionRef(ctx).Branch())
+	ref := f.Filesystem().RefResolver().GetRef(ctx)
+
+	i, ok := f.index.VersionedTree()
 	if ok {
 		return i, nil
 	}

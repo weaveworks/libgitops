@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,9 +28,9 @@ func NewSimpleStorage(dir string, namespacer storage.Namespacer, opts SimpleFile
 	return NewGeneric(fileFinder, namespacer)
 }
 
-func NewSimpleFileFinder(fs Filesystem, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
-	if fs == nil {
-		return nil, fmt.Errorf("NewSimpleFileFinder: fs is mandatory")
+func NewSimpleFileFinder(fsimpl Filesystem, opts SimpleFileFinderOptions) (*SimpleFileFinder, error) {
+	if fsimpl == nil {
+		return nil, fmt.Errorf("NewSimpleFileFinder: fsimpl is mandatory")
 	}
 	ct := content.ContentTypeJSON
 	if len(opts.ContentType) != 0 {
@@ -40,7 +41,7 @@ func NewSimpleFileFinder(fs Filesystem, opts SimpleFileFinderOptions) (*SimpleFi
 		resolver = opts.FileExtensionResolver
 	}
 	return &SimpleFileFinder{
-		fs:           fs,
+		fsimpl:       fsimpl,
 		opts:         opts,
 		contentTyper: StaticContentTyper{ContentType: ct},
 		resolver:     resolver,
@@ -83,7 +84,7 @@ var _ FileFinder = &SimpleFileFinder{}
 //
 // This FileFinder does not support the ObjectAt method.
 type SimpleFileFinder struct {
-	fs           Filesystem
+	fsimpl       Filesystem
 	opts         SimpleFileFinderOptions
 	contentTyper StaticContentTyper
 	resolver     FileExtensionResolver
@@ -101,7 +102,7 @@ type SimpleFileFinderOptions struct {
 }
 
 func (f *SimpleFileFinder) Filesystem() Filesystem {
-	return f.fs
+	return f.fsimpl
 }
 
 func (f *SimpleFileFinder) ContentTyper() ContentTyper {
@@ -167,14 +168,15 @@ func (f *SimpleFileFinder) ListGroupKinds(ctx context.Context) ([]core.GroupKind
 	}
 
 	// List groups at top-level
-	groups, err := readDir(ctx, f.fs, "")
+	ctxFs := f.fsimpl.WithContext(ctx)
+	groups, err := readDir(ctxFs, "")
 	if err != nil {
 		return nil, err
 	}
 	// For all groups; also list all kinds, and add to the following list
 	groupKinds := []core.GroupKind{}
 	for _, group := range groups {
-		kinds, err := readDir(ctx, f.fs, group)
+		kinds, err := readDir(ctxFs, group)
 		if err != nil {
 			return nil, err
 		}
@@ -196,7 +198,8 @@ func (f *SimpleFileFinder) ListGroupKinds(ctx context.Context) ([]core.GroupKind
 // different namespaces that have been set on any object belonging to
 // the given GroupKind.
 func (f *SimpleFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
-	entries, err := readDir(ctx, f.fs, f.kindKeyPath(gk))
+	ctxFs := f.fsimpl.WithContext(ctx)
+	entries, err := readDir(ctxFs, f.kindKeyPath(gk))
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +214,8 @@ func (f *SimpleFileFinder) ListNamespaces(ctx context.Context, gk core.GroupKind
 func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
 	// If namespace is empty, the names will be in ./<kindkey>, otherwise ./<kindkey>/<ns>
 	namesDir := filepath.Join(f.kindKeyPath(gk), namespace)
-	entries, err := readDir(ctx, f.fs, namesDir)
+	ctxFs := f.fsimpl.WithContext(ctx)
+	entries, err := readDir(ctxFs, namesDir)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +232,8 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 			// If f.SubDirectoryFileName != "", the file names already match .metadata.name
 			// Make sure the metadata file ./<.metadata.name>/<SubDirectoryFileName>.<ext> actually exists
 			expectedPath := filepath.Join(namesDir, entry, f.opts.SubDirectoryFileName+ext)
-			if exists, _ := f.fs.Exists(ctx, expectedPath); !exists {
+
+			if exists, _ := Exists(ctxFs, expectedPath); !exists {
 				continue
 			}
 		} else {
@@ -246,9 +251,9 @@ func (f *SimpleFileFinder) ListObjectIDs(ctx context.Context, gk core.GroupKind,
 	return ids, nil
 }
 
-func readDir(ctx context.Context, fs Filesystem, dir string) ([]string, error) {
-	fi, err := fs.Stat(ctx, dir)
-	if os.IsNotExist(err) {
+func readDir(ctxFs FS, dir string) ([]string, error) {
+	fi, err := ctxFs.Stat(dir)
+	if errors.Is(err, os.ErrNotExist) {
 		// It's ok if the directory doesn't exist (yet), we just don't have any items then :)
 		return nil, nil
 	} else if !fi.IsDir() {
@@ -257,7 +262,7 @@ func readDir(ctx context.Context, fs Filesystem, dir string) ([]string, error) {
 	}
 
 	// When we know that path is a directory, go ahead and read it
-	entries, err := fs.ReadDir(ctx, dir)
+	entries, err := ctxFs.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}

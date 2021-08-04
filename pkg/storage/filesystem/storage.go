@@ -2,12 +2,14 @@ package filesystem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/weaveworks/libgitops/pkg/content"
 	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -44,8 +46,8 @@ func (r *Generic) FileFinder() FileFinder {
 	return r.fileFinder
 }
 
-func (r *Generic) VersionRefResolver() core.VersionRefResolver {
-	return r.fileFinder.Filesystem().VersionRefResolver()
+func (r *Generic) RefResolver() commit.RefResolver {
+	return r.fileFinder.Filesystem().RefResolver()
 }
 
 func (r *Generic) Read(ctx context.Context, id core.UnversionedObjectID) ([]byte, error) {
@@ -55,25 +57,32 @@ func (r *Generic) Read(ctx context.Context, id core.UnversionedObjectID) ([]byte
 		return nil, err
 	}
 	// Check if the resource indicated by key exists
-	if !r.exists(ctx, p) {
+	exists, err := r.exists(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		return nil, core.NewErrNotFound(id)
 	}
 	// Read the file
-	return r.FileFinder().Filesystem().ReadFile(ctx, p)
+	return r.FileFinder().Filesystem().WithContext(ctx).ReadFile(p)
 }
 
-func (r *Generic) Exists(ctx context.Context, id core.UnversionedObjectID) bool {
+func (r *Generic) Exists(ctx context.Context, id core.UnversionedObjectID) (bool, error) {
 	// Get the path and verify namespacing info
 	p, err := r.getPath(ctx, id)
 	if err != nil {
-		return false
+		return false, err
 	}
 	return r.exists(ctx, p)
 }
 
-func (r *Generic) exists(ctx context.Context, path string) bool {
-	exists, _ := r.FileFinder().Filesystem().Exists(ctx, path)
-	return exists
+func (r *Generic) fsFor(ctx context.Context) FS {
+	return r.FileFinder().Filesystem().WithContext(ctx)
+}
+
+func (r *Generic) exists(ctx context.Context, path string) (bool, error) {
+	return Exists(r.fsFor(ctx), path)
 }
 
 func (r *Generic) Checksum(ctx context.Context, id core.UnversionedObjectID) (string, error) {
@@ -83,10 +92,11 @@ func (r *Generic) Checksum(ctx context.Context, id core.UnversionedObjectID) (st
 		return "", err
 	}
 	// Return a "high level" error if the file does not exist
-	checksum, err := r.FileFinder().Filesystem().Checksum(ctx, p)
-	if os.IsNotExist(err) {
+	checksum, err := r.fsFor(ctx).Checksum(p)
+	if errors.Is(err, os.ErrNotExist) {
 		return "", core.NewErrNotFound(id)
-	} else if err != nil {
+	}
+	if err != nil {
 		return "", err
 	}
 	return checksum, nil
@@ -98,6 +108,7 @@ func (r *Generic) ContentType(ctx context.Context, id core.UnversionedObjectID) 
 	if err != nil {
 		return "", err
 	}
+	// The object doesn't necessarily need to exist
 	return r.FileFinder().ContentTyper().ContentTypeForPath(ctx, r.fileFinder.Filesystem(), p)
 }
 
@@ -109,13 +120,17 @@ func (r *Generic) Write(ctx context.Context, id core.UnversionedObjectID, conten
 	}
 
 	// Create the underlying directories if they do not exist already
-	if !r.exists(ctx, p) {
-		if err := r.FileFinder().Filesystem().MkdirAll(ctx, filepath.Dir(p), 0755); err != nil {
+	exists, err := r.exists(ctx, p)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := r.fsFor(ctx).MkdirAll(filepath.Dir(p), 0755); err != nil {
 			return err
 		}
 	}
 	// Write the file content
-	return r.FileFinder().Filesystem().WriteFile(ctx, p, content, 0664)
+	return r.fsFor(ctx).WriteFile(p, content, 0664)
 }
 
 func (r *Generic) Delete(ctx context.Context, id core.UnversionedObjectID) error {
@@ -126,11 +141,15 @@ func (r *Generic) Delete(ctx context.Context, id core.UnversionedObjectID) error
 	}
 
 	// Check if the resource indicated by key exists
-	if !r.exists(ctx, p) {
+	exists, err := r.exists(ctx, p)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return core.NewErrNotFound(id)
 	}
 	// Remove the file
-	return r.FileFinder().Filesystem().Remove(ctx, p)
+	return r.fsFor(ctx).Remove(p)
 }
 
 // ListGroupKinds returns all known GroupKinds by the implementation at that

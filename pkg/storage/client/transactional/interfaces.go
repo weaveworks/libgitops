@@ -4,15 +4,21 @@ import (
 	"context"
 
 	"github.com/weaveworks/libgitops/pkg/storage/client"
-	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 )
 
 type Client interface {
+	GenericClient
+
+	AtHash(commit.Hash) Client
+	AtRef(commit.Ref) Client
+}
+
+type GenericClient interface {
 	client.Reader
 
-	AtRef(commit.Ref) Client
-	AtSymbolicRef(string) Client
+	CurrentHash() (commit.Hash, error)
 	CurrentRef() commit.Ref
 
 	TransactionManager() TransactionManager
@@ -47,8 +53,8 @@ type TransactionManager interface {
 
 	Abort(ctx context.Context, tx *TxInfo) error
 
-	RefResolver() commit.RefResolver
-	CommitResolver() commit.Resolver
+	//RefResolver() commit.RefResolver
+	//CommitResolver() commit.Resolver
 
 	// CreateBranch creates a new branch with the given target branch name. It forks out
 	// of the branch specified in the context.

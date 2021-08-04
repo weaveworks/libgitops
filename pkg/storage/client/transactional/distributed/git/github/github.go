@@ -7,38 +7,26 @@ import (
 
 	"github.com/fluxcd/go-git-providers/github"
 	"github.com/fluxcd/go-git-providers/gitprovider"
-	"github.com/fluxcd/go-git-providers/validation"
 	gogithub "github.com/google/go-github/v32/github"
 	"github.com/sirupsen/logrus"
 	"github.com/weaveworks/libgitops/pkg/storage/client/transactional"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
+	"github.com/weaveworks/libgitops/pkg/storage/commit/pr"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
-// PullRequest can be returned from a TransactionFunc instead of a CommitResult, if
-// a PullRequest is desired to be created by the PullRequestProvider.
-type PullRequest interface {
-	// PullRequestResult is a superset of CommitResult
-	transactional.Commit
+// PullRequest implements pr.Request.
+var _ pr.Request = PullRequest{}
 
-	// GetLabels specifies what labels should be applied on the PR.
-	// +optional
-	GetLabels() []string
-	// GetAssignees specifies what user login names should be assigned to this PR.
-	// Note: Only users with "pull" access or more can be assigned.
-	// +optional
-	GetAssignees() []string
-	// GetMilestone specifies what milestone this should be attached to.
-	// +optional
-	GetMilestone() string
-}
+// PullRequest implements PullRequest.
+type PullRequest struct {
+	// PullRequest is a superset of any Commit.
+	commit.Request
 
-// GenericPullRequest implements PullRequest.
-var _ PullRequest = GenericPullRequest{}
-
-// GenericPullRequest implements PullRequest.
-type GenericPullRequest struct {
-	// GenericPullRequest is a superset of a Commit.
-	transactional.Commit
-
+	// TargetBranch specifies what branch the Pull Request head branch should
+	// be merged into.
+	// +required
+	TargetBranch string
 	// Labels specifies what labels should be applied on the PR.
 	// +optional
 	Labels []string
@@ -51,16 +39,28 @@ type GenericPullRequest struct {
 	Milestone string
 }
 
-func (r GenericPullRequest) GetLabels() []string    { return r.Labels }
-func (r GenericPullRequest) GetAssignees() []string { return r.Assignees }
-func (r GenericPullRequest) GetMilestone() string   { return r.Milestone }
-
-func (r GenericPullRequest) Validate() error {
-	v := validation.New("GenericPullRequest")
-	// Just validate the "inner" object
-	v.Append(r.Commit.Validate(), r.Commit, "Commit")
-	return v.Error()
+func (r PullRequest) PullRequest() pr.Metadata {
+	return &metadata{&r.Labels, &r.Assignees, &r.TargetBranch, &r.Milestone}
 }
+
+func (r PullRequest) Validate() error {
+	root := field.NewPath("github.PullRequest")
+	allErrs := field.ErrorList{}
+	if err := r.Request.Validate(); err != nil {
+		allErrs = append(allErrs, field.Invalid(root.Child("Request"), r.Request, err.Error()))
+	}
+	return allErrs.ToAggregate()
+}
+
+type metadata struct {
+	labels, assignees       *[]string
+	targetBranch, milestone *string
+}
+
+func (m *metadata) TargetBranch() string { return *m.targetBranch }
+func (m *metadata) Labels() []string     { return *m.labels }
+func (m *metadata) Assignees() []string  { return *m.assignees }
+func (m *metadata) Milestone() string    { return *m.milestone }
 
 // TODO: This package should really only depend on go-git-providers' abstraction interface
 
@@ -80,17 +80,17 @@ type prCreator struct {
 	repoRef gitprovider.RepositoryRef
 }
 
-func (c *prCreator) PreCommitHook(ctx context.Context, commit transactional.Commit, info transactional.TxInfo) error {
+func (c *prCreator) PreCommitHook(ctx context.Context, info transactional.TxInfo, req commit.Request) error {
 	return nil
 }
 
-func (c *prCreator) PostCommitHook(ctx context.Context, commit transactional.Commit, info transactional.TxInfo) error {
+func (c *prCreator) PostCommitHook(ctx context.Context, info transactional.TxInfo, req commit.Request) error {
 	// First, validate the input
-	if err := commit.Validate(); err != nil {
-		return fmt.Errorf("given transactional.Commit wasn't valid")
+	if err := req.Validate(); err != nil {
+		return fmt.Errorf("given commit.Request wasn't valid: %v", err)
 	}
 
-	prCommit, ok := commit.(PullRequest)
+	prCommit, ok := req.(pr.Request)
 	if !ok {
 		return nil
 	}
@@ -102,15 +102,15 @@ func (c *prCreator) PostCommitHook(ctx context.Context, commit transactional.Com
 	owner := c.repoRef.GetIdentity()
 	repo := c.repoRef.GetRepository()
 	var body *string
-	if commit.GetMessage().GetDescription() != "" {
-		body = gogithub.String(commit.GetMessage().GetDescription())
+	if prCommit.Message().Description() != "" {
+		body = gogithub.String(prCommit.Message().Description())
 	}
 
 	// Create the Pull Request
 	prPayload := &gogithub.NewPullRequest{
-		Head:  gogithub.String(info.Head),
-		Base:  gogithub.String(info.Base),
-		Title: gogithub.String(commit.GetMessage().GetTitle()),
+		Head:  gogithub.String(info.Target.DestBranch()),
+		Base:  gogithub.String(prCommit.PullRequest().TargetBranch()),
+		Title: gogithub.String(prCommit.Message().Title()),
 		Body:  body,
 	}
 	logrus.Infof("GitHub PR payload: %+v", prPayload)
@@ -122,8 +122,8 @@ func (c *prCreator) PostCommitHook(ctx context.Context, commit transactional.Com
 	// If spec.GetMilestone() is set, fetch the ID of the milestone
 	// Only set milestoneID to non-nil if specified
 	var milestoneID *int
-	if len(prCommit.GetMilestone()) != 0 {
-		milestoneID, err = getMilestoneID(ctx, ghClient, owner, repo, prCommit.GetMilestone())
+	if len(prCommit.PullRequest().Milestone()) != 0 {
+		milestoneID, err = getMilestoneID(ctx, ghClient, owner, repo, prCommit.PullRequest().Milestone())
 		if err != nil {
 			return err
 		}
@@ -131,13 +131,13 @@ func (c *prCreator) PostCommitHook(ctx context.Context, commit transactional.Com
 
 	// Only set assignees to non-nil if specified
 	var assignees *[]string
-	if a := prCommit.GetAssignees(); len(a) != 0 {
+	if a := prCommit.PullRequest().Assignees(); len(a) != 0 {
 		assignees = &a
 	}
 
 	// Only set labels to non-nil if specified
 	var labels *[]string
-	if l := prCommit.GetLabels(); len(l) != 0 {
+	if l := prCommit.PullRequest().Labels(); len(l) != 0 {
 		labels = &l
 	}
 

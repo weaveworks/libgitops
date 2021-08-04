@@ -6,7 +6,7 @@ import (
 	gosync "sync"
 
 	"github.com/sirupsen/logrus"
-	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/storage"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"github.com/weaveworks/libgitops/pkg/storage/event"
@@ -15,6 +15,7 @@ import (
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem/fileevents/inotify"
 	"github.com/weaveworks/libgitops/pkg/storage/filesystem/unstructured"
 	"github.com/weaveworks/libgitops/pkg/util/sync"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // Storage is a union of unstructured.Storage and fileevents.Storage.
@@ -50,7 +51,7 @@ func NewManifest(
 	if err != nil {
 		return nil, err
 	}
-	unstructuredRaw, err := unstructured.NewGeneric(fsRaw, recognizer, pathExcluder, serializer.NewFrameReaderFactory())
+	unstructuredRaw, err := unstructured.NewGeneric(fsRaw, recognizer, pathExcluder, frame.DefaultFactory())
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +102,7 @@ var _ Storage = &Generic{}
 // in sync, and sends high-level ObjectEvents upstream.
 //
 // This implementation does not support different VersionRefs, but always stays on
-// the "zero value" "" branch.
+// the "zero value" "" branch. TODO
 type Generic struct {
 	unstructured.Storage
 	// the filesystem events emitter
@@ -109,7 +110,7 @@ type Generic struct {
 
 	// channels
 	inbound    fileevents.FileEventStream
-	outbound   event.ObjectEventStream
+	outbound   chan watch.Event
 	outboundMu *gosync.Mutex
 
 	// goroutine
@@ -123,6 +124,7 @@ func (s *Generic) FileEventsEmitter() fileevents.Emitter {
 	return s.emitter
 }
 
+/*
 func (s *Generic) WatchForObjectEvents(ctx context.Context, into event.ObjectEventStream) error {
 	s.outboundMu.Lock()
 	defer s.outboundMu.Unlock()
@@ -149,7 +151,7 @@ func (s *Generic) WatchForObjectEvents(ctx context.Context, into event.ObjectEve
 		}
 	}
 	return nil // all ok
-}
+}*/
 
 // Sync extends the underlying unstructured.Storage.Sync(), but optionally also
 // sends special "SYNC" and "ERROR" events to the returned "successful" and "duplicates"
@@ -170,6 +172,7 @@ func (s *Generic) Sync(ctx context.Context) (successful, duplicates core.Unversi
 		})
 		_ = duplicates.ForEach(func(id core.UnversionedObjectID) error {
 			// Send an error upstream for the duplicate
+			// TODO: Struct error
 			s.sendError(id, fmt.Errorf("%w: %s", unstructured.ErrTrackingDuplicate, id))
 			return nil
 		})

@@ -1,17 +1,18 @@
 package git
 
 import (
-	"context"
-	"fmt"
-	"io/ioutil"
+	"errors"
+	"io/fs"
 	"os"
-	"reflect"
-	"strings"
 	"testing"
-
-	"github.com/fluxcd/go-git-providers/gitprovider"
 )
 
+func TestStat(t *testing.T) {
+	fi, err := os.Stat("nonexist.yaml")
+	t.Error(fi, err, errors.Is(err, fs.ErrNotExist))
+}
+
+/*
 type filesChangedSubTest struct {
 	fromCommit string
 	toCommit   string
@@ -86,7 +87,7 @@ func Test_goGit(t *testing.T) {
 	}
 }
 
-func Subtest_filesChanged(t *testing.T, g Interface, tests []filesChangedSubTest) {
+func Subtest_filesChanged(t *testing.T, g *goGit, tests []filesChangedSubTest) {
 	ctx := context.Background()
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("filesChanged_%d", i), func(t *testing.T) {
@@ -102,7 +103,7 @@ func Subtest_filesChanged(t *testing.T, g Interface, tests []filesChangedSubTest
 	}
 }
 
-func Subtest_readFiles(t *testing.T, g Interface, tests []readFileSubTest) {
+func Subtest_readFiles(t *testing.T, g *goGit, tests []readFileSubTest) {
 	ctx := context.Background()
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("readFiles_%d", i), func(t *testing.T) {
@@ -122,3 +123,4 @@ func Subtest_readFiles(t *testing.T, g Interface, tests []readFileSubTest) {
 		})
 	}
 }
+*/

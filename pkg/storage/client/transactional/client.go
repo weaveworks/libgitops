@@ -7,12 +7,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sirupsen/logrus"
+	"github.com/go-logr/logr"
 	"github.com/weaveworks/libgitops/pkg/storage/backend"
 	"github.com/weaveworks/libgitops/pkg/storage/client"
-	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	"github.com/weaveworks/libgitops/pkg/storage/core"
 	"go.uber.org/atomic"
+	"k8s.io/apimachinery/pkg/types"
 	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 )
 
@@ -31,10 +32,10 @@ func NewGeneric(c client.Client, manager TransactionManager) (Client, error) {
 		txHooks:     &MultiTransactionHook{},
 		commitHooks: &MultiCommitHook{},
 		manager:     manager,
-		txs:         make(map[string]*atomic.Bool),
+		txs:         make(map[types.UID]*atomic.Bool),
 		txsMu:       &sync.Mutex{},
 	}
-	return &genericWithRef{g, commit.Default()}, nil
+	return &genericWithRef{g, nil, commit.Default()}, nil
 }
 
 type generic struct {
@@ -49,59 +50,65 @@ type generic struct {
 	// +required
 	manager TransactionManager
 
-	txs   map[string]*atomic.Bool
+	txs   map[types.UID]*atomic.Bool
 	txsMu *sync.Mutex
 }
 
 type genericWithRef struct {
 	*generic
-	ref commit.Ref
+	hash commit.Hash
+	ref  commit.Ref
 }
 
-func (c *genericWithRef) AtRef(ref commit.Ref) Client {
-	return &genericWithRef{c.generic, ref}
+func (c *genericWithRef) AtHash(h commit.Hash) Client {
+	return &genericWithRef{generic: c.generic, hash: h, ref: c.ref}
 }
-func (c *genericWithRef) AtSymbolicRef(symbolic string) Client {
-	return c.AtRef(commit.At(symbolic))
+func (c *genericWithRef) AtRef(symbolic commit.Ref) Client {
+	// TODO: Invalid (programmer error) to pass symbolic == nil
+	return &genericWithRef{generic: c.generic, hash: c.hash, ref: symbolic}
 }
 func (c *genericWithRef) CurrentRef() commit.Ref {
 	return c.ref
 }
-
-/*
-type txLockKeyImpl struct{}
-
-var txLockKey = txLockKeyImpl{}
-
-type txLock struct {
-	// mode specifies what transaction mode is used; Atomic or AllowReading.
-	//mode TxMode
-	// active == 1 means "transaction active, mu is locked for writing"
-	// active == 0 means "transaction has stopped, mu has been unlocked"
-	//active uint32
-	active *atomic.Bool
-}*/
+func (c *genericWithRef) CurrentHash() (commit.Hash, error) {
+	// Use the fixed hash if set
+	if c.hash != nil {
+		return c.hash, nil
+	}
+	// Otherwise, lookup the symbolic
+	return c.ref.Resolve(c.manager.RefResolver())
+}
 
 func (c *genericWithRef) Get(ctx context.Context, key core.ObjectKey, obj client.Object) error {
-	return c.lockAndRead(ctx, func(ctx context.Context) error {
+	return c.defaultCtxCommitRef(ctx, func(ctx context.Context) error {
 		return c.c.Get(ctx, key, obj)
 	})
 }
 
 func (c *genericWithRef) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	return c.lockAndRead(ctx, func(ctx context.Context) error {
+	return c.defaultCtxCommitRef(ctx, func(ctx context.Context) error {
 		return c.c.List(ctx, list, opts...)
 	})
 }
 
-/*func (c *genericWithRef) lockForBranch(branch string) (syncutil.LockWithData, *txLock, bool) {
-	lck := c.lockMap.LockByName(branch)
-	txState, ok := lck.QLoad(txLockKey).(*txLock)
-	return lck, txState, ok
-}*/
+// defaultCtxCommitRef makes sure that there's either commit.Hash registered with the context when reading
+// TODO: In the future, shall filesystems also support commit.Ref?
+func (c *genericWithRef) defaultCtxCommitRef(ctx context.Context, callback func(ctx context.Context) error) error {
+	// If ctx already specifies an immutable version to read, use it
+	if _, ok := commit.GetHash(ctx); ok {
+		return callback(ctx)
+	}
+	// If ctx specifies a symbolic target, resolve it
+	if ref, ok := commit.GetRef(ctx); ok {
+		h, err := ref.Resolve(c.manager.RefResolver())
+		if err != nil {
+			return err
+		}
+		return callback(commit.WithHash(ctx, h))
+	}
 
-func (c *genericWithRef) lockAndRead(ctx context.Context, callback func(ctx context.Context) error) error {
-	h, err := c.ref.Resolve(c.manager.RefResolver())
+	// Otherwise, look it up based on this client's data
+	h, err := c.CurrentHash()
 	if err != nil {
 		return err
 	}
@@ -111,48 +118,31 @@ func (c *genericWithRef) lockAndRead(ctx context.Context, callback func(ctx cont
 	return callback(commit.WithHash(ctx, h))
 }
 
-func (c *genericWithRef) txStateByName(name string) *atomic.Bool {
+func (c *genericWithRef) txStateByUID(uid types.UID) *atomic.Bool {
 	// c.txsMu guards reads and writes of the c.txs map
 	c.txsMu.Lock()
 	defer c.txsMu.Unlock()
 
 	// Check if information about a transaction on this branch exists.
-	state, ok := c.txs[name]
+	state, ok := c.txs[uid]
 	if ok {
 		return state
 	}
 	// if not, grow the txs map by one and return it
-	c.txs[name] = atomic.NewBool(false)
-	return c.txs[name]
+	c.txs[uid] = atomic.NewBool(false)
+	return c.txs[uid]
 }
 func (c *genericWithRef) initTx(ctx context.Context, info TxInfo) (context.Context, txFunc, error) {
-	// Get the head branch lock and status
-	//lck := c.lockMap.LockByName(info.HeadBranch)
+	log := logr.FromContextOrDiscard(ctx)
 
-	// Wait for all reads to complete (in the case of the atomic more),
-	// and then lock for writing. For non-atomic mode this uses the mutex
-	// as it is modifying txState, and two transactions must not run at
-	// the same time for the same branch.
-	//
-	// Always lock mu when a transaction is running on this branch,
-	// regardless of mode. If atomic mode is enabled, this also waits
-	// on any reads happening at this moment. For all modes, this ensures
-	// transactions happen in order.
-	/*lck.Lock()
-	txState := &txLock{
-		active: 1, // set tx state to "active"
-		//mode:   info.Options.Mode, // declare what transaction mode is used
-	}
-	lck.Store(txLockKey, txState)*/
-
-	active := c.txStateByName(info.HeadBranch)
+	active := c.txStateByUID(info.Target.UUID())
 	// If active == false, then this will switch active => true and return true
 	// If active == true, then no operation will take place, and false is returned
-	// In other words, if false is returned, a transaction is ongoing and we should
-	// return a temporal error
+	// In other words, if false is returned, a transaction with this UID is ongoing.
+	// However, a UID conflict is very unlikely, given randomness and length of the UID
 	if !active.CAS(false, true) {
-		// TODO: Is this the right way?
-		return nil, nil, errors.New("transaction is already ongoing")
+		// TODO: Avoid this possibility
+		return nil, nil, errors.New("should never happen; UID conflict")
 	}
 
 	// Create a child context with a timeout
@@ -162,10 +152,12 @@ func (c *genericWithRef) initTx(ctx context.Context, info TxInfo) (context.Conte
 	cleanupFunc := func() error {
 		// Cleanup after the transaction
 		if err := c.cleanupAfterTx(ctx, &info); err != nil {
-			return fmt.Errorf("Failed to cleanup branch %s after tx: %v", info.HeadBranch, err)
+			return fmt.Errorf("Failed to cleanup branch %s after tx: %v", info.Target.DestBranch(), err)
 		}
-		// Unlock the mutex so new transactions can take place on this branch
-		//lck.Unlock()
+		// Avoid leaking memory by growing c.txs infinitely
+		c.txsMu.Lock()
+		delete(c.txs, info.Target.UUID())
+		c.txsMu.Unlock()
 		return nil
 	}
 
@@ -177,7 +169,7 @@ func (c *genericWithRef) initTx(ctx context.Context, info TxInfo) (context.Conte
 		// once, regardless of transaction end cause.
 		if active.CAS(true, false) {
 			if err := cleanupFunc(); err != nil {
-				logrus.Errorf("Failed to cleanup after tx timeout: %v", err)
+				log.Error(err, "failed to cleanup after tx timeout")
 			}
 		}
 	}()
@@ -240,6 +232,8 @@ func (c *genericWithRef) Transaction(ctx context.Context, headBranch string, opt
 var ErrVersionRefIsImmutable = errors.New("cannot execute transaction against immutable version ref")
 
 func (c *genericWithRef) transaction(ctx context.Context, headBranch string, opts ...TxOption) (Tx, error) {
+	log := logr.FromContextOrDiscard(ctx)
+
 	// Get the immutable base version hash
 	baseHash, err := c.ref.Resolve(c.manager.RefResolver())
 	if err != nil {
@@ -255,28 +249,28 @@ func (c *genericWithRef) transaction(ctx context.Context, headBranch string, opt
 		headBranch += suffix
 	}
 
-	logrus.Debugf("Base commit hash: %q. Head branch: %q.", baseHash, headBranch)
+	log.V(2).Info("Base commit hash: %q. Head branch: %q.", baseHash, headBranch)
 
 	// Parse options
 	o := defaultTxOptions().ApplyOptions(opts)
 
+	target := commit.NewMutableTarget(headBranch, baseHash)
 	info := TxInfo{
-		BaseCommit: baseHash,
-		HeadBranch: headBranch,
-		Options:    *o,
+		Target:  target,
+		Options: *o,
 	}
 
 	// Register the head branch with the context
 	// TODO: We should register all of TxInfo here instead, or ...?
-	ctxWithHeadBranch := commit.WithMutable(ctx, commit.NewMutable(headBranch))
+	ctxWithDestBranch := commit.WithMutableTarget(ctx, target)
 	// Initialize the transaction
-	ctxWithDeadline, cleanupFunc, err := c.initTx(ctxWithHeadBranch, info)
+	ctxWithDeadline, cleanupFunc, err := c.initTx(ctxWithDestBranch, info)
 	if err != nil {
 		return nil, err
 	}
 
 	// Run pre-tx checks and create the new branch
-	// TODO: Use multierr?
+	// TODO: Use uber's multierr?
 	if err := utilerrs.NewAggregate([]error{
 		c.TransactionHookChain().PreTransactionHook(ctxWithDeadline, info),
 		c.manager.Init(ctxWithDeadline, &info),

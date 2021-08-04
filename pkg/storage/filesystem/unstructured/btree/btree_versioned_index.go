@@ -12,6 +12,14 @@ var (
 	ErrVersionRefAlreadyExists = errors.New("version ref tree already exists")
 )
 
+/*
+	New Commit Event:
+	-> UnstructuredStorage.Sync(ctx), where ctx has
+
+*/
+
+// VersionedIndex represents a set of Indexes that are built as copy-on-write
+// extensions on top of each other.
 type VersionedIndex interface {
 	VersionedTree(ref string) (Index, bool)
 	NewVersionedTree(ref, base string) (Index, error)

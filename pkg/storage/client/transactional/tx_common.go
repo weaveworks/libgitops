@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/weaveworks/libgitops/pkg/storage/client"
-	"github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
 	utilerrs "k8s.io/apimachinery/pkg/util/errors"
 )
 
@@ -35,7 +35,7 @@ func (tx *txCommon) Abort(err error) error {
 
 func (tx *txCommon) handlePreCommit(c commit.Request) txFunc {
 	return func() error {
-		return tx.commitHook.PreCommitHook(tx.ctx, c, tx.info)
+		return tx.commitHook.PreCommitHook(tx.ctx, tx.info, c)
 	}
 }
 
@@ -47,7 +47,7 @@ func (tx *txCommon) commit(c commit.Request) txFunc {
 
 func (tx *txCommon) handlePostCommit(c commit.Request) txFunc {
 	return func() error {
-		return tx.commitHook.PostCommitHook(tx.ctx, c, tx.info)
+		return tx.commitHook.PostCommitHook(tx.ctx, tx.info, c)
 	}
 }
 

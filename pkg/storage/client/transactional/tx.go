@@ -1,6 +1,6 @@
 package transactional
 
-import "github.com/weaveworks/libgitops/pkg/storage/client/transactional/commit"
+import "github.com/weaveworks/libgitops/pkg/storage/commit"
 
 type txImpl struct {
 	*txCommon
