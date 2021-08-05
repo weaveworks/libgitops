@@ -21,6 +21,7 @@ require (
 	github.com/labstack/gommon v0.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/rjeczalik/notify v0.9.2
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/pflag v1.0.5

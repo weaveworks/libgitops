@@ -33,13 +33,13 @@ docker-%:
 		"golang:${GO_VERSION}" make $*
 
 test: docker-test-internal
-test-internal:
+test-internal: tidy-internal
 	go test -v $(addsuffix /...,$(addprefix ./,${SRC_PKGS}))
 
 tidy: docker-tidy-internal
 tidy-internal: /go/bin/goimports
 	go mod tidy
-	hack/generate-client.sh
+	if [ -d vendor ]; then go mod vendor; fi
 	gofmt -s -w ${SRC_PKGS}
 	goimports -w ${SRC_PKGS}
 
