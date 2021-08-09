@@ -72,7 +72,7 @@ type TransactionManager interface {
 	MergeBranches(ctx context.Context, base, head core.VersionRef, commit Commit) error
 }*/
 
-type CustomTxFunc func(ctx context.Context) error
+type CustomTxFunc func(ctx context.Context, writer client.Client) error
 
 type Tx interface {
 	Commit(req commit.Request) error
@@ -81,7 +81,7 @@ type Tx interface {
 	Client() client.Client
 
 	// TODO: Rename to Do/Run/Execute
-	Custom(CustomTxFunc) Tx
+	Run(CustomTxFunc) Tx
 
 	Get(key core.ObjectKey, obj client.Object) Tx
 	List(list client.ObjectList, opts ...client.ListOption) Tx

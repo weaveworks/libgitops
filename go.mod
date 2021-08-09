@@ -35,6 +35,7 @@ require (
 	k8s.io/apimachinery v0.21.3
 	k8s.io/kube-openapi v0.0.0-20210527164424-3c818078ee3d
 	k8s.io/utils v0.0.0-20210722164352-7f3ee0f31471
+	sigs.k8s.io/cluster-api v0.4.0
 	sigs.k8s.io/controller-runtime v0.9.5
 	sigs.k8s.io/kustomize/kyaml v0.11.1-0.20210721155208-d6ce84604738
 	sigs.k8s.io/yaml v1.2.0
