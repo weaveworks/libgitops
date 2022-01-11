@@ -1,5 +1,6 @@
 // TODO: Docs
 
+//go:build ignore
 // +build ignore
 
 package client
