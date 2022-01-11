@@ -95,8 +95,8 @@ spec:
   template:
     spec:
       containers:
-      - name: foo
-        image: bar # comment 1
+        - name: foo
+          image: bar # comment 1
 `,
 		}, {
 			name: "keep_comments",
@@ -150,7 +150,7 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-- a # comment
+  - a # comment
 `,
 		}, {
 			name: "copy_item_comments_2",
@@ -171,8 +171,8 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-# comment
-- a
+  # comment
+  - a
 `,
 		}, {
 			name: "copy_item_comments_middle",
@@ -196,9 +196,9 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-- d
-- b # comment
-- e
+  - d
+  - b # comment
+  - e
 `,
 		}, {
 			name: "copy_item_comments_moved",
@@ -222,9 +222,9 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-- a
-- c
-- b
+  - a
+  - c
+  - b
 `,
 		}, {
 			name: "copy_item_comments_no_match",
@@ -244,7 +244,7 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-- b
+  - b
 `,
 		}, {
 			name: "copy_item_comments_add",
@@ -265,8 +265,8 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-- a # comment
-- b
+  - a # comment
+  - b
 `,
 		}, {
 			name: "copy_item_comments_remove",
@@ -287,7 +287,7 @@ items:
 apiVersion: apps/v1
 kind: Deployment
 items:
-- a # comment
+  - a # comment
 `,
 		}, {
 			name: "copy_comments_folded_style",

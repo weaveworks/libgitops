@@ -95,7 +95,7 @@ func run(identityFile, gitURL, ghToken, authorName, authorEmail string) error {
 	}
 
 	// Create a new GitHub client using the given token
-	ghClient, err := github.NewClient(github.WithOAuth2Token(ghToken))
+	ghClient, err := github.NewClient(gitprovider.WithOAuth2Token(ghToken))
 	if err != nil {
 		return err
 	}
