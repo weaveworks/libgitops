@@ -46,6 +46,8 @@ func (c *combinedEvent) match(events notifyEvents) (notify.EventInfo, bool) {
 // combinedEvents describes the event combinations to concatenate,
 // this is iterated in order, so the longest matches should be first
 var combinedEvents = []combinedEvent{
+	// MOVE + MODIFY => MODIFY issue: https://github.com/save-abandoned-projects/ignite/issues/8
+	{[]notify.Event{notify.InMovedFrom, notify.InCloseWrite}, 1},
 	// DELETE + MODIFY => MODIFY
 	{[]notify.Event{notify.InDelete, notify.InCloseWrite}, 1},
 	// MODIFY + DELETE => NONE

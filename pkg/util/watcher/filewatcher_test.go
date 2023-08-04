@@ -49,6 +49,10 @@ var testEvents = []notifyEvents{
 		testEvent(notify.InCloseWrite),
 		testEvent(notify.InDelete),
 	},
+	{
+		testEvent(notify.InMovedFrom),
+		testEvent(notify.InCloseWrite),
+	},
 }
 
 var targets = []FileEvents{
@@ -67,6 +71,9 @@ var targets = []FileEvents{
 		FileEventModify,
 	},
 	{},
+	{
+		FileEventModify,
+	},
 }
 
 func extractEvents(updates FileUpdates) (events FileEvents) {
