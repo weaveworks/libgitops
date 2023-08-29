@@ -1,3 +1,7 @@
+# Deprecated
+
+This repository is no longer maintained. For a more up-to-date way to manage microVMs, please take a look at [Flintlock](https://github.com/weaveworks-liquidmetal/flintlock).
+
 # Weave libgitops
 
 A library of tools for manipulation and storage of Kubernetes-style objects with inbuilt GitOps functionality.
