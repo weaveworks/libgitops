@@ -226,7 +226,8 @@ items:
 - c
 - b
 `,
-		}, {
+		},
+		{
 			name: "copy_item_comments_no_match",
 			from: `
 apiVersion: apps/v1

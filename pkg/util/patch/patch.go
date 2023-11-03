@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io/ioutil"
 
+	"github.com/weaveworks/libgitops/pkg/frame"
 	"github.com/weaveworks/libgitops/pkg/runtime"
 	"github.com/weaveworks/libgitops/pkg/serializer"
+	"github.com/weaveworks/libgitops/pkg/stream"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 )
@@ -31,7 +33,7 @@ func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error)
 	encoder := p.serializer.Encoder()
 	old := new.DeepCopyObject().(runtime.Object)
 
-	if err = encoder.Encode(serializer.NewJSONFrameWriter(&oldBytes), old); err != nil {
+	if err = encoder.Encode(frame.NewJSONWriter(stream.NewWriter(&oldBytes)), old); err != nil {
 		return
 	}
 
@@ -39,7 +41,7 @@ func (p *patcher) Create(new runtime.Object, applyFn func(runtime.Object) error)
 		return
 	}
 
-	if err = encoder.Encode(serializer.NewJSONFrameWriter(&newBytes), new); err != nil {
+	if err = encoder.Encode(frame.NewJSONWriter(stream.NewWriter(&newBytes)), new); err != nil {
 		return
 	}
 
@@ -89,13 +91,13 @@ func (p *patcher) ApplyOnFile(filePath string, patch []byte, gvk schema.GroupVer
 // with the serializer so it conforms to a runtime.Object
 // TODO: Just use encoding/json.Indent here instead?
 func (p *patcher) serializerEncode(input []byte) ([]byte, error) {
-	obj, err := p.serializer.Decoder().Decode(serializer.NewJSONFrameReader(serializer.FromBytes(input)))
+	obj, err := p.serializer.Decoder().Decode(frame.NewJSONReader(stream.FromBytes(input)))
 	if err != nil {
 		return nil, err
 	}
 
 	var result bytes.Buffer
-	if err := p.serializer.Encoder().Encode(serializer.NewJSONFrameWriter(&result), obj); err != nil {
+	if err := p.serializer.Encoder().Encode(frame.NewJSONWriter(stream.NewWriter(&result)), obj); err != nil {
 		return nil, err
 	}
 

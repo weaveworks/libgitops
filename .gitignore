@@ -4,3 +4,5 @@
 
 # Binary artifacts
 bin/
+# Don't check in the vendor directory
+vendor
