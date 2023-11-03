@@ -31,13 +31,13 @@ spec:
   data:
   - field # Inline comment
   - another:
-      subthing: "yes"
+    subthing: "yes"
   thing:
     # Head comment
     var: true
 status:
   nested:
-    fields:
+    fields: {}
     # Just a comment
 `
 

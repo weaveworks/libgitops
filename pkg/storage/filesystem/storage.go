@@ -1,0 +1,204 @@
+package filesystem
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/weaveworks/libgitops/pkg/content"
+	"github.com/weaveworks/libgitops/pkg/storage"
+	"github.com/weaveworks/libgitops/pkg/storage/commit"
+	"github.com/weaveworks/libgitops/pkg/storage/core"
+	"k8s.io/apimachinery/pkg/util/sets"
+)
+
+// NewGeneric creates a new Generic using the given lower-level
+// FileFinder and Namespacer.
+func NewGeneric(fileFinder FileFinder, namespacer storage.Namespacer) (Storage, error) {
+	if fileFinder == nil {
+		return nil, fmt.Errorf("NewGeneric: fileFinder is mandatory")
+	}
+	if namespacer == nil {
+		return nil, fmt.Errorf("NewGeneric: namespacer is mandatory")
+	}
+
+	return &Generic{
+		fileFinder: fileFinder,
+		namespacer: namespacer,
+	}, nil
+}
+
+// Generic is a Storage-compliant implementation, that
+// combines the given lower-level FileFinder, Namespacer and Filesystem interfaces
+// in a generic manner.
+type Generic struct {
+	fileFinder FileFinder
+	namespacer storage.Namespacer
+}
+
+func (r *Generic) Namespacer() storage.Namespacer {
+	return r.namespacer
+}
+
+func (r *Generic) FileFinder() FileFinder {
+	return r.fileFinder
+}
+
+func (r *Generic) RefResolver() commit.RefResolver {
+	return r.fileFinder.Filesystem().RefResolver()
+}
+
+func (r *Generic) Read(ctx context.Context, id core.UnversionedObjectID) ([]byte, error) {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Check if the resource indicated by key exists
+	exists, err := r.exists(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, core.NewErrNotFound(id)
+	}
+	// Read the file
+	return r.FileFinder().Filesystem().WithContext(ctx).ReadFile(p)
+}
+
+func (r *Generic) Exists(ctx context.Context, id core.UnversionedObjectID) (bool, error) {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return r.exists(ctx, p)
+}
+
+func (r *Generic) fsFor(ctx context.Context) FS {
+	return r.FileFinder().Filesystem().WithContext(ctx)
+}
+
+func (r *Generic) exists(ctx context.Context, path string) (bool, error) {
+	return Exists(r.fsFor(ctx), path)
+}
+
+func (r *Generic) Checksum(ctx context.Context, id core.UnversionedObjectID) (string, error) {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	// Return a "high level" error if the file does not exist
+	checksum, err := r.fsFor(ctx).Checksum(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", core.NewErrNotFound(id)
+	}
+	if err != nil {
+		return "", err
+	}
+	return checksum, nil
+}
+
+func (r *Generic) ContentType(ctx context.Context, id core.UnversionedObjectID) (content.ContentType, error) {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	// The object doesn't necessarily need to exist
+	return r.FileFinder().ContentTyper().ContentTypeForPath(ctx, r.fileFinder.Filesystem(), p)
+}
+
+func (r *Generic) Write(ctx context.Context, id core.UnversionedObjectID, content []byte) error {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// Create the underlying directories if they do not exist already
+	exists, err := r.exists(ctx, p)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := r.fsFor(ctx).MkdirAll(filepath.Dir(p), 0755); err != nil {
+			return err
+		}
+	}
+	// Write the file content
+	return r.fsFor(ctx).WriteFile(p, content, 0664)
+}
+
+func (r *Generic) Delete(ctx context.Context, id core.UnversionedObjectID) error {
+	// Get the path and verify namespacing info
+	p, err := r.getPath(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// Check if the resource indicated by key exists
+	exists, err := r.exists(ctx, p)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return core.NewErrNotFound(id)
+	}
+	// Remove the file
+	return r.fsFor(ctx).Remove(p)
+}
+
+// ListGroupKinds returns all known GroupKinds by the implementation at that
+// time. The set might vary over time as data is created and deleted; and
+// should not be treated as an universal "what types could possibly exist",
+// but more generally, "what are the GroupKinds of the objects that currently
+// exist"? However, obviously, specific implementations might honor this
+// guideline differently. This might be used for introspection into the system.
+func (r *Generic) ListGroupKinds(ctx context.Context) ([]core.GroupKind, error) {
+	// Just use the underlying filefinder
+	return r.FileFinder().ListGroupKinds(ctx)
+}
+
+// ListNamespaces lists the available namespaces for the given GroupKind.
+// This function shall only be called for namespaced objects, it is up to
+// the caller to make sure they do not call this method for root-spaced
+// objects; for that the behavior is undefined (but returning an error
+// is recommended).
+func (r *Generic) ListNamespaces(ctx context.Context, gk core.GroupKind) (sets.String, error) {
+	namespaced, err := r.namespacer.IsNamespaced(gk)
+	if err != nil {
+		return nil, err
+	}
+	// Validate the groupkind
+	if !namespaced {
+		return nil, fmt.Errorf("%w: cannot list namespaces for non-namespaced kind: %v", storage.ErrNamespacedMismatch, gk)
+	}
+	// Just use the underlying filefinder
+	return r.FileFinder().ListNamespaces(ctx, gk)
+}
+
+// ListObjectIDs returns a list of unversioned ObjectIDs.
+// For namespaced GroupKinds, the caller must provide a namespace, and for
+// root-spaced GroupKinds, the caller must not. When namespaced, this function
+// must only return object IDs for that given namespace.
+func (r *Generic) ListObjectIDs(ctx context.Context, gk core.GroupKind, namespace string) (core.UnversionedObjectIDSet, error) {
+	// Validate the namespace parameter
+	if err := storage.VerifyNamespaced(r.Namespacer(), gk, namespace); err != nil {
+		return nil, err
+	}
+	// Just use the underlying filefinder
+	return r.FileFinder().ListObjectIDs(ctx, gk, namespace)
+}
+
+func (r *Generic) getPath(ctx context.Context, id core.UnversionedObjectID) (string, error) {
+	// Verify namespacing info
+	if err := storage.VerifyNamespaced(r.Namespacer(), id.GroupKind(), id.ObjectKey().Namespace); err != nil {
+		return "", err
+	}
+	// Get the path
+	return r.FileFinder().ObjectPath(ctx, id)
+}
